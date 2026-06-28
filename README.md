@@ -1,10 +1,54 @@
 # Suika AI Sandbox
 
-A research-grade platform for training, benchmarking, and shipping AI agents that play Suika (Watermelon) Game. The engine is headless, deterministic, and fully JVM-native; the Python layer provides Gymnasium-compatible training integrations.
+A research-grade platform for training, benchmarking, and shipping AI agents that play Suika (Watermelon) Game. Includes a **fully windowed LibGDX game** with Human and AI Watch modes — no assets required, all graphics are procedurally generated.
 
 [![CI](https://github.com/ericcayers-ai/suikaAI-plus/actions/workflows/ci.yml/badge.svg)](https://github.com/ericcayers-ai/suikaAI-plus/actions/workflows/ci.yml)
 
+---
+
+## Quick Start — Play or Watch AI
+
+**Download the latest release** from the [Releases page](https://github.com/ericcayers-ai/suikaAI-plus/releases/latest) and extract `suika-app-0.2.0.zip`:
+
+```bash
+# Linux / macOS
+cd suika-app-0.2.0/bin && ./suika-app
+
+# Windows
+cd suika-app-0.2.0\bin && suika-app.bat
+```
+
+**Java 21+ must be on your `PATH`.** The ZIP bundles all JVM dependencies — no Python or GPU required for the game.
+
+> **Headless / training mode**
+> ```bash
+> ./suika-app --headless    # runs the Explorer-mode GA demo in the terminal
+> ```
+
+---
+
+## Screens
+
+| Screen | What you see |
+|---|---|
+| **Main Menu** | SUIKA AI SANDBOX title, three buttons: **PLAY** / **AI WATCH** / **QUIT** |
+| **Game (Human)** | Drop fruits by clicking; HUD shows score, best score, next-fruit preview, controls |
+| **Game (AI Watch)** | MCTS agent drops every 0.85 s; you watch in real time |
+| **Game Over** | Final score, **PLAY AGAIN** restarts the same mode, **MAIN MENU** returns |
+
+All rendering uses `ShapeRenderer` circles — tier numbers are labelled on each fruit. No external art files.
+
+---
+
 ## Features
+
+### Windowed Game (suika-game + suika-app)
+- LibGDX 1.12.1 + LWJGL3 backend — 720 × 1060 virtual-pixel viewport with `FitViewport` scaling
+- Procedural fruit graphics: 11 distinct colors mapped to Cherry → Watermelon
+- Human mode: click-to-drop with hover guide line and ghost preview
+- AI Watch mode: live MCTS agent (`MctsAgent(50, √2, 5, 32)`)
+- Screen transitions: Main Menu → Gameplay → Game Over → Main Menu
+- `--headless` CLI flag bypasses the window for CI / training runs
 
 ### Game Engine (suika-core)
 - Deterministic rigid-body physics via **dyn4j** — same seed + same actions always produces the same game
@@ -48,8 +92,8 @@ A research-grade platform for training, benchmarking, and shipping AI agents tha
 - Gymnasium-compatible `ActionSpace.Discrete` / `ActionSpace.Continuous`
 
 ### Java↔Python Bridge (suika-bridge)
-- `BridgeTransport` interface with `InProcessTransport` (tests/inference) and stubs for JEP / gRPC / shared-memory sidecar
-- `ObservationCodec` — length-prefixed little-endian float32 wire format (same as Arrow)
+- `BridgeTransport` interface with `InProcessTransport` and stubs for JEP / gRPC / shared-memory sidecar
+- `ObservationCodec` — length-prefixed little-endian float32 wire format
 - `GymBridge` — Gymnasium `(obs, reward, terminated, truncated, info)` contract on the JVM
 - `PettingZooBridge` — two-player racing adapter for competitive training
 - `OnnxPolicyRunner` + `StubOnnxPolicyRunner` — no-Python inference deploy path
@@ -61,7 +105,7 @@ A research-grade platform for training, benchmarking, and shipping AI agents tha
 - `ActionHeatmap` — drop-position heatmap across episodes
 - `ConsoleExporter` — human-readable terminal output
 
-### Extensibility (suika-app + plugin SPI)
+### Extensibility
 - `AgentPlugin` / `TrainerPlugin` SPI — discovered via `java.util.ServiceLoader`
 - `PluginRegistry` — runtime registration and lookup
 - Schema-driven hyperparameter UI (`HyperparamSchema`) for Explorer / Researcher modes
@@ -77,21 +121,25 @@ A research-grade platform for training, benchmarking, and shipping AI agents tha
 - **Python 3.10+** (optional, for training scripts)
 - Git
 
-### Build & Run Tests (JVM)
+### Build & Run
 
 ```bash
 # Clone
 git clone https://github.com/ericcayers-ai/suikaAI-plus.git
 cd suikaAI-plus
 
-# Build all modules
+# Build all modules + run all tests
 ./gradlew build
 
-# Run the full test suite
-./gradlew test
-
-# Start the headless demo (Explorer mode, 3 GA generations)
+# Launch the GUI game
 ./gradlew :suika-app:run
+
+# Launch headless training demo
+./gradlew :suika-app:run --args="--headless"
+
+# Build distribution ZIP
+./gradlew :suika-app:distZip
+# → suika-app/build/distributions/suika-app-<version>.zip
 ```
 
 ### Python Environment
@@ -125,7 +173,7 @@ print("score:", info["score"])
 
 **Neuroevolution (no Python, no GPU)**
 ```bash
-./gradlew :suika-app:run
+./gradlew :suika-app:run --args="--headless"
 # Runs the built-in GA loop; outputs scores per generation
 ```
 
@@ -176,8 +224,8 @@ suika-env       — obs encoders, action/reward, vectorised env
 suika-bridge    — Java↔Python boundary (transports, codec, Gym/PettingZoo adapters)
 suika-ai        — all JVM-native AI algorithms + plugin SPI
 suika-dash      — metrics, heatmaps, replay viewer, exporters
-suika-game      — LibGDX rendering + game loop (display required)
-suika-app       — entry point, wires everything + Explorer/Researcher UI
+suika-game      — LibGDX rendering + input + screens (display required)
+suika-app       — entry point, DesktopLauncher, Explorer/Researcher UI
 python/suika/   — Gymnasium env + PyTorch training toolkit
 ```
 
@@ -193,8 +241,10 @@ python/suika/   — Gymnasium env + PyTorch training toolkit
               ┌──────────────┼─────────────────┐
               ▼              ▼                  ▼
          suika-game      suika-ai           suika-dash
-         (LibGDX)        (MCTS, GA,         (metrics,
-                          BC, DAgger…)       heatmaps)
+         (LibGDX UI)     (MCTS, GA,         (metrics,
+         MainMenuScreen   BC, DAgger…)       heatmaps)
+         SuikaScreen
+         GameOverScreen
               │              │
               └──────────────┤
                              ▼
@@ -216,22 +266,6 @@ python/suika/   — Gymnasium env + PyTorch training toolkit
 
 **Deploy path (no Python)**:
 Train in Python → export ONNX → load with `OnnxPolicyRunner` → shipped in game JAR.
-
----
-
-## Latest Release
-
-See the [Releases page](https://github.com/ericcayers-ai/suikaAI-plus/releases/latest) for the pre-built `suika-app-<version>.zip` distribution.
-
-Extract and run:
-```bash
-unzip suika-app-0.1.0.zip
-cd suika-app-0.1.0/bin
-./suika-app        # Linux/macOS
-suika-app.bat      # Windows
-```
-
-The distribution bundles all JVM dependencies. Java 21+ must be on your PATH.
 
 ---
 

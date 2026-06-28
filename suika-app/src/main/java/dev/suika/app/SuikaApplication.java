@@ -11,17 +11,26 @@ import dev.suika.env.*;
 import java.util.Map;
 
 /**
- * Application entry point. Wires the full stack:
- *   suika-core ← suika-env ← suika-ai ← suika-dash
+ * Application entry point.
  *
- * Phase 9: demonstrates Explorer/Researcher mode presets, schema-driven config,
- * and the headless training loop with live dashboard output.
- * Full LibGDX window rendering is wired in the game module (requires display).
+ * <ul>
+ *   <li>Default (no args or no {@code --headless}): launches the full LibGDX windowed game.</li>
+ *   <li>{@code --headless}: runs the CLI training demo (Explorer mode, GA, no display required).</li>
+ * </ul>
+ *
+ * Run the GUI:   {@code ./gradlew :suika-app:run}
+ * Run headless:  {@code ./gradlew :suika-app:run --args="--headless"}
  */
 public class SuikaApplication {
 
     public static void main(String[] args) throws Exception {
-        System.out.println("=== Suika AI Sandbox — v0.1.0-SNAPSHOT ===");
+        boolean headless = args.length > 0 && "--headless".equals(args[0]);
+        if (!headless) {
+            DesktopLauncher.launch();
+            return;
+        }
+
+        System.out.println("=== Suika AI Sandbox — v0.2.0-SNAPSHOT ===");
         System.out.println("Running headless demo (Explorer → Quick Learner preset)\n");
 
         // --- Explorer mode: use a friendly preset ---
@@ -79,5 +88,6 @@ public class SuikaApplication {
         }
 
         System.out.println("\nDone. Run `./gradlew test` to execute the full test suite.");
+        System.out.println("Run `./gradlew :suika-app:run` to launch the GUI game.");
     }
 }
