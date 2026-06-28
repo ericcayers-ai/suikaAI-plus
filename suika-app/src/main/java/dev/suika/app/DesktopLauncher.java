@@ -16,7 +16,7 @@ public final class DesktopLauncher {
 
     public static void launch() {
         Lwjgl3ApplicationConfiguration config = new Lwjgl3ApplicationConfiguration();
-        config.setTitle("Suika AI Sandbox — v0.2.0-SNAPSHOT");
+        config.setTitle("Suika AI Sandbox — v0.2.0");
         config.setWindowedMode(720, 1060);
         config.setResizable(true);
         config.setForegroundFPS(60);

@@ -115,7 +115,7 @@ public final class MainMenuScreen extends ScreenAdapter {
     private void drawFooter() {
         game.batch.begin();
         game.font.setColor(0.32f, 0.32f, 0.40f, 1f);
-        game.font.draw(game.batch, "v0.2.0-SNAPSHOT", 10f, 24f);
+        game.font.draw(game.batch, "v0.2.0", 10f, 24f);
         game.batch.end();
     }
 
