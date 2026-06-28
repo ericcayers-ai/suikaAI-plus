@@ -13,6 +13,10 @@ public final class NeuralAgent implements AgentPlugin {
     private final MlpPolicy          policy;
     private final StateObservationEncoder encoder = new StateObservationEncoder();
 
+    /** No-arg constructor for {@link java.util.ServiceLoader} discovery. */
+    public NeuralAgent() { this(new MlpPolicy(
+            dev.suika.env.StateObservationEncoder.TOTAL, 64, 32)); }
+
     public NeuralAgent(MlpPolicy policy) { this.policy = policy; }
 
     @Override public String id()          { return "neural-mlp"; }

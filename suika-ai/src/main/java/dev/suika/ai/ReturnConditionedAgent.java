@@ -21,6 +21,9 @@ public final class ReturnConditionedAgent implements AgentPlugin {
     /**
      * @param targetReturn  the score this agent is trying to achieve
      */
+    /** No-arg constructor for {@link java.util.ServiceLoader} discovery; targets score 1000. */
+    public ReturnConditionedAgent() { this(1000.0); }
+
     public ReturnConditionedAgent(double targetReturn) {
         this.targetReturn   = targetReturn;
         this.remainingReturn = targetReturn;

@@ -16,6 +16,9 @@ public final class GreedyOnePlyAgent implements AgentPlugin {
 
     private final int actionBins;
 
+    /** No-arg constructor for {@link java.util.ServiceLoader} discovery. */
+    public GreedyOnePlyAgent() { this(32); }
+
     public GreedyOnePlyAgent(int actionBins) { this.actionBins = actionBins; }
 
     @Override public String id()          { return "greedy-1ply"; }

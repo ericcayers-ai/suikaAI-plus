@@ -1,0 +1,6 @@
+dev.suika.ai.RandomAgent
+dev.suika.ai.HeuristicAgent
+dev.suika.ai.NeuralAgent
+dev.suika.ai.MctsAgent
+dev.suika.ai.GreedyOnePlyAgent
+dev.suika.ai.ReturnConditionedAgent

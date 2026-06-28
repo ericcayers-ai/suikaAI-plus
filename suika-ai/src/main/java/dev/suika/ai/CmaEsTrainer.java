@@ -39,6 +39,9 @@ public final class CmaEsTrainer implements TrainerPlugin, AutoCloseable {
     private double[] recombWeights;// normalised recombination weights
     private int      generation = 0;
 
+    /** No-arg constructor for {@link java.util.ServiceLoader} discovery; uses default hyperparams. */
+    public CmaEsTrainer() { this(0.3, 2, 0L); }
+
     public CmaEsTrainer(double sigma0, int episodesPerEval, long seed) {
         int n         = MlpPolicy.paramCount(INPUT_SIZE, HIDDEN_SIZE, OUTPUT_BINS);
         this.sigma0   = sigma0;

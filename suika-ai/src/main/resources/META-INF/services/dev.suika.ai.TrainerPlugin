@@ -1,0 +1,3 @@
+dev.suika.ai.GeneticTrainer
+dev.suika.ai.CmaEsTrainer
+dev.suika.ai.BehavioralCloningTrainer

@@ -24,6 +24,9 @@ public final class BehavioralCloningTrainer implements TrainerPlugin {
     private final int        batchSize;
     private int              updateCount = 0;
 
+    /** No-arg constructor for {@link java.util.ServiceLoader} discovery; uses an empty dataset and default hyperparams. */
+    public BehavioralCloningTrainer() { this(new DemoDataset(), 1e-3, 32); }
+
     public BehavioralCloningTrainer(DemoDataset dataset, double learningRate, int batchSize) {
         this.policy       = new MlpPolicy(INPUT_SIZE, HIDDEN_SIZE, OUTPUT_BINS);
         this.dataset      = dataset;

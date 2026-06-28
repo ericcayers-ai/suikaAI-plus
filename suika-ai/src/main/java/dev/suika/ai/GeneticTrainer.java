@@ -43,6 +43,9 @@ public final class GeneticTrainer implements TrainerPlugin, AutoCloseable {
     private double[]   fitness;
     private int        generation = 0;
 
+    /** No-arg constructor for {@link java.util.ServiceLoader} discovery; uses default hyperparams. */
+    public GeneticTrainer() { this(20, 4, 0.1, 2, 0L); }
+
     public GeneticTrainer(int populationSize, int eliteCount, double mutationSigma,
                           int episodesPerEval, long seed) {
         this.populationSize  = populationSize;

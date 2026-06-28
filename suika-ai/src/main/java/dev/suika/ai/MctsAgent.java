@@ -34,6 +34,9 @@ public final class MctsAgent implements AgentPlugin {
      * @param rolloutDepth max steps in each simulation rollout
      * @param actionBins   number of discrete drop positions
      */
+    /** No-arg constructor for {@link java.util.ServiceLoader} discovery; uses default hyperparams. */
+    public MctsAgent() { this(50, Math.sqrt(2), 5, 32); }
+
     public MctsAgent(int rollouts, double explorationC, int rolloutDepth, int actionBins) {
         this.rollouts     = rollouts;
         this.explorationC = explorationC;
