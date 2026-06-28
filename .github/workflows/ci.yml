@@ -2,8 +2,6 @@ name: CI
 
 on:
   push:
-    branches: ["main", "claude/**", "feature/**"]
-  pull_request:
     branches: ["main"]
 
 jobs:
