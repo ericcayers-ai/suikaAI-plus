@@ -40,7 +40,7 @@ class PlanningTest {
 
     @Test
     void policyValueStubReturnsCorrectShape() {
-        PolicyValueNetwork net = new PolicyValueNetwork.UniformStub();
+        PolicyValueNetwork net = new PolicyValueNetwork.UniformPrior();
         GameCore core = new GameCore(1L);
         PolicyValueNetwork.Output out = net.evaluate(core.getState(), 32);
         assertEquals(32, out.policyLogits().length);
