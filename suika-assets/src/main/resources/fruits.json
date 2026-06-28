@@ -1,0 +1,17 @@
+{
+  "_comment": "Data-driven fruit ladder. Radii and scores are starting values to calibrate against reference (see ROADMAP §I.2, Appendix B).",
+  "fruits": [
+    { "tier": 1,  "name": "Cherry",     "radius": 0.50, "mergeScore":  0, "droppable": true,  "density": 1.0 },
+    { "tier": 2,  "name": "Strawberry", "radius": 0.70, "mergeScore":  1, "droppable": true,  "density": 1.0 },
+    { "tier": 3,  "name": "Grape",      "radius": 0.90, "mergeScore":  3, "droppable": true,  "density": 1.0 },
+    { "tier": 4,  "name": "Dekopon",    "radius": 1.15, "mergeScore":  6, "droppable": true,  "density": 1.0 },
+    { "tier": 5,  "name": "Persimmon",  "radius": 1.40, "mergeScore": 10, "droppable": true,  "density": 1.0 },
+    { "tier": 6,  "name": "Apple",      "radius": 1.65, "mergeScore": 15, "droppable": false, "density": 1.0 },
+    { "tier": 7,  "name": "Pear",       "radius": 1.90, "mergeScore": 21, "droppable": false, "density": 1.0 },
+    { "tier": 8,  "name": "Peach",      "radius": 2.15, "mergeScore": 28, "droppable": false, "density": 1.0 },
+    { "tier": 9,  "name": "Pineapple",  "radius": 2.45, "mergeScore": 36, "droppable": false, "density": 1.0 },
+    { "tier": 10, "name": "Melon",      "radius": 2.80, "mergeScore": 45, "droppable": false, "density": 1.0 },
+    { "tier": 11, "name": "Watermelon", "radius": 3.20, "mergeScore": 55, "droppable": false, "density": 1.0 }
+  ],
+  "doubleWatermelonBonus": 100
+}

@@ -1,0 +1,48 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.classpath
+*.project
+.settings/
+
+# Java
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+venv/
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Test outputs
+**/test-results/
+**/test-reports/
+
+# User-supplied assets (copyrighted; not redistributed)
+suika-assets/src/main/resources/sprites/
+suika-assets/src/main/resources/audio/
+
+# Trained models and datasets (too large for git)
+*.onnx
+*.pt
+*.ckpt
+*.parquet
+*.arrow
+runs/
+experiments/
