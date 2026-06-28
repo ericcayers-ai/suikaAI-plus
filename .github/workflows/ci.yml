@@ -35,8 +35,17 @@ jobs:
       - name: Run suika-env unit tests
         run: ./gradlew :suika-env:test --parallel
 
+      - name: Run suika-bridge unit tests
+        run: ./gradlew :suika-bridge:test --parallel
+
       - name: Run suika-ai unit tests
         run: ./gradlew :suika-ai:test --parallel
+
+      - name: Run suika-dash unit tests
+        run: ./gradlew :suika-dash:test --parallel
+
+      - name: Run suika-app unit tests
+        run: ./gradlew :suika-app:test --parallel
 
       - name: Upload test reports
         if: always()

@@ -7,6 +7,7 @@ suika-core        headless dyn4j physics engine, GameCore, FruitTier, modding ty
     ↑
 suika-assets      data-driven FruitDefinition / AssetRegistry (fruits.json)
 suika-env         Gymnasium-shaped environment (SuikaEnv, VectorEnv, encoders, reward)
+suika-bridge      Java↔Python boundary (BridgeTransport, GymBridge, PettingZooBridge, ONNX deploy)
 suika-ai          plugin SPI, neuroevolution, MCTS, imitation, IRL, offline RL, benchmark
 suika-game        fixed-timestep game loop, renderer/input interfaces (LibGDX boundary)
 suika-dash        RunMetrics, DashboardRegistry, ConsoleExporter, ActionHeatmap
@@ -15,6 +16,22 @@ suika-app         application entry point, AgentPreset, HyperparamSchema, OnnxEx
 ```
 
 Dependencies flow downward only — `suika-core` has no runtime dependencies beyond dyn4j.
+
+## The Java ↔ Python Boundary (`suika-bridge`)
+
+The roadmap's hybrid boundary (§II.4) is expressed as a JVM-side contract:
+
+- `BridgeTransport` — the channel carrying observations out / actions back. Real
+  implementations wrap JEP, GraalPy, a gRPC sidecar, or an Arrow shared-memory ring;
+  `InProcessTransport` is the dependency-free path for tests and JVM-native inference.
+- `BridgeConfig` — selects the mechanism (`JEP`, `GRAALPY`, `GRPC_SIDECAR`,
+  `SHARED_MEMORY`, `DJL_ONNX`).
+- `ObservationCodec` — length-prefixed little-endian tensor wire format (the
+  dependency-free stand-in for Arrow zero-copy).
+- `GymBridge` / `PettingZooBridge` — Gymnasium and PettingZoo adapters over `SuikaEnv`,
+  the JVM half that Python `gym.make` / `parallel_env` drive.
+- `OnnxPolicyRunner` — the no-Python deployment seam: load an exported ONNX policy and
+  run inference on the JVM (pairs with `OnnxExportConfig` in suika-app).
 
 ## Two Front Doors
 
