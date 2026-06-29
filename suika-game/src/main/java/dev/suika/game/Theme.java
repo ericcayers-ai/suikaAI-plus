@@ -13,8 +13,10 @@ public final class Theme {
     private Theme() {}
 
     // --- Virtual canvas (all rendering happens in this fixed pixel space) ---
-    public static final float VW = 720f;
-    public static final float VH = 1280f;
+    public static final float VW   = 720f;
+    public static final float VH   = 1280f;
+    public static final float VW_L = 1280f;  // landscape virtual width
+    public static final float VH_L = 720f;   // landscape virtual height
 
     // --- Backdrop ---
     public static final Color BG_TOP    = new Color(0.09f, 0.10f, 0.16f, 1f);

@@ -46,13 +46,13 @@ public abstract class AgentRunner extends LiveBoardRunner {
     protected void setAgent(AgentPlugin a) { if (a != null) this.agent = a; }
     protected AgentPlugin agent() { return agent; }
 
-    private float baseDelay() { return Math.max(0.05f, 0.6f / Math.max(0.1f, speed)); }
+    protected float baseDelay() { return Math.max(0.05f, 0.6f / Math.max(0.1f, speed)); }
 
     @Override
     protected void onUpdate(float dt) {
         bestScore = Math.max(bestScore, core.getScore());
         if (core.isGameOver()) {
-            if (gameOverTimer < 0f) gameOverTimer = 1.6f;
+            if (gameOverTimer < 0f) gameOverTimer = 0.4f;
             gameOverTimer -= dt;
             if (gameOverTimer <= 0f) { newGame(); gameOverTimer = -1f; }
             return;
@@ -79,6 +79,10 @@ public abstract class AgentRunner extends LiveBoardRunner {
         thinking = true;
         final var snap = core.snapshot();
         final AgentPlugin a = agent;
+        // Set a wall-clock deadline so MCTS never stalls at fast speeds.
+        if (a instanceof MctsAgent m && cfg.maxThinkMs > 0) {
+            m.setSearchDeadline(System.nanoTime() + cfg.maxThinkMs * 1_000_000L);
+        }
         Thread t = new Thread(() -> {
             long t0 = System.nanoTime();
             Object act = a.selectAction(snap, spec);

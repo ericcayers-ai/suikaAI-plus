@@ -34,6 +34,14 @@ public final class MctsAgent implements AgentPlugin {
     private int[] lastVisits = new int[0];
 
     /**
+     * Optional wall-clock deadline (nanoTime). When set, the search loop exits early
+     * rather than blocking indefinitely — prevents high-rollout configs stalling fast
+     * physics speeds. Reset to {@link Long#MAX_VALUE} to remove the budget.
+     */
+    private volatile long searchDeadlineNs = Long.MAX_VALUE;
+    public void setSearchDeadline(long deadlineNs) { this.searchDeadlineNs = deadlineNs; }
+
+    /**
      * @param rollouts     simulations per move (more → stronger, slower)
      * @param explorationC UCB1 exploration constant (√2 is the standard default)
      * @param rolloutDepth max steps in each simulation rollout
@@ -101,7 +109,9 @@ public final class MctsAgent implements AgentPlugin {
         MctsNode root = new MctsNode(-1, null);
         List<Integer> actions = allActions();
 
+        long deadline = searchDeadlineNs;   // read once per search
         for (int r = 0; r < rollouts; r++) {
+            if (r > 0 && System.nanoTime() > deadline) break;  // time budget exceeded
             GameCore fork = liveCore.snapshot();
 
             MctsNode node = root;

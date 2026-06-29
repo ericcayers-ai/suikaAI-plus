@@ -55,7 +55,7 @@ public final class MainMenuScreen extends ScreenAdapter {
     public void show() {
         Gdx.input.setInputProcessor(new InputAdapter() {
             @Override public boolean touchDown(int sx, int sy, int pointer, int button) {
-                camera.unproject(touch.set(sx, sy, 0));
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
                 if (playBtn.contains(touch.x, touch.y))
                     game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN));
                 else if (watchBtn.contains(touch.x, touch.y))
@@ -67,7 +67,7 @@ public final class MainMenuScreen extends ScreenAdapter {
                 return true;
             }
             @Override public boolean mouseMoved(int sx, int sy) {
-                camera.unproject(touch.set(sx, sy, 0));
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
                 mx = touch.x; my = touch.y;
                 return false;
             }
@@ -127,7 +127,7 @@ public final class MainMenuScreen extends ScreenAdapter {
         // Footer
         Ui.textCenter(game.batch, game.fontSmall,
                 "Click / drag to aim · ESC pauses · R restarts", CX, 250, Theme.TEXT_FAINT);
-        Ui.text(game.batch, game.fontSmall, "v0.4.2", 14, 30, Theme.TEXT_FAINT);
+        Ui.text(game.batch, game.fontSmall, "v0.5.0", 14, 30, Theme.TEXT_FAINT);
         Ui.textRight(game.batch, game.fontSmall,
                 WatchAgents.get(game.settings.agentIndex).name() + " · " + game.settings.fpsLabel(),
                 Theme.VW - 14, 30, Theme.TEXT_FAINT);

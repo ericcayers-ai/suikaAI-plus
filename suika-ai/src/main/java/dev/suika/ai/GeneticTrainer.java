@@ -153,6 +153,16 @@ public final class GeneticTrainer implements TrainerPlugin, AutoCloseable {
     public double meanFitness()  { return Arrays.stream(fitness).average().orElse(0); }
     public int    generation()   { return generation; }
 
+    /** Returns the top-N agents by fitness (index 0 = champion). */
+    public List<AgentPlugin> eliteAgents() {
+        Integer[] order = new Integer[populationSize];
+        for (int i = 0; i < populationSize; i++) order[i] = i;
+        Arrays.sort(order, Comparator.comparingDouble((Integer i) -> fitness[i]).reversed());
+        List<AgentPlugin> result = new ArrayList<>(eliteCount);
+        for (int e = 0; e < Math.min(eliteCount, populationSize); e++) result.add(buildAgent(population[order[e]]));
+        return result;
+    }
+
     @Override
     public void close() { pool.shutdownNow(); }
 }

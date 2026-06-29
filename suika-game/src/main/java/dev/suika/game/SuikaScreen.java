@@ -40,7 +40,7 @@ public final class SuikaScreen extends ScreenAdapter {
 
     public enum Mode { HUMAN, AI_WATCH }
 
-    private static final float DROP_COOLDOWN  = 0.40f; // min seconds between human drops
+    private static final float DROP_COOLDOWN  = 0.24f; // min seconds between human drops (1.7× faster)
     private static final float GAME_OVER_WAIT = 2.2f;
 
     private final SuikaGame    game;
@@ -106,23 +106,23 @@ public final class SuikaScreen extends ScreenAdapter {
     public void show() {
         Gdx.input.setInputProcessor(new InputAdapter() {
             @Override public boolean touchDown(int sx, int sy, int p, int b) {
-                camera.unproject(touch.set(sx, sy, 0));
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
                 if (paused) { handlePauseClick(touch.x, touch.y); return true; }
                 if (core.isGameOver()) { toGameOver(); return true; }
-                if (mode == Mode.HUMAN && dropCooldown <= 0f) {
+                if (mode == Mode.HUMAN && dropCooldown <= 0f && chuteClear()) {
                     core.spawnDrop(hoverGameX);
                     dropCooldown = DROP_COOLDOWN;
                 }
                 return true;
             }
             @Override public boolean mouseMoved(int sx, int sy) {
-                camera.unproject(touch.set(sx, sy, 0));
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
                 mx = touch.x; my = touch.y;
                 updateHoverFromScreen();
                 return false;
             }
             @Override public boolean touchDragged(int sx, int sy, int p) {
-                camera.unproject(touch.set(sx, sy, 0));
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
                 mx = touch.x; my = touch.y;
                 updateHoverFromScreen();
                 return false;
@@ -223,6 +223,7 @@ public final class SuikaScreen extends ScreenAdapter {
         if (mode == Mode.AI_WATCH) updateAi(delta);
 
         if (core.isGameOver()) {
+            if (cfg.immediateDeadline) { toGameOver(); return; }
             if (gameOverTimer < 0f) gameOverTimer = GAME_OVER_WAIT;
             gameOverTimer -= delta;
             if (gameOverTimer <= 0f) toGameOver();

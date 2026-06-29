@@ -55,8 +55,8 @@ public final class Ui {
         // face
         s.setColor(face);
         fillRoundRect(s, r.x, r.y, r.width, r.height, 16f);
-        // top sheen
-        s.setColor(1f, 1f, 1f, hovered ? 0.18f : 0.10f);
+        // top sheen (subtle — bright reflections are distracting, especially on dark overlays)
+        s.setColor(1f, 1f, 1f, hovered ? 0.09f : 0.05f);
         fillRoundRect(s, r.x + 7f, r.y + r.height * 0.50f, r.width - 14f, r.height * 0.42f, 12f);
     }
 

@@ -42,16 +42,21 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private static final float CARD_W   = Theme.VW - 72f;
 
     // drawer controls
-    private final Rectangle speedCtrl = new Rectangle(420, 246, 260, 34);
-    private final Rectangle paraCtrl  = new Rectangle(420, 204, 260, 34);
-    private final Rectangle paramCtrl = new Rectangle(420, 162, 260, 34);
+    private final Rectangle speedCtrl = new Rectangle(420, 252, 260, 34);
+    private final Rectangle paraCtrl  = new Rectangle(420, 210, 260, 34);
+    private final Rectangle paramCtrl = new Rectangle(420, 168, 260, 34);
+    private final Rectangle ghostCtrl = new Rectangle(420, 126, 260, 34);
     private final Rectangle backBtn   = new Rectangle(36, 36, 300, 64);
     private final Rectangle launchBtn = new Rectangle(Theme.VW - 336, 36, 300, 64);
 
     private static final int[] ROLLOUTS = {40, 80, 150, 300};
-    private static final int[] POP      = {16, 24, 40, 64};
+    private static final int[] POP      = {16, 24, 40, 64, 128, 256, 512, 1000};
     private static final int[] RETURNS  = {1000, 2000, 4000};
     private static final double[] LRS   = {1e-3, 3e-3, 1e-2};
+
+    // hover infocard
+    private int hovCardIdx = -1;
+    private float cardHoverTimer = 0f;
 
     public AiPlaygroundScreen(SuikaGame game) { this(game, null); }
 
@@ -69,10 +74,10 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     public void show() {
         Gdx.input.setInputProcessor(new InputAdapter() {
             @Override public boolean touchDown(int sx, int sy, int p, int b) {
-                camera.unproject(touch.set(sx, sy, 0)); handleClick(touch.x, touch.y); return true;
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight()); handleClick(touch.x, touch.y); return true;
             }
             @Override public boolean mouseMoved(int sx, int sy) {
-                camera.unproject(touch.set(sx, sy, 0)); mx = touch.x; my = touch.y; return false;
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight()); mx = touch.x; my = touch.y; return false;
             }
             @Override public boolean scrolled(float ax, float ay) {
                 scroll = MathUtils.clamp(scroll + ay * 46f, 0f, maxScroll()); return true;
@@ -101,6 +106,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             cfg.parallelism = MathUtils.clamp(cfg.parallelism + dir(x, paraCtrl), 1, cores); return;
         }
         if (paramCtrl.contains(x, y) && paramApplicable()) { cycleParam(dir(x, paramCtrl)); return; }
+        if (ghostCtrl.contains(x, y) && ghostApplicable()) { cfg.ghostView = !cfg.ghostView; return; }
         // card hit-test (only within the visible band)
         for (int i = 0; i < techs.length; i++) {
             float top = cardTop(i);
@@ -114,6 +120,11 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
     private int dir(float x, Rectangle r) { return x < r.x + r.width / 2f ? -1 : +1; }
     private static int wrap(int i, int n) { return Math.floorMod(i, n); }
+
+    // ---- ghost view toggle ----
+    private boolean ghostApplicable() {
+        return cfg.technique.family == AiTechnique.Family.EVOLUTION;
+    }
 
     // ---- family-specific param ----
     private boolean paramApplicable() {
@@ -169,6 +180,19 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
     @Override
     public void render(float delta) {
+        // Track hover card for infocard popup
+        hovCardIdx = -1;
+        for (int i = 0; i < techs.length; i++) {
+            float top = cardTop(i);
+            if (top < LIST_BOT - 1 || top - CARD_H > LIST_TOP + 1) continue;
+            if (mx >= CARD_X && mx <= CARD_X + CARD_W && my <= top && my >= top - CARD_H + 6) {
+                if (i != hovCardIdx) cardHoverTimer = 0;
+                hovCardIdx = i;
+                break;
+            }
+        }
+        cardHoverTimer = hovCardIdx >= 0 ? Math.min(cardHoverTimer + delta * 5f, 1f) : 0f;
+
         Gdx.gl.glClearColor(0.05f, 0.06f, 0.10f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         Gdx.gl.glEnable(GL20.GL_BLEND);
@@ -206,8 +230,29 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         drawCycler(s, speedCtrl, true);
         drawCycler(s, paraCtrl, cfg.technique.parallel);
         drawCycler(s, paramCtrl, paramApplicable());
+        // ghost toggle (for evolution techniques)
+        boolean ghostEn = ghostApplicable();
+        s.setColor(ghostEn ? Theme.PANEL_DEEP : new Color(0.10f, 0.11f, 0.16f, 0.6f));
+        Ui.fillRoundRect(s, ghostCtrl.x, ghostCtrl.y, ghostCtrl.width, ghostCtrl.height, 8);
+        if (ghostEn) Ui.toggle(s, ghostCtrl.x + ghostCtrl.width - 64f, ghostCtrl.y + 5f, 58f, ghostCtrl.height - 10f, cfg.ghostView);
         Ui.button(s, backBtn, Theme.PANEL_EDGE, backBtn.contains(mx, my), true);
         Ui.button(s, launchBtn, Theme.ACCENT_2, launchBtn.contains(mx, my), true);
+
+        // hover infocard
+        if (hovCardIdx >= 0 && cardHoverTimer > 0.05f) {
+            AiTechnique ht = techs[hovCardIdx];
+            float top = cardTop(hovCardIdx);
+            float cardY = top - CARD_H;
+            float iW = CARD_W - 12f, iH = 64f;
+            float iX = CARD_X + 6f;
+            float iY = cardY - iH - 2f;
+            if (iY < LIST_BOT) iY = top + 2f;  // flip above if too low
+            float a = Math.min(1f, cardHoverTimer * 2f);
+            s.setColor(Theme.PANEL_DEEP.r, Theme.PANEL_DEEP.g, Theme.PANEL_DEEP.b, a * 0.95f);
+            Ui.fillRoundRect(s, iX, iY, iW, iH, 10f);
+            s.setColor(familyColor(ht).r, familyColor(ht).g, familyColor(ht).b, a * 0.7f);
+            Ui.fillRoundRect(s, iX, iY + iH - 3f, iW, 3f, 2f);
+        }
         s.end();
 
         // ---- text ----
@@ -227,6 +272,23 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         }
 
         drawDrawerText();
+
+        // render infocard blurb text
+        if (hovCardIdx >= 0 && cardHoverTimer > 0.1f) {
+            AiTechnique ht = techs[hovCardIdx];
+            float top = cardTop(hovCardIdx);
+            float cardY = top - CARD_H;
+            float iW = CARD_W - 12f, iH = 64f;
+            float iX = CARD_X + 6f;
+            float iY = cardY - iH - 2f;
+            if (iY < LIST_BOT) iY = top + 2f;
+            float a = Math.min(1f, cardHoverTimer * 2f);
+            Color tc = new Color(Theme.TEXT_DIM.r, Theme.TEXT_DIM.g, Theme.TEXT_DIM.b, a);
+            Ui.text(game.batch, game.fontSmall, ht.blurb, iX + 10f, iY + iH / 2f + 8f, tc);
+            Ui.text(game.batch, game.fontSmall, ht.category + "  ·  " + ht.kind + "  ·  obs: " + ht.dataMode,
+                    iX + 10f, iY + iH / 2f - 14f, new Color(familyColor(ht).r, familyColor(ht).g, familyColor(ht).b, a * 0.8f));
+        }
+
         game.batch.end();
     }
 
@@ -252,6 +314,11 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         cyclerText("Speed", cfg.speedLabel(), speedCtrl, true);
         cyclerText("Parallelism", cfg.parallelism + " threads", paraCtrl, t.parallel);
         cyclerText(paramLabel(), paramValue(), paramCtrl, paramApplicable());
+        // ghost view label
+        boolean ghostEn = ghostApplicable();
+        Color glc = ghostEn ? Theme.TEXT : Theme.TEXT_FAINT;
+        Ui.text(game.batch, game.font, "Ghost overlay", CARD_X + 4, ghostCtrl.y + ghostCtrl.height / 2f + 8, glc);
+        if (!ghostEn) Ui.textCenter(game.batch, game.fontSmall, "n/a (evolution only)", ghostCtrl.x + ghostCtrl.width / 2f - 28f, ghostCtrl.y + ghostCtrl.height / 2f, Theme.TEXT_FAINT);
 
         Ui.textCenter(game.batch, game.fontMed, "BACK", backBtn.x + backBtn.width / 2f, backBtn.y + 32, Theme.TEXT);
         Ui.textCenter(game.batch, game.fontMed, "LAUNCH", launchBtn.x + launchBtn.width / 2f, launchBtn.y + 32, Theme.TEXT);

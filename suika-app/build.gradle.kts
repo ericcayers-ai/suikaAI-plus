@@ -19,3 +19,37 @@ dependencies {
 application {
     mainClass = "dev.suika.app.SuikaApplication"
 }
+
+// ---- jpackage: produce a native Windows .exe installer ----
+// Usage: ./gradlew :suika-app:jpackageExe
+// Requires: JDK 21+ (jpackage is bundled with the JDK), WiX Toolset on PATH for MSI
+tasks.register<Exec>("jpackageExe") {
+    dependsOn("installDist")
+
+    val jpackage = "${System.getProperty("java.home")}/bin/jpackage"
+    val installDir = layout.buildDirectory.dir("install/suika-app").get().asFile
+    val outDir = layout.buildDirectory.dir("jpackage").get().asFile
+
+    doFirst { outDir.mkdirs() }
+
+    commandLine(
+        jpackage,
+        "--type", "exe",
+        "--name", "SuikaAI",
+        "--app-version", version.toString(),
+        "--vendor", "ericcayers-ai",
+        "--description", "Suika AI+ — AI Playground for the Watermelon Game",
+        "--input", "$installDir/lib",
+        "--main-jar", "suika-app-${version}.jar",
+        "--main-class", "dev.suika.app.SuikaApplication",
+        "--dest", outDir.absolutePath,
+        "--win-console",                // keep a console window for debug; remove for production
+        "--java-options", "--enable-preview",
+        "--java-options", "-Xmx512m"
+    )
+
+    doLast {
+        println("jpackage output: $outDir")
+        outDir.listFiles()?.forEach { println("  -> ${it.name}") }
+    }
+}

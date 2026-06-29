@@ -89,6 +89,10 @@ public final class SettingsScreen extends ScreenAdapter {
         toggle(null, "Seed", () -> cfg.randomSeed, () -> cfg.randomSeed = !cfg.randomSeed) // label shows mode via value
                 .value = () -> cfg.randomSeed ? "Random" : "Fixed " + cfg.fixedSeed;
 
+        // ---- Gameplay ----
+        toggle("GAMEPLAY", "Immediate game over (no safety delay)",
+                () -> cfg.immediateDeadline, () -> cfg.immediateDeadline = !cfg.immediateDeadline);
+
         // ---- AI Watch ----
         cycle("AI WATCH", "Agent", () -> WatchAgents.get(cfg.agentIndex).name(),
                 () -> cfg.agentIndex = wrap(cfg.agentIndex - 1, WatchAgents.count()),
@@ -118,11 +122,11 @@ public final class SettingsScreen extends ScreenAdapter {
     public void show() {
         Gdx.input.setInputProcessor(new InputAdapter() {
             @Override public boolean touchDown(int sx, int sy, int p, int b) {
-                camera.unproject(touch.set(sx, sy, 0));
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
                 handleClick(touch.x, touch.y); return true;
             }
             @Override public boolean mouseMoved(int sx, int sy) {
-                camera.unproject(touch.set(sx, sy, 0)); mx = touch.x; my = touch.y; return false;
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight()); mx = touch.x; my = touch.y; return false;
             }
             @Override public boolean keyDown(int k) {
                 if (k == Input.Keys.ESCAPE) { game.setScreen(back.apply(game)); return true; }

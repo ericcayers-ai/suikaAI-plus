@@ -23,9 +23,11 @@ public final class GameSettings {
 
     // ---- Simulation ----
     public static final int[] BIN_OPTIONS = {16, 32, 64};
-    public int     binIndex   = 1;        // default 32 drop columns
-    public boolean randomSeed = true;
-    public long    fixedSeed  = 42L;
+    public int     binIndex        = 1;     // default 32 drop columns
+    public boolean randomSeed      = true;
+    public long    fixedSeed       = 42L;
+    /** When true the game ends the instant any fruit touches the deadline. */
+    public boolean immediateDeadline = false;
 
     // ---- AI Watch ----
     public int   agentIndex   = WatchAgents.DEFAULT_INDEX;

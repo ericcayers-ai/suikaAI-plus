@@ -53,13 +53,13 @@ public final class GameOverScreen extends ScreenAdapter {
     public void show() {
         Gdx.input.setInputProcessor(new InputAdapter() {
             @Override public boolean touchDown(int sx, int sy, int p, int b) {
-                camera.unproject(touch.set(sx, sy, 0));
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
                 if (againBtn.contains(touch.x, touch.y)) game.setScreen(new SuikaScreen(game, mode));
                 else if (menuBtn.contains(touch.x, touch.y)) game.setScreen(new MainMenuScreen(game));
                 return true;
             }
             @Override public boolean mouseMoved(int sx, int sy) {
-                camera.unproject(touch.set(sx, sy, 0)); mx = touch.x; my = touch.y; return false;
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight()); mx = touch.x; my = touch.y; return false;
             }
         });
     }

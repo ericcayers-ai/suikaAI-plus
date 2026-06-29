@@ -1,8 +1,15 @@
 package dev.suika.game;
 
+import dev.suika.ai.AgentPlugin;
 import dev.suika.ai.CmaEsTrainer;
 import dev.suika.ai.FitnessEvaluator;
 import dev.suika.ai.GeneticTrainer;
+import dev.suika.core.GameCore;
+import dev.suika.core.GameState;
+import dev.suika.core.PhysicsConfig;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Control center for the gradient-free learners (Neuroevolution GA, CMA-ES, PBT).
@@ -27,6 +34,14 @@ public final class EvolutionRunner extends AgentRunner {
     private volatile boolean running = false;
     private Thread worker;
 
+    // Ghost boards: up to 3 extra parallel games driven by recent top agents
+    private static final int GHOST_COUNT = 3;
+    private final GameCore[]   ghostCores   = new GameCore[GHOST_COUNT];
+    private final AgentPlugin[] ghostAgents = new AgentPlugin[GHOST_COUNT];
+    private final double[]  ghostAccum      = new double[GHOST_COUNT];
+    private final float[]   ghostTimer      = new float[GHOST_COUNT];
+    private volatile List<AgentPlugin> topAgents = new ArrayList<>();
+
     public EvolutionRunner(SuikaGame game, PlaygroundConfig cfg) {
         super(game, cfg);
         this.isCma = cfg.technique == AiTechnique.CMA_ES;
@@ -45,6 +60,14 @@ public final class EvolutionRunner extends AgentRunner {
         worker = new Thread(this::trainLoop, "evolution-trainer");
         worker.setDaemon(true);
         worker.start();
+        initGhosts();
+    }
+
+    private void initGhosts() {
+        for (int i = 0; i < GHOST_COUNT; i++) {
+            ghostCores[i] = new GameCore(seed + i + 1);
+            ghostTimer[i] = (i + 1) * 0.3f;
+        }
     }
 
     private void trainLoop() {
@@ -56,19 +79,72 @@ public final class EvolutionRunner extends AgentRunner {
                     var champ = cma.bestAgent();
                     bestFit = evaluator.evaluate(champ, 9000L + generation);
                     setAgent(champ);
+                    topAgents = List.of(champ);
                 } else {
                     ga.update();
                     generation = ga.generation();
                     bestFit = ga.bestFitness();
                     meanFit = ga.meanFitness();
                     setAgent(ga.bestAgent());
+                    // expose top agents for ghost view (champion is already in agent())
+                    var elites = ga.eliteAgents();
+                    topAgents = elites != null && elites.size() > 1
+                            ? elites.subList(1, Math.min(elites.size(), GHOST_COUNT + 1))
+                            : List.of();
                 }
                 bestSoFar = Math.max(bestSoFar, bestFit);
                 fitnessChart.add((float) bestSoFar);
+                // refresh ghost agents
+                List<AgentPlugin> ta = topAgents;
+                for (int i = 0; i < GHOST_COUNT; i++) {
+                    ghostAgents[i] = i < ta.size() ? ta.get(i) : agent();
+                }
             } catch (Exception e) {
                 running = false;
             }
         }
+    }
+
+    /** Advance ghost games one physics tick + ghost-agent drop cadence. */
+    @Override
+    protected void onUpdate(float dt) {
+        super.onUpdate(dt);
+        if (!cfg.ghostView) return;
+        for (int i = 0; i < GHOST_COUNT; i++) {
+            GameCore gc = ghostCores[i];
+            if (gc == null) continue;
+            // physics
+            ghostAccum[i] += dt * speed;
+            while (ghostAccum[i] >= PhysicsConfig.FIXED_DT) {
+                gc.tick();
+                ghostAccum[i] -= PhysicsConfig.FIXED_DT;
+            }
+            // auto-restart ghost if game over
+            if (gc.isGameOver()) {
+                ghostCores[i] = new GameCore(seed + i + 1 + generation);
+                ghostTimer[i] = 0.3f;
+                continue;
+            }
+            // ghost agent drops
+            ghostTimer[i] -= dt;
+            if (ghostTimer[i] <= 0f && ghostAgents[i] != null) {
+                AgentPlugin ghostAgent = ghostAgents[i];
+                GameCore snap = gc.snapshot();
+                dev.suika.ai.ActionSpec spec = dev.suika.ai.ActionSpec.discrete(cfg.actionBins);
+                Object act = ghostAgent.selectAction(snap, spec);
+                double dropX = spec.toDropX(act, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
+                gc.spawnDrop(dropX);
+                ghostTimer[i] = baseDelay() * 1.2f;
+            }
+        }
+    }
+
+    /** Returns live game-states for the ghost boards (null entries skipped by renderer). */
+    public GameState[] ghostStates() {
+        if (!cfg.ghostView) return null;
+        GameState[] arr = new GameState[GHOST_COUNT];
+        for (int i = 0; i < GHOST_COUNT; i++) arr[i] = ghostCores[i] != null ? ghostCores[i].getState() : null;
+        return arr;
     }
 
     @Override public String title()    { return cfg.technique.display; }
