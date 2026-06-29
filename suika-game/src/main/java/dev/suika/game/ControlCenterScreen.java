@@ -118,16 +118,23 @@ public final class ControlCenterScreen extends ScreenAdapter {
         board.setHover(human ? hoverGameX : Float.NaN, gs.currentFruitTier());
 
         ShapeRenderer s = game.shapes;
+        // 1) board world + overlays + control bar
         s.begin(ShapeRenderer.ShapeType.Filled);
         board.drawBackground(s);
         board.drawBoard(s, gs, game.settings, game.particles);
         drawColumnOverlay(s, gs);
-        drawPanel(s);
         drawControlBar(s);
         s.end();
-
+        // 2) board tier labels
         game.batch.begin();
         board.drawLabels(game.batch, game.fontSmall, gs, game.settings);
+        game.batch.end();
+        // 3) diagnostics panel (opaque — masks fruit spawned at the chute behind it)
+        s.begin(ShapeRenderer.ShapeType.Filled);
+        drawPanel(s);
+        s.end();
+        // 4) panel + control text
+        game.batch.begin();
         drawPanelText(gs);
         drawControlBarText();
         game.batch.end();
@@ -162,6 +169,9 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private static final float PX = 26, PY = 980, PW = Theme.VW - 52, PH = 286;
 
     private void drawPanel(ShapeRenderer s) {
+        // opaque backing so fruit/labels spawned in the chute behind the panel never bleed through
+        s.setColor(0.07f, 0.08f, 0.12f, 1f);
+        Ui.fillRoundRect(s, PX - 4, PY - 4, PW + 8, PH + 8, 18);
         Ui.panel(s, PX, PY, PW, PH, 16, Theme.PANEL, Theme.PANEL_EDGE);
         // chart frames (right column)
         float cw = 286, cx = PX + PW - cw - 16;

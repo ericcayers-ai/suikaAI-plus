@@ -1,5 +1,7 @@
 package dev.suika.ai;
 
+import dev.suika.core.Fruit;
+import dev.suika.core.FruitTier;
 import dev.suika.core.GameCore;
 import dev.suika.core.GameState;
 import dev.suika.core.PhysicsConfig;
@@ -150,9 +152,34 @@ public final class MctsAgent implements AgentPlugin {
     private double rollout(GameCore core) {
         long scoreBefore = core.getScore();
         for (int d = 0; d < rolloutDepth && !core.isGameOver(); d++) {
-            applyAction(core, rng.nextInt(actionBins));
+            // Heuristic-guided (ε-greedy) rollouts: pure-random play almost never merges,
+            // giving a near-zero value signal that leaves UCB1 unable to differentiate
+            // columns. A cheap merge-seeking default policy makes rollouts informative,
+            // which is what lets MCTS concentrate visits and actually plan strongly.
+            int a = (rng.nextDouble() < 0.8) ? heuristicAction(core.getState()) : rng.nextInt(actionBins);
+            applyAction(core, a);
         }
         return (core.getScore() - scoreBefore) * 0.001; // normalise to ~[0,1]
+    }
+
+    /** Cheap merge-seek / low-stack default policy used inside rollouts. */
+    private int heuristicAction(GameState s) {
+        double xMin = PhysicsConfig.DROP_X_MIN, xMax = PhysicsConfig.DROP_X_MAX;
+        FruitTier cur = s.currentFruitTier();
+        int best = actionBins / 2;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int b = 0; b < actionBins; b++) {
+            double x = xMin + b / (double) (actionBins - 1) * (xMax - xMin);
+            double score = 0.0;
+            for (Fruit f : s.fruits()) {
+                double dx = Math.abs(f.x() - x);
+                if (f.tier() == cur && dx < (cur.radius + f.radius()) * 1.2) score += (cur.tier + 1) * 2.0;
+                if (dx < cur.radius * 2.0) score -= f.y() * 0.15;            // prefer lower columns
+                if (dx < cur.radius * 2.0 && s.isAboveDeadline(f)) score -= 6.0;
+            }
+            if (score > bestScore) { bestScore = score; best = b; }
+        }
+        return best;
     }
 
     /**

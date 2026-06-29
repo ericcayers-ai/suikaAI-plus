@@ -39,11 +39,13 @@ public final class CaptureHarness implements ApplicationListener {
             case 0 -> { if (t > 0.6f)  { shoot("01-menu.png"); game.setScreen(new SettingsScreen(game, MainMenuScreen::new)); stage++; } }
             case 1 -> { if (t > 1.3f)  { shoot("02-settings.png"); game.setScreen(new AiPlaygroundScreen(game)); stage++; } }
             case 2 -> { if (t > 2.0f)  { shoot("03-playground.png"); game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN)); stage++; } }
-            case 3 -> { if (t > 2.6f)  { shoot("04-human.png"); launchControlCenter(AiTechnique.MCTS); stage++; } }
-            case 4 -> { if (t > 7.0f)  { shoot("05-mcts-cc.png"); launchControlCenter(AiTechnique.NEUROEVO); stage++; } }
-            case 5 -> { if (t > 14.0f) { shoot("06-neuroevo-cc.png"); launchControlCenter(AiTechnique.PPO); stage++; } }
-            case 6 -> { if (t > 18.0f) { shoot("07-ppo-cc.png"); launchControlCenter(AiTechnique.BC); stage++; } }
-            case 7 -> { if (t > 19.0f) { shoot("08-bc-modal.png"); stage++; Gdx.app.exit(); } }
+            case 3 -> { if (t > 2.6f)  { shoot("04-human.png"); launchControlCenter(AiTechnique.GREEDY); stage++; } }
+            case 4 -> { if (t > 12.0f) { shoot("05-greedy-early.png"); stage++; } }
+            case 5 -> { if (t > 24.0f) { shoot("06-greedy-late.png"); launchControlCenter(AiTechnique.MCTS); stage++; } }
+            case 6 -> { if (t > 36.0f) { shoot("07-mcts-cc.png"); launchControlCenter(AiTechnique.NEUROEVO); stage++; } }
+            case 7 -> { if (t > 58.0f) { shoot("08-neuroevo-cc.png"); launchControlCenter(AiTechnique.PPO); stage++; } }
+            case 8 -> { if (t > 62.0f) { shoot("09-ppo-cc.png"); launchControlCenter(AiTechnique.BC); stage++; } }
+            case 9 -> { if (t > 63.0f) { shoot("10-bc-modal.png"); stage++; Gdx.app.exit(); } }
             default -> { }
         }
     }

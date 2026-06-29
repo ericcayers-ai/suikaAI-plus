@@ -45,8 +45,8 @@ public abstract class AgentRunner extends LiveBoardRunner {
 
     @Override
     protected void onUpdate(float dt) {
+        bestScore = Math.max(bestScore, core.getScore());
         if (core.isGameOver()) {
-            bestScore = Math.max(bestScore, core.getScore());
             if (gameOverTimer < 0f) gameOverTimer = 1.6f;
             gameOverTimer -= dt;
             if (gameOverTimer <= 0f) { newGame(); gameOverTimer = -1f; }

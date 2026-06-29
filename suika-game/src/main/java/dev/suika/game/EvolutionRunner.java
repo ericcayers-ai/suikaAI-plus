@@ -23,7 +23,7 @@ public final class EvolutionRunner extends AgentRunner {
     private final FitnessEvaluator evaluator = new FitnessEvaluator(1, 250, 32);
 
     private volatile int    generation = 0;
-    private volatile double bestFit = 0, meanFit = 0;
+    private volatile double bestFit = 0, meanFit = 0, bestSoFar = 0;
     private volatile boolean running = false;
     private Thread worker;
 
@@ -63,7 +63,8 @@ public final class EvolutionRunner extends AgentRunner {
                     meanFit = ga.meanFitness();
                     setAgent(ga.bestAgent());
                 }
-                fitnessChart.add((float) bestFit);
+                bestSoFar = Math.max(bestSoFar, bestFit);
+                fitnessChart.add((float) bestSoFar);
             } catch (Exception e) {
                 running = false;
             }
@@ -77,7 +78,7 @@ public final class EvolutionRunner extends AgentRunner {
     public String[] stats() {
         return new String[]{
             "generation   " + generation,
-            "best fitness " + Math.round(bestFit),
+            "best fitness " + Math.round(bestSoFar),
             (isCma ? "mode         separable CMA-ES" : "mean fitness " + Math.round(meanFit)),
             "population   " + (isCma ? "auto (λ)" : Math.max(8, cfg.populationSize)),
             "eval threads " + cfg.parallelism + " (virtual pool)",
@@ -87,7 +88,7 @@ public final class EvolutionRunner extends AgentRunner {
     }
 
     @Override public LiveChart chart2()      { return fitnessChart; }
-    @Override public String    chart2Label() { return "best fitness  ·  " + Math.round(bestFit); }
+    @Override public String    chart2Label() { return "best fitness  ·  " + Math.round(bestSoFar); }
 
     @Override
     public void dispose() {

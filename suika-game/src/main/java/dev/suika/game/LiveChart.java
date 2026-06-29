@@ -40,13 +40,14 @@ public final class LiveChart {
         if (count < 2) return;
         float lo = Float.MAX_VALUE, hi = -Float.MAX_VALUE;
         for (int i = 0; i < count; i++) { float v = at(i); lo = Math.min(lo, v); hi = Math.max(hi, v); }
-        if (hi - lo < 1e-6f) { hi = lo + 1f; }
+        boolean flat = (hi - lo) < 1e-6f;   // constant series → draw centred, not glued to the floor
+        if (flat) { lo -= 1f; hi += 1f; }
         s.setColor(c);
         for (int i = 0; i < count - 1; i++) {
             float x0 = x + w * (i / (float) (count - 1));
             float x1 = x + w * ((i + 1) / (float) (count - 1));
-            float y0 = y + h * ((at(i)     - lo) / (hi - lo));
-            float y1 = y + h * ((at(i + 1) - lo) / (hi - lo));
+            float y0 = flat ? y + h * 0.5f : y + h * ((at(i)     - lo) / (hi - lo));
+            float y1 = flat ? y + h * 0.5f : y + h * ((at(i + 1) - lo) / (hi - lo));
             s.rectLine(x0, y0, x1, y1, 2.2f);
         }
     }
