@@ -16,10 +16,12 @@ public final class PhysicsConfig {
     public static final int    MAX_SUB_STEPS = 8;
 
     // --- Gravity ---
-    public static final double GRAVITY_Y = -9.8;
+    // Chosen so a cherry (r=0.5) dropped from DROP_Y=16 reaches the floor in ~0.85 s at 1× speed.
+    // g = 2*(DROP_Y - r) / t² = 2*15.5 / 0.7225 ≈ 42.9
+    public static final double GRAVITY_Y = -43.0;
 
     // --- Material ---
-    public static final double RESTITUTION      = 0.05;
+    public static final double RESTITUTION      = 0.0;   // no bounce; merge spawns land cleanly
     public static final double FRICTION_STATIC  = 0.7;
     public static final double FRICTION_DYNAMIC = 0.5;
 

@@ -233,7 +233,7 @@ public class GameCore {
 
     private void configureWorld() {
         world.setGravity(new Vector2(0.0, PhysicsConfig.GRAVITY_Y));
-        world.getSettings().setMaximumTranslation(0.5);
+        world.getSettings().setMaximumTranslation(1.2); // raised for g=43; prevents tunneling
         world.getSettings().setAtRestDetectionEnabled(true);
         world.getSettings().setMaximumAtRestLinearVelocity(PhysicsConfig.SLEEP_LINEAR_VELOCITY);
         world.getSettings().setMaximumAtRestAngularVelocity(PhysicsConfig.SLEEP_ANGULAR_VELOCITY);
@@ -371,8 +371,6 @@ public class GameCore {
 
             if (e.resultTier() != null) {
                 Body nb = createFruitBody(e.resultTier(), e.spawnX(), e.spawnY());
-                // Small upward impulse to simulate the "pop"
-                nb.applyImpulse(new Vector2(0.0, 0.3 * e.resultTier().radius));
                 world.addBody(nb);
                 int newId = nextId++;
                 register(newId, nb, e.resultTier());

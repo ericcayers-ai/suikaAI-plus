@@ -22,7 +22,7 @@ public final class DesktopLauncher {
         String captureDir = System.getProperty("suika.capture.dir");
 
         Lwjgl3ApplicationConfiguration config = new Lwjgl3ApplicationConfiguration();
-        config.setTitle("Suika AI Sandbox — v0.5.0");
+        config.setTitle("Suika AI Sandbox — v0.5.1");
         config.setResizable(true);
         config.setForegroundFPS(60);
         config.useVsync(true);

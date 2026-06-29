@@ -93,14 +93,7 @@ public final class SettingsScreen extends ScreenAdapter {
         toggle("GAMEPLAY", "Immediate game over (no safety delay)",
                 () -> cfg.immediateDeadline, () -> cfg.immediateDeadline = !cfg.immediateDeadline);
 
-        // ---- AI Watch ----
-        cycle("AI WATCH", "Agent", () -> WatchAgents.get(cfg.agentIndex).name(),
-                () -> cfg.agentIndex = wrap(cfg.agentIndex - 1, WatchAgents.count()),
-                () -> cfg.agentIndex = wrap(cfg.agentIndex + 1, WatchAgents.count()));
-        slider(null, "Move delay",
-                () -> (cfg.aiMoveDelay - 0.1) / (2.0 - 0.1),
-                f -> cfg.aiMoveDelay = (float) (0.1 + f * (2.0 - 0.1)));
-        toggle(null, "Show AI thinking (MCTS)", () -> cfg.showThinking, () -> cfg.showThinking = !cfg.showThinking);
+        // AI Watch configuration lives inside the AI game itself (side toggle per technique).
     }
 
     // --- row builders ---
@@ -229,8 +222,6 @@ public final class SettingsScreen extends ScreenAdapter {
             y = rowBot - ROW_GAP;
         }
 
-        Ui.textCenter(game.batch, game.fontSmall, WatchAgents.get(cfg.agentIndex).blurb(),
-                Theme.VW / 2f, 168f, Theme.TEXT_DIM);
         Ui.textCenter(game.batch, game.fontMed, "BACK", Theme.VW / 2f, backBtn.y + 35f, Theme.TEXT);
         game.batch.end();
     }
