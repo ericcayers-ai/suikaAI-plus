@@ -27,7 +27,7 @@ import java.util.function.Supplier;
  */
 public final class SettingsScreen extends ScreenAdapter {
 
-    private enum Kind { TOGGLE, CYCLE, SLIDER }
+    private enum Kind { TOGGLE, CYCLE, SLIDER, BUTTON }
 
     private final class Row {
         String  section;            // optional header drawn above this row
@@ -52,6 +52,7 @@ public final class SettingsScreen extends ScreenAdapter {
 
     private final List<Row> rows = new ArrayList<>();
     private final Rectangle backBtn = new Rectangle(Theme.VW / 2f - 130, 70, 260, 70);
+    private volatile String pythonStatus = "Checking…";
 
     private static final float ROW_H       = 54f;
     private static final float ROW_GAP      = 6f;
@@ -94,6 +95,27 @@ public final class SettingsScreen extends ScreenAdapter {
                 () -> cfg.immediateDeadline, () -> cfg.immediateDeadline = !cfg.immediateDeadline);
 
         // AI Watch configuration lives inside the AI game itself (side toggle per technique).
+
+        // ---- AI Environment ----
+        cycle("AI ENVIRONMENT", "Python", () -> pythonStatus, null, null);
+        button(null, "Copy: pip install torch torchvision", () ->
+                Gdx.app.getClipboard().setContents(
+                        "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"));
+    }
+
+    private void detectPython() {
+        Thread t = new Thread(() -> {
+            for (String cmd : new String[]{"python", "python3"}) {
+                try {
+                    Process p = new ProcessBuilder(cmd, "--version").redirectErrorStream(true).start();
+                    String out = new String(p.getInputStream().readAllBytes()).trim();
+                    if (p.waitFor() == 0 && !out.isEmpty()) { pythonStatus = "Found  ·  " + out; return; }
+                } catch (Exception ignored) {}
+            }
+            pythonStatus = "Not found — see pip button";
+        }, "python-detect");
+        t.setDaemon(true);
+        t.start();
     }
 
     // --- row builders ---
@@ -109,10 +131,14 @@ public final class SettingsScreen extends ScreenAdapter {
     private Row slider(String section, String label, DoubleSupplier frac, DoubleConsumer set) {
         Row r = add(section, label, Kind.SLIDER); r.frac = frac; r.setFrac = set; return r;
     }
+    private Row button(String section, String label, Runnable act) {
+        Row r = add(section, label, Kind.BUTTON); r.next = act; r.value = () -> label; return r;
+    }
     private static int wrap(int i, int n) { return Math.floorMod(i, n); }
 
     @Override
     public void show() {
+        detectPython();
         Gdx.input.setInputProcessor(new InputAdapter() {
             @Override public boolean touchDown(int sx, int sy, int p, int b) {
                 camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
@@ -134,8 +160,9 @@ public final class SettingsScreen extends ScreenAdapter {
             if (!r.area.contains(x, y)) continue;
             switch (r.kind) {
                 case TOGGLE -> r.next.run();
-                case CYCLE  -> { if (x < r.area.x + r.area.width / 2f) r.prev.run(); else r.next.run(); }
+                case CYCLE  -> { if (r.prev != null && x < r.area.x + r.area.width / 2f) r.prev.run(); else if (r.next != null) r.next.run(); }
                 case SLIDER -> r.setFrac.accept(clamp01((x - r.area.x) / r.area.width));
+                case BUTTON -> { if (r.next != null) r.next.run(); }
             }
             return;
         }
@@ -189,6 +216,11 @@ public final class SettingsScreen extends ScreenAdapter {
                     s.setColor(0.97f, 0.98f, 1f, 1f);
                     s.circle(r.area.x + r.area.width * f, r.area.y + r.area.height / 2f, 11f, 18);
                 }
+                case BUTTON -> {
+                    boolean hov = r.area.contains(mx, my);
+                    s.setColor(hov ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
+                    Ui.fillRoundRect(s, r.area.x, r.area.y, r.area.width, r.area.height, 8f);
+                }
             }
             y = rowBot - ROW_GAP;
         }
@@ -211,13 +243,16 @@ public final class SettingsScreen extends ScreenAdapter {
             float labelY = rowBot + ROW_H / 2f + 8f;
             Ui.text(game.batch, game.font, r.label, MARGIN_X + 16f, labelY, Theme.TEXT);
             if (r.kind == Kind.CYCLE) {
-                Ui.textCenter(game.batch, game.font, r.value.get(),
+                Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
                         r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);
-                Ui.textCenter(game.batch, game.fontMed, "<", r.area.x + 20f, r.area.y + r.area.height / 2f + 1f, Theme.TEXT);
-                Ui.textCenter(game.batch, game.fontMed, ">", r.area.x + r.area.width - 20f, r.area.y + r.area.height / 2f + 1f, Theme.TEXT);
+                if (r.prev != null) Ui.textCenter(game.batch, game.fontMed, "<", r.area.x + 20f, r.area.y + r.area.height / 2f + 1f, Theme.TEXT);
+                if (r.next != null) Ui.textCenter(game.batch, game.fontMed, ">", r.area.x + r.area.width - 20f, r.area.y + r.area.height / 2f + 1f, Theme.TEXT);
             } else if (r.kind == Kind.TOGGLE && r.value != null) {
                 Ui.textRight(game.batch, game.fontSmall, r.value.get(),
                         r.area.x + r.area.width - 80f, labelY - 2f, Theme.TEXT_DIM);
+            } else if (r.kind == Kind.BUTTON) {
+                Ui.textCenter(game.batch, game.fontSmall, "COPY",
+                        r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);
             }
             y = rowBot - ROW_GAP;
         }

@@ -105,11 +105,14 @@ public final class EvolutionRunner extends AgentRunner {
         }
     }
 
-    /** Advance ghost games one physics tick + ghost-agent drop cadence. */
+    /**
+     * Advance ghost games one physics tick + ghost-agent drop cadence.
+     * Ghost cores always run — they feed both the overlay view (ghostView=true)
+     * and the 4-quadrant grid view (ghostView=false).
+     */
     @Override
     protected void onUpdate(float dt) {
         super.onUpdate(dt);
-        if (!cfg.ghostView) return;
         for (int i = 0; i < GHOST_COUNT; i++) {
             GameCore gc = ghostCores[i];
             if (gc == null) continue;
@@ -139,11 +142,22 @@ public final class EvolutionRunner extends AgentRunner {
         }
     }
 
-    /** Returns live game-states for the ghost boards (null entries skipped by renderer). */
+    /** Returns live game-states for the ghost boards (overlay mode; null entries skipped). */
     public GameState[] ghostStates() {
         if (!cfg.ghostView) return null;
         GameState[] arr = new GameState[GHOST_COUNT];
         for (int i = 0; i < GHOST_COUNT; i++) arr[i] = ghostCores[i] != null ? ghostCores[i].getState() : null;
+        return arr;
+    }
+
+    /**
+     * Returns all 4 live game-states: [0]=champion, [1-3]=top elites.
+     * Used by the 4-quadrant grid when ghostView is off.
+     */
+    public GameState[] topStates() {
+        GameState[] arr = new GameState[4];
+        arr[0] = core.getState();
+        for (int i = 0; i < GHOST_COUNT; i++) arr[i + 1] = ghostCores[i] != null ? ghostCores[i].getState() : null;
         return arr;
     }
 

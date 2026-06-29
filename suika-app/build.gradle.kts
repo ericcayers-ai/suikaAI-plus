@@ -34,7 +34,7 @@ tasks.register<Exec>("jpackageExe") {
 
     commandLine(
         jpackage,
-        "--type", "exe",
+        "--type", "app-image",
         "--name", "SuikaAI",
         "--app-version", version.toString(),
         "--vendor", "ericcayers-ai",

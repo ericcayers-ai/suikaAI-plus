@@ -22,20 +22,25 @@ public final class DesktopLauncher {
         String captureDir = System.getProperty("suika.capture.dir");
 
         Lwjgl3ApplicationConfiguration config = new Lwjgl3ApplicationConfiguration();
-        config.setTitle("Suika AI Sandbox — v0.5.1");
+        config.setTitle("Suika AI Sandbox — v0.5.2");
         config.setResizable(true);
         config.setForegroundFPS(60);
         config.useVsync(true);
         // 4× MSAA for smooth circle / panel edges (depth/stencil unused).
         config.setBackBufferConfig(8, 8, 8, 8, 16, 0, 4);
-        config.setOpenGLEmulation(Lwjgl3ApplicationConfiguration.GLEmulation.GL20, 2, 0);
+        // GL30 enables instanced rendering and better GPU pipeline on modern drivers.
+        config.setOpenGLEmulation(Lwjgl3ApplicationConfiguration.GLEmulation.GL30, 3, 2);
 
         if (captureDir != null) {
             // Match the virtual canvas aspect exactly so captures have no letterbox bars.
             config.setWindowedMode(720, 1280);
             new Lwjgl3Application(new CaptureHarness(captureDir), config);
         } else {
-            config.setWindowedMode(720, 1080);
+            // Cap the initial window to ~88 % of screen height so it fits any display.
+            var dm = Lwjgl3ApplicationConfiguration.getDisplayMode();
+            int winH = Math.min(1080, (int)(dm.height * 0.88f));
+            int winW = (int)(winH * 720.0 / 1280.0);
+            config.setWindowedMode(winW, winH);
             new Lwjgl3Application(new SuikaGame(), config);
         }
     }

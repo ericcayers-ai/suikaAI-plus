@@ -260,14 +260,15 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
         // Infocard modal overlay
         if (infocardTech != null) {
-            s.setColor(0f, 0f, 0f, 0.72f);
+            s.setColor(0f, 0f, 0f, 0.88f);
             s.rect(0, 0, Theme.VW, Theme.VH);
-            float mW = 580f, mH = 310f;
+            float mW = 580f, mH = 400f;
             float mX = (Theme.VW - mW) / 2f, mY = (Theme.VH - mH) / 2f;
             s.setColor(Theme.PANEL_DEEP);
             Ui.fillRoundRect(s, mX, mY, mW, mH, 18);
             s.setColor(familyColor(infocardTech));
             Ui.fillRoundRect(s, mX, mY + mH - 4f, mW, 4f, 3f);
+            drawInfoBarsShapes(s, infocardTech, mX, mY, mW);
         }
 
         s.end();
@@ -304,7 +305,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         // Infocard modal text
         if (infocardTech != null) {
             AiTechnique t = infocardTech;
-            float mW = 580f, mH = 310f;
+            float mW = 580f, mH = 400f;
             float mX = (Theme.VW - mW) / 2f, mY = (Theme.VH - mH) / 2f;
             float tx  = mX + 28f;
             Ui.text(game.batch, game.fontMed, t.display,
@@ -313,25 +314,58 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
                     mX + mW - 24, mY + mH - 46, familyColor(t));
             Ui.text(game.batch, game.fontSmall,
                     t.category + "  ·  " + t.kind + "  ·  obs: " + t.dataMode,
-                    tx, mY + mH - 78, Theme.TEXT_DIM);
+                    tx, mY + mH - 82, Theme.TEXT_DIM);
             // blurb split into ≤52-char lines
             String blurb = t.blurb;
             if (blurb.length() > 52) {
                 int split = blurb.lastIndexOf(' ', 52);
                 if (split < 0) split = 52;
                 Ui.text(game.batch, game.fontSmall, blurb.substring(0, split),
-                        tx, mY + mH - 130, Theme.TEXT);
+                        tx, mY + mH - 120, Theme.TEXT);
                 Ui.text(game.batch, game.fontSmall, blurb.substring(split).trim(),
-                        tx, mY + mH - 160, Theme.TEXT);
+                        tx, mY + mH - 148, Theme.TEXT);
             } else {
                 Ui.text(game.batch, game.fontSmall, blurb,
-                        tx, mY + mH - 130, Theme.TEXT);
+                        tx, mY + mH - 120, Theme.TEXT);
             }
+            // Attribute bars section
+            Ui.text(game.batch, game.fontSmall, "ATTRIBUTES", tx, mY + 204f, Theme.TEXT_DIM);
+            Ui.text(game.batch, game.fontSmall, "Performance", tx, mY + 164f, Theme.TEXT_DIM);
+            Ui.text(game.batch, game.fontSmall, "Speed",       tx, mY + 124f, Theme.TEXT_DIM);
+            Ui.text(game.batch, game.fontSmall, "Setup ease",  tx, mY + 84f,  Theme.TEXT_DIM);
             Ui.textCenter(game.batch, game.fontSmall, "tap anywhere to close",
-                    Theme.VW / 2f, mY + 24, Theme.TEXT_FAINT);
+                    Theme.VW / 2f, mY + 26, Theme.TEXT_FAINT);
         }
 
         game.batch.end();
+    }
+
+    private void drawInfoBarsShapes(ShapeRenderer s, AiTechnique t, float mX, float mY, float mW) {
+        float bX   = mX + 158f;   // left edge of bar (after 130px label column)
+        float bW   = mW - 186f;   // bar width (580 - 28 margin - 130 label - 28 margin)
+        float barH = 14f;
+        float[] bY = {mY + 157f, mY + 117f, mY + 77f};
+        float[] frac = {
+            1.0f - t.ordinal() / (float)(AiTechnique.values().length - 1),
+            techSpeedFrac(t),
+            t.jvmNative && !t.python ? 1.0f : t.jvmNative ? 0.55f : 0.25f
+        };
+        Color[] cols = {Theme.ACCENT_2, Theme.ACCENT_BLUE, Theme.GOLD};
+        for (int i = 0; i < 3; i++) {
+            s.setColor(0.08f, 0.09f, 0.13f, 1f);
+            Ui.fillRoundRect(s, bX, bY[i], bW, barH, 5f);
+            s.setColor(cols[i]);
+            Ui.fillRoundRect(s, bX, bY[i], Math.max(bW * 0.05f, bW * frac[i]), barH, 5f);
+        }
+    }
+
+    private static float techSpeedFrac(AiTechnique t) {
+        return switch (t.family) {
+            case PLANNING  -> 0.82f;
+            case EVOLUTION -> 0.60f;
+            case IMITATION -> 0.50f;
+            case PYTHON    -> 0.30f;
+        };
     }
 
     private void drawCycler(ShapeRenderer s, Rectangle r, boolean enabled) {

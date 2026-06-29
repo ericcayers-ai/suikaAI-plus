@@ -41,8 +41,9 @@ public final class BoardRenderer {
     private float   hoverX = Float.NaN;     // game-x of the hover guide (NaN = hidden)
     private FruitTier hoverTier;
 
-    public void usePortrait()   { iOX = OX;    iOY = OY;    iScale = SCALE;   landscape = false; }
-    public void useLandscape()  { iOX = OX_L;  iOY = OY_L;  iScale = SCALE_L; landscape = true;  }
+    public void usePortrait()                           { iOX = OX;    iOY = OY;    iScale = SCALE;   landscape = false; }
+    public void useLandscape()                          { iOX = OX_L;  iOY = OY_L;  iScale = SCALE_L; landscape = true;  }
+    public void useCustom(float ox, float oy, float sc) { iOX = ox;     iOY = oy;    iScale = sc;      landscape = false; }
     public boolean isLandscape(){ return landscape; }
 
     // Static helpers — always use portrait constants (backward compat for SuikaScreen etc.)
