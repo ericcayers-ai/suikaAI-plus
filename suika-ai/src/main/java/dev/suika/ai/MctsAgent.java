@@ -28,6 +28,9 @@ public final class MctsAgent implements AgentPlugin {
     private final int    actionBins;
     private final Random rng;
 
+    /** Per-column visit counts from the most recent search — for "see it think" overlays. */
+    private int[] lastVisits = new int[0];
+
     /**
      * @param rollouts     simulations per move (more → stronger, slower)
      * @param explorationC UCB1 exploration constant (√2 is the standard default)
@@ -85,6 +88,49 @@ public final class MctsAgent implements AgentPlugin {
 
         return root.bestAction();
     }
+
+    /**
+     * Exact path: search using forks of the supplied live core instead of the
+     * replay approximation. Also records the per-column visit distribution so a UI
+     * can render "where the agent is thinking" (ROADMAP §VI.4).
+     */
+    @Override
+    public Object selectAction(GameCore liveCore, ActionSpec spec) {
+        MctsNode root = new MctsNode(-1, null);
+        List<Integer> actions = allActions();
+
+        for (int r = 0; r < rollouts; r++) {
+            GameCore fork = liveCore.snapshot();
+
+            MctsNode node = root;
+            while (node.isExpanded() && !node.isLeaf()) {
+                node = node.selectChild(explorationC);
+                applyAction(fork, node.action);
+                if (fork.isGameOver()) break;
+            }
+            if (!fork.isGameOver() && !node.isExpanded()) {
+                node.expand(actions);
+                node = node.selectChild(explorationC);
+                applyAction(fork, node.action);
+            }
+            node.backup(rollout(fork));
+        }
+
+        int[] visits = new int[actionBins];
+        for (MctsNode child : root.children()) {
+            if (child.action >= 0 && child.action < actionBins) {
+                visits[child.action] = child.visits();
+            }
+        }
+        lastVisits = visits;
+        return root.bestAction();
+    }
+
+    /** Per-column visit counts from the most recent {@link #selectAction(GameCore, ActionSpec)}. */
+    public int[] lastVisits() { return lastVisits; }
+
+    /** Number of discrete drop columns this agent reasons over. */
+    public int actionBins() { return actionBins; }
 
     // -------------------------------------------------------------------------
 

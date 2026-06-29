@@ -46,6 +46,23 @@ public final class GreedyOnePlyAgent implements AgentPlugin {
         return spec.discrete() ? bestAction : binToX(bestAction);
     }
 
+    /** Exact path: snapshot the live core and try every drop for real. */
+    @Override
+    public Object selectAction(GameCore liveCore, ActionSpec spec) {
+        long   baseScore  = liveCore.getScore();
+        int    bestAction = 0;
+        double bestValue  = Double.NEGATIVE_INFINITY;
+
+        for (int a = 0; a < actionBins; a++) {
+            GameCore fork = liveCore.snapshot();
+            StepResult r  = fork.dropAndSettle(binToX(a));
+            double value  = r.observation().score() - baseScore;
+            if (r.terminated()) value -= 10.0;
+            if (value > bestValue) { bestValue = value; bestAction = a; }
+        }
+        return spec.discrete() ? bestAction : binToX(bestAction);
+    }
+
     private double binToX(int a) {
         return PhysicsConfig.DROP_X_MIN
                 + a / (double) (actionBins - 1)

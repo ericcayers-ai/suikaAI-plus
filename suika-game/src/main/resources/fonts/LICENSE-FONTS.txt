@@ -1,0 +1,11 @@
+Bundled fonts
+=============
+
+DroidSans.ttf, DroidSans-Bold.ttf
+  Droid Sans, designed by Steve Matteson / Ascender Corp.
+  Licensed under the Apache License, Version 2.0.
+  https://www.apache.org/licenses/LICENSE-2.0
+
+These fonts are redistributed here under the Apache 2.0 license, which is
+compatible with this project's own Apache 2.0 license. They are used only as
+placeholder UI typography; you may drop in your own fonts of the same name.

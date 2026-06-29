@@ -140,6 +140,53 @@ public class GameCore {
     }
 
     /**
+     * Spawns the current fruit at {@code x} for <em>live</em>, frame-by-frame
+     * simulation and advances the preview queue immediately. Unlike
+     * {@link #dropAndSettle(double)} this does <strong>not</strong> run the physics
+     * to rest — call {@link #tick()} once per physics frame to watch the fruit fall
+     * and settle. Used by the windowed game so the player and the AI-watch viewer
+     * see real-time motion instead of a teleport to the settled position.
+     *
+     * @param x horizontal drop position, clamped to the valid range
+     */
+    public void spawnDrop(double x) {
+        if (gameOver) return;
+        x = Math.clamp(x, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
+        Body dropped = createFruitBody(currentTier, x, PhysicsConfig.DROP_Y);
+        world.addBody(dropped);
+        register(nextId++, dropped, currentTier);
+        advanceFruitQueue();
+        stepCount++;
+    }
+
+    /**
+     * Advances the live physics world by exactly one fixed timestep, applying any
+     * merges and updating the score and dead-line timer. Returns the merge events
+     * that occurred this tick so the renderer can spawn particle / pop feedback.
+     *
+     * <p>Pair with {@link #spawnDrop(double)} and {@link #allAtRest()} to drive a
+     * real-time game loop. {@link #dropAndSettle(double)} remains the headless,
+     * settle-in-one-call path used by training and planning.
+     */
+    public List<MergeEvent> tick() {
+        if (gameOver) return List.of();
+        world.step(1, PhysicsConfig.FIXED_DT);
+        checkDeadLine();
+        if (gameOver) return List.of();
+
+        List<MergeEvent> merges = detectAndApplyMerges();
+        if (!merges.isEmpty()) {
+            long gained = merges.stream().mapToLong(MergeEvent::scoreAwarded).sum();
+            score += gained;
+            if (score > bestScore) bestScore = score;
+        }
+        return merges;
+    }
+
+    /** True when every live fruit body has settled — i.e. ready for the next drop. */
+    public boolean allAtRest() { return isSettled(); }
+
+    /**
      * Returns a deep copy of this core for MCTS / planning forks.
      * The fork's physics steps are fully independent of the original.
      */
