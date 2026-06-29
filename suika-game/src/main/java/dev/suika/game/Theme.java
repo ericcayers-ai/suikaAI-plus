@@ -12,6 +12,9 @@ public final class Theme {
 
     private Theme() {}
 
+    /** Single source of truth for the displayed app version (keep in sync with build.gradle.kts). */
+    public static final String VERSION = "0.5.3";
+
     // --- Virtual canvas (all rendering happens in this fixed pixel space) ---
     public static final float VW   = 720f;
     public static final float VH   = 1280f;

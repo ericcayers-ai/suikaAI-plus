@@ -127,9 +127,9 @@ public final class MainMenuScreen extends ScreenAdapter {
         // Footer
         Ui.textCenter(game.batch, game.fontSmall,
                 "Click / drag to aim · ESC pauses · R restarts", CX, 250, Theme.TEXT_FAINT);
-        Ui.text(game.batch, game.fontSmall, "v0.5.1", 14, 30, Theme.TEXT_FAINT);
+        Ui.text(game.batch, game.fontSmall, "v" + Theme.VERSION, 14, 30, Theme.TEXT_FAINT);
         Ui.textRight(game.batch, game.fontSmall,
-                WatchAgents.get(game.settings.agentIndex).name() + " · " + game.settings.fpsLabel(),
+                AiTechnique.values().length + " AI techniques · " + game.settings.fpsLabel(),
                 Theme.VW - 14, 30, Theme.TEXT_FAINT);
         game.batch.end();
     }

@@ -31,7 +31,7 @@ public class SuikaApplication {
             return;
         }
 
-        System.out.println("=== Suika AI Sandbox — v0.5.2 ===");
+        System.out.println("=== Suika AI Sandbox — v" + dev.suika.game.Theme.VERSION + " ===");
         System.out.println("Running headless demo (Explorer → Quick Learner preset)\n");
 
         // --- Explorer mode: use a friendly preset ---
