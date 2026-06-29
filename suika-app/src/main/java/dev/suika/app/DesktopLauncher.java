@@ -33,7 +33,9 @@ public final class DesktopLauncher {
 
         if (captureDir != null) {
             // Match the virtual canvas aspect exactly so captures have no letterbox bars.
-            config.setWindowedMode(720, 1280);
+            // suika.capture.land=true captures in landscape (1280×720) to verify that layout.
+            if (Boolean.getBoolean("suika.capture.land")) config.setWindowedMode(1280, 720);
+            else                                          config.setWindowedMode(720, 1280);
             new Lwjgl3Application(new CaptureHarness(captureDir), config);
         } else {
             // Cap the initial window to ~88 % of screen height so it fits any display.

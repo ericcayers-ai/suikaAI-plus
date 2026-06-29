@@ -34,6 +34,20 @@ public final class PlanningRunner extends AgentRunner {
         return s.toArray(new String[0]);
     }
 
+    @Override
+    public String[] extendedStats() {
+        java.util.List<String> s = new java.util.ArrayList<>();
+        s.add("model        perfect simulator");
+        s.add("action space " + cfg.actionBins + " drop columns");
+        if (agent() instanceof MctsAgent) {
+            s.add("budget       " + cfg.maxThinkMs + " ms / move");
+            s.add("selection    UCB1 + heuristic rollouts");
+        } else {
+            s.add("policy       " + cfg.technique.kind);
+        }
+        return s.toArray(new String[0]);
+    }
+
     @Override public LiveChart chart2()      { return gameScoreChart; }
     @Override public String    chart2Label() {
         return gameScoreChart.size() == 0 ? "game scores (game 1 in progress)"

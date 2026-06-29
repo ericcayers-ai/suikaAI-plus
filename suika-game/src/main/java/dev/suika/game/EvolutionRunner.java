@@ -26,7 +26,8 @@ public final class EvolutionRunner extends AgentRunner {
     private CmaEsTrainer   cma;
     private final boolean  isCma;
 
-    private final LiveChart fitnessChart = new LiveChart(260);
+    private final LiveChart fitnessChart  = new LiveChart(260);
+    private final LiveChart meanFitChart  = new LiveChart(260);
     private final FitnessEvaluator evaluator = new FitnessEvaluator(1, 250, 32);
 
     private volatile int    generation = 0;
@@ -94,6 +95,7 @@ public final class EvolutionRunner extends AgentRunner {
                 }
                 bestSoFar = Math.max(bestSoFar, bestFit);
                 fitnessChart.add((float) bestSoFar);
+                meanFitChart.add((float) meanFit);
                 // refresh ghost agents
                 List<AgentPlugin> ta = topAgents;
                 for (int i = 0; i < GHOST_COUNT; i++) {
@@ -161,6 +163,30 @@ public final class EvolutionRunner extends AgentRunner {
         return arr;
     }
 
+    @Override public GameState[] multiStates() { return topStates(); }
+
+    @Override
+    public String[] multiLabels() {
+        return new String[]{
+            "CHAMPION  ·  " + core.getScore(),
+            "ELITE #2",
+            "ELITE #3",
+            "ELITE #4",
+        };
+    }
+
+    @Override public LiveChart chart3()      { return meanFitChart; }
+    @Override public String    chart3Label() { return "mean fitness  ·  " + Math.round(meanFit); }
+
+    @Override
+    public String[] extendedStats() {
+        return new String[]{
+            "elite views  " + Math.min(GHOST_COUNT + 1, 4) + " live",
+            "mutation rate " + String.format("%.3f", cfg.mutationSigma),
+            "best so far  " + Math.round(bestSoFar),
+        };
+    }
+
     @Override public String title()    { return cfg.technique.display; }
     @Override public String subtitle() { return "Evolution  ·  JVM  ·  gen " + generation; }
 
@@ -171,7 +197,7 @@ public final class EvolutionRunner extends AgentRunner {
             "best fitness " + Math.round(bestSoFar),
             (isCma ? "mode         separable CMA-ES" : "mean fitness " + Math.round(meanFit)),
             "population   " + (isCma ? "auto (λ)" : Math.max(8, cfg.populationSize)),
-            "eval threads " + cfg.parallelism + " (virtual pool)",
+            "eval threads " + cfg.parallelism,
             "champion sc. " + core.getScore(),
             "speed        " + cfg.speedLabel(),
         };

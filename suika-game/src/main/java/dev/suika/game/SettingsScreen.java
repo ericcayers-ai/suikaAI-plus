@@ -53,7 +53,7 @@ public final class SettingsScreen extends ScreenAdapter {
     private final List<Row> rows = new ArrayList<>();
     private final Rectangle backBtn = new Rectangle(Theme.VW / 2f - 130, 70, 260, 70);
     private volatile String installStatus = PythonSetup.isReady()
-            ? "Ready  ·  ~/.suikai/venv" : "Not installed";
+            ? "Ready  ·  venv" : "Not installed";
     private volatile boolean installing = false;
 
     private static final float ROW_H       = 54f;
@@ -100,9 +100,14 @@ public final class SettingsScreen extends ScreenAdapter {
 
         // ---- AI Environment ----
         cycle("AI ENVIRONMENT", "Python env", () -> installStatus, null, null);
-        button(null, "Auto-setup PyTorch + CUDA (downloads to ~/.suikai/venv)",
+        button(null, "Download AI GPU deps",
                 () -> PythonSetup.isReady() ? "REINSTALL" : installing ? "WORKING…" : "SETUP",
                 this::startInstall);
+    }
+
+    /** Shorten a progress line so it fits the ~250 px status cycler box. */
+    private static String fit(String msg) {
+        return msg.length() > 24 ? msg.substring(0, 23) + "…" : msg;
     }
 
     private void startInstall() {
@@ -110,12 +115,10 @@ public final class SettingsScreen extends ScreenAdapter {
         installing = true;
         installStatus = "Starting…";
         PythonSetup.installAsync(msg -> {
-            installStatus = msg.length() > 54 ? msg.substring(0, 51) + "…" : msg;
-            if (msg.startsWith("Done") || msg.startsWith("Error") || msg.startsWith("Warning")
-                    || msg.startsWith("Python not found")) {
-                installing = false;
-                installStatus = msg;
-            }
+            boolean done = msg.startsWith("Done") || msg.startsWith("Error")
+                    || msg.startsWith("Warning") || msg.startsWith("Python not found");
+            installStatus = done ? fit(msg) : fit(msg);
+            if (done) installing = false;
         });
     }
 

@@ -67,8 +67,10 @@ public class SuikaGame extends Game {
         FreeTypeFontParameter p = new FreeTypeFontParameter();
         p.size       = size;
         p.color      = Color.WHITE;
-        // Default ASCII plus the typographic glyphs the UI uses (em-dash, ellipsis, dot, arrows).
-        p.characters = FreeTypeFontGenerator.DEFAULT_CHARS + "—…·•≈→←×÷";
+        // Default ASCII plus the typographic glyphs the UI uses (em-dash, minus sign,
+        // ellipsis, dot, arrows). The minus sign (U+2212) is distinct from the ASCII
+        // hyphen and is used by the +/− cyclers.
+        p.characters = FreeTypeFontGenerator.DEFAULT_CHARS + "—−…·•≈→←×÷";
         p.genMipMaps = true;
         p.minFilter  = Texture.TextureFilter.MipMapLinearLinear;
         p.magFilter  = Texture.TextureFilter.Linear;

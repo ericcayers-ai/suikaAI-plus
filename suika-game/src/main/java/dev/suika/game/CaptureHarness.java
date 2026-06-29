@@ -20,6 +20,8 @@ public final class CaptureHarness implements ApplicationListener {
     private SuikaGame game;
     private float t = 0f;
     private int stage = 0;
+    private AiPlaygroundScreen playground;
+    private ControlCenterScreen cc;
 
     public CaptureHarness(String outDir) { this.outDir = outDir; }
 
@@ -37,24 +39,30 @@ public final class CaptureHarness implements ApplicationListener {
 
         switch (stage) {
             case 0 -> { if (t > 0.6f)  { shoot("01-menu.png"); game.setScreen(new SettingsScreen(game, MainMenuScreen::new)); stage++; } }
-            case 1 -> { if (t > 1.3f)  { shoot("02-settings.png"); game.setScreen(new AiPlaygroundScreen(game)); stage++; } }
-            case 2 -> { if (t > 2.0f)  { shoot("03-playground.png"); game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN)); stage++; } }
-            case 3 -> { if (t > 2.6f)  { shoot("04-human.png"); launchControlCenter(AiTechnique.GREEDY); stage++; } }
-            case 4 -> { if (t > 12.0f) { shoot("05-greedy-early.png"); stage++; } }
-            case 5 -> { if (t > 24.0f) { shoot("06-greedy-late.png"); launchControlCenter(AiTechnique.MCTS); stage++; } }
-            case 6 -> { if (t > 36.0f) { shoot("07-mcts-cc.png"); launchControlCenter(AiTechnique.NEUROEVO); stage++; } }
-            case 7 -> { if (t > 58.0f) { shoot("08-neuroevo-cc.png"); launchControlCenter(AiTechnique.PPO); stage++; } }
-            case 8 -> { if (t > 62.0f) { shoot("09-ppo-cc.png"); launchControlCenter(AiTechnique.BC); stage++; } }
-            case 9 -> { if (t > 63.0f) { shoot("10-bc-modal.png"); stage++; Gdx.app.exit(); } }
+            case 1 -> { if (t > 1.3f)  { shoot("02-settings.png"); openPlayground(); stage++; } }
+            case 2 -> { if (t > 1.9f)  { shoot("03-playground.png"); playground.openInfocardForCapture(AiTechnique.PPO); stage++; } }
+            case 3 -> { if (t > 2.3f)  { shoot("04-infocard-modal.png"); launchControlCenter(AiTechnique.MCTS, false); stage++; } }
+            case 4 -> { if (t > 6.0f)  { shoot("05-mcts-cc.png"); cc.openHotswapForCapture(); stage++; } }
+            case 5 -> { if (t > 6.5f)  { shoot("06-hotswap-modal.png"); launchControlCenter(AiTechnique.NEUROEVO, false); stage++; } }
+            case 6 -> { if (t > 16.0f) { shoot("07-neuroevo-4grid.png"); launchControlCenter(AiTechnique.SELF_PLAY, false); stage++; } }
+            case 7 -> { if (t > 22.0f) { shoot("08-selfplay-2view.png"); launchControlCenter(AiTechnique.NEUROEVO, true); stage++; } }
+            case 8 -> { if (t > 30.0f) { shoot("09-neuroevo-ghost.png"); stage++; Gdx.app.exit(); } }
             default -> { }
         }
     }
 
-    private void launchControlCenter(AiTechnique tech) {
+    private void openPlayground() {
+        playground = new AiPlaygroundScreen(game);
+        game.setScreen(playground);
+    }
+
+    private void launchControlCenter(AiTechnique tech, boolean ghost) {
         PlaygroundConfig c = new PlaygroundConfig();
         c.selectDefaultsFor(tech);
+        c.ghostView = ghost;
         c.actionBins = game.settings.actionBins();
-        game.setScreen(new ControlCenterScreen(game, c));
+        cc = new ControlCenterScreen(game, c);
+        game.setScreen(cc);
     }
 
     private void shoot(String name) {

@@ -52,6 +52,9 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     // Infocard modal (null = closed)
     private AiTechnique infocardTech = null;
 
+    /** Test/QA hook: open the info modal for a technique (used by the capture harness). */
+    void openInfocardForCapture(AiTechnique t) { this.infocardTech = t; }
+
     private static final int[]    ROLLOUTS = {40, 80, 150, 300};
     private static final int[]    POP      = {16, 24, 40, 64, 128, 256, 512, 1000};
     private static final int[]    RETURNS  = {1000, 2000, 4000};
@@ -258,14 +261,15 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         Ui.button(s, backBtn,   Theme.PANEL_EDGE, backBtn.contains(mx, my),   true);
         Ui.button(s, launchBtn, Theme.ACCENT_2,   launchBtn.contains(mx, my), true);
 
-        // Infocard modal overlay
+        // Infocard modal overlay — drawn opaque so the busy list behind it is fully hidden.
         if (infocardTech != null) {
-            s.setColor(0f, 0f, 0f, 0.88f);
+            s.setColor(0.03f, 0.04f, 0.07f, 0.94f);     // near-opaque dim over everything
             s.rect(0, 0, Theme.VW, Theme.VH);
             float mW = 580f, mH = 400f;
             float mX = (Theme.VW - mW) / 2f, mY = (Theme.VH - mH) / 2f;
-            s.setColor(Theme.PANEL_DEEP);
+            s.setColor(0.08f, 0.09f, 0.13f, 1f);        // solid card backing (no bleed-through)
             Ui.fillRoundRect(s, mX, mY, mW, mH, 18);
+            Ui.panel(s, mX, mY, mW, mH, 18, Theme.PANEL, Theme.PANEL_EDGE);
             s.setColor(familyColor(infocardTech));
             Ui.fillRoundRect(s, mX, mY + mH - 4f, mW, 4f, 3f);
             drawInfoBarsShapes(s, infocardTech, mX, mY, mW);
@@ -275,32 +279,36 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
         // ---- Text pass ----
         game.batch.begin();
-        Ui.textCenter(game.batch, game.fontBig, "AI PLAYGROUND",
-                Theme.VW / 2f, Theme.VH - 86, Theme.TEXT);
-        Ui.textCenter(game.batch, game.fontSmall,
-                "Capability matrix · " + techs.length + " techniques · scroll to browse",
-                Theme.VW / 2f, Theme.VH - 126, Theme.TEXT_DIM);
+        // Background text (header, cards, drawer) is suppressed while the modal is open,
+        // so nothing bleeds through the dimmed overlay.
+        if (infocardTech == null) {
+            Ui.textCenter(game.batch, game.fontBig, "AI PLAYGROUND",
+                    Theme.VW / 2f, Theme.VH - 86, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall,
+                    "Capability matrix · " + techs.length + " techniques · scroll to browse",
+                    Theme.VW / 2f, Theme.VH - 126, Theme.TEXT_DIM);
 
-        // Card labels — only when card centre is above the drawer
-        for (int i = 0; i < techs.length; i++) {
-            float top = cardTop(i);
-            float cy  = top - CARD_H / 2f;
-            if (cy <= LIST_BOT || top - CARD_H > LIST_TOP) continue;
-            AiTechnique t = techs[i];
-            Ui.text(game.batch, game.font,      t.display,
-                    CARD_X + 46, cy + 12, Theme.TEXT);
-            Ui.text(game.batch, game.fontSmall, t.category + "  ·  " + t.kind,
-                    CARD_X + 46, cy - 12, Theme.TEXT_DIM);
-            // env badge left of the "i" circle
-            Ui.textRight(game.batch, game.fontSmall, t.envBadge(),
-                    INFO_CX - INFO_R - 10f, cy + 6, familyColor(t));
-            // "i" glyph
-            boolean iHov = hitInfoIcon(i, mx, my);
-            Ui.textCenter(game.batch, game.fontSmall, "i",
-                    INFO_CX, cy + 5, iHov ? Theme.TEXT : Theme.TEXT_DIM);
+            // Card labels — only when card centre is above the drawer
+            for (int i = 0; i < techs.length; i++) {
+                float top = cardTop(i);
+                float cy  = top - CARD_H / 2f;
+                if (cy <= LIST_BOT || top - CARD_H > LIST_TOP) continue;
+                AiTechnique t = techs[i];
+                Ui.text(game.batch, game.font,      t.display,
+                        CARD_X + 46, cy + 12, Theme.TEXT);
+                Ui.text(game.batch, game.fontSmall, t.category + "  ·  " + t.kind,
+                        CARD_X + 46, cy - 12, Theme.TEXT_DIM);
+                // env badge left of the "i" circle
+                Ui.textRight(game.batch, game.fontSmall, t.envBadge(),
+                        INFO_CX - INFO_R - 10f, cy + 6, familyColor(t));
+                // "i" glyph
+                boolean iHov = hitInfoIcon(i, mx, my);
+                Ui.textCenter(game.batch, game.fontSmall, "i",
+                        INFO_CX, cy + 5, iHov ? Theme.TEXT : Theme.TEXT_DIM);
+            }
+
+            drawDrawerText();
         }
-
-        drawDrawerText();
 
         // Infocard modal text
         if (infocardTech != null) {
