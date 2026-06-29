@@ -61,6 +61,7 @@ public final class SuikaScreen extends ScreenAdapter {
     private float  shake = 0f;
     private float  gameOverTimer = -1f;
     private boolean paused = false;
+    private long   displayScore = 0;  // smoothly lerps toward core.getScore()
 
     // --- AI watch ---
     private final AgentPlugin aiAgent;
@@ -90,6 +91,7 @@ public final class SuikaScreen extends ScreenAdapter {
         this.seed = cfg.resolveSeed();
         this.core = new GameCore(seed);
         game.particles.clear();
+        game.scorePops.clear();
 
         if (mode == Mode.AI_WATCH) {
             aiSpec  = ActionSpec.discrete(cfg.actionBins());
@@ -187,6 +189,7 @@ public final class SuikaScreen extends ScreenAdapter {
         game.batch.begin();
         board.drawLabels(game.batch, game.fontSmall, gs, cfg);
         drawHudText(gs);
+        game.scorePops.draw(game.batch, game.fontMed);
         game.batch.end();
 
         if (core.isGameOver())  drawGameOverFade(delta);
@@ -195,6 +198,16 @@ public final class SuikaScreen extends ScreenAdapter {
 
     private void update(float delta) {
         if (dropCooldown > 0f) dropCooldown -= delta;
+
+        // smooth score display — count up toward the real score
+        long actual = core.getScore();
+        long diff = actual - displayScore;
+        if (diff > 0) {
+            displayScore += Math.max(1L, (long) (diff * Math.min(1.0, delta * 10.0)));
+            if (displayScore > actual) displayScore = actual;
+        }
+
+        game.scorePops.update(delta);
 
         // fixed-step physics
         accumulator += delta;
@@ -217,11 +230,15 @@ public final class SuikaScreen extends ScreenAdapter {
     }
 
     private void onMerge(MergeEvent m) {
-        if (m.resultTier() != null && cfg.particles) {
-            game.particles.burst(BoardRenderer.vpx(m.spawnX()), BoardRenderer.vpy(m.spawnY()),
-                    FruitColors.of(m.resultTier()), 10 + m.resultTier().tier * 2);
+        if (m.resultTier() != null) {
+            float vpx = BoardRenderer.vpx(m.spawnX());
+            float vpy = BoardRenderer.vpy(m.spawnY());
+            if (cfg.particles) {
+                game.particles.burst(vpx, vpy, FruitColors.of(m.resultTier()), 10 + m.resultTier().tier * 2);
+            }
+            game.scorePops.add(vpx, vpy, m.scoreAwarded());
+            if (m.resultTier().tier >= 6) shake = 7f;
         }
-        if (m.resultTier() != null && m.resultTier().tier >= 6) shake = 7f;
     }
 
     private void updateAi(float delta) {
@@ -289,7 +306,7 @@ public final class SuikaScreen extends ScreenAdapter {
 
     private void drawHudText(GameState gs) {
         Ui.text(game.batch, game.fontSmall, "SCORE", 60, Theme.VH - 64, Theme.TEXT_DIM);
-        Ui.text(game.batch, game.fontBig, Long.toString(gs.score()), 58, Theme.VH - 86, Theme.TEXT);
+        Ui.text(game.batch, game.fontBig, Long.toString(displayScore), 58, Theme.VH - 86, Theme.TEXT);
         Ui.textRight(game.batch, game.fontSmall, "BEST  " + gs.bestScore(), 320, Theme.VH - 150, Theme.TEXT_DIM);
 
         Ui.textCenter(game.batch, game.fontSmall, "NEXT", Theme.VW - 120, Theme.VH - 64, Theme.TEXT_DIM);

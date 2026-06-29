@@ -38,6 +38,7 @@ public abstract class LiveBoardRunner implements TechniqueRunner {
         drops = 0;
         scoreChart.clear();
         game.particles.clear();
+        game.scorePops.clear();
         onNewGame();
     }
 
@@ -72,9 +73,13 @@ public abstract class LiveBoardRunner implements TechniqueRunner {
     }
 
     protected void onMerge(MergeEvent m) {
-        if (m.resultTier() != null && game.settings.particles) {
-            game.particles.burst(BoardRenderer.vpx(m.spawnX()), BoardRenderer.vpy(m.spawnY()),
-                    FruitColors.of(m.resultTier()), 10 + m.resultTier().tier * 2);
+        if (m.resultTier() != null) {
+            float vpx = BoardRenderer.vpx(m.spawnX());
+            float vpy = BoardRenderer.vpy(m.spawnY());
+            if (game.settings.particles) {
+                game.particles.burst(vpx, vpy, FruitColors.of(m.resultTier()), 10 + m.resultTier().tier * 2);
+            }
+            game.scorePops.add(vpx, vpy, m.scoreAwarded());
         }
     }
 

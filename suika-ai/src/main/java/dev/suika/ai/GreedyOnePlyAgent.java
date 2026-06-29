@@ -16,10 +16,16 @@ public final class GreedyOnePlyAgent implements AgentPlugin {
 
     private final int actionBins;
 
+    /** Normalised per-bin scores (0–100) from the most recent selectAction call. */
+    private volatile int[] lastBinScores = new int[0];
+
     /** No-arg constructor for {@link java.util.ServiceLoader} discovery. */
     public GreedyOnePlyAgent() { this(32); }
 
     public GreedyOnePlyAgent(int actionBins) { this.actionBins = actionBins; }
+
+    /** Returns a copy of the per-bin evaluation scores normalised to 0–100. */
+    public int[] lastScores() { return lastBinScores; }
 
     @Override public String id()          { return "greedy-1ply"; }
     @Override public String displayName() { return "Greedy One-Ply"; }
@@ -49,17 +55,31 @@ public final class GreedyOnePlyAgent implements AgentPlugin {
     /** Exact path: snapshot the live core and try every drop for real. */
     @Override
     public Object selectAction(GameCore liveCore, ActionSpec spec) {
-        long   baseScore  = liveCore.getScore();
-        int    bestAction = 0;
-        double bestValue  = Double.NEGATIVE_INFINITY;
+        long     baseScore = liveCore.getScore();
+        double[] scores    = new double[actionBins];
+        int      bestAction = 0;
+        double   bestValue  = Double.NEGATIVE_INFINITY;
 
         for (int a = 0; a < actionBins; a++) {
             GameCore fork = liveCore.snapshot();
             StepResult r  = fork.dropAndSettle(binToX(a));
-            double value  = r.observation().score() - baseScore;
-            if (r.terminated()) value -= 10.0;
-            if (value > bestValue) { bestValue = value; bestAction = a; }
+            scores[a] = r.observation().score() - baseScore;
+            if (r.terminated()) scores[a] -= 10.0;
+            if (scores[a] > bestValue) { bestValue = scores[a]; bestAction = a; }
         }
+
+        // normalise to 0–100 for the column-bar overlay display
+        double lo = Double.MAX_VALUE, hi = -Double.MAX_VALUE;
+        for (double v : scores) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+        int[] norm = new int[actionBins];
+        double range = hi - lo;
+        if (range > 1e-9) {
+            for (int i = 0; i < actionBins; i++) norm[i] = (int) (100.0 * (scores[i] - lo) / range);
+        } else {
+            java.util.Arrays.fill(norm, 50);
+        }
+        lastBinScores = norm;
+
         return spec.discrete() ? bestAction : binToX(bestAction);
     }
 

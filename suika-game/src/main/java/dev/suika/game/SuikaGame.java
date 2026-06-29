@@ -37,6 +37,9 @@ public class SuikaGame extends Game {
     /** Shared merge-sparkle particle system. */
     public final Particles particles = new Particles();
 
+    /** Floating "+N" score labels spawned on each merge. */
+    public final ScorePopManager scorePops = new ScorePopManager();
+
     @Override
     public void create() {
         batch  = new SpriteBatch();

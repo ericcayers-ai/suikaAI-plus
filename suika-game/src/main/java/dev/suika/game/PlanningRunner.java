@@ -22,6 +22,7 @@ public final class PlanningRunner extends AgentRunner {
         java.util.List<String> s = new java.util.ArrayList<>();
         s.add("score        " + core.getScore());
         s.add("best         " + bestScore());
+        s.add("games        " + gamesPlayed);
         s.add("drops        " + drops);
         s.add("think        " + thinkMs() + " ms");
         s.add("columns      " + cfg.actionBins);
@@ -33,5 +34,9 @@ public final class PlanningRunner extends AgentRunner {
         return s.toArray(new String[0]);
     }
 
-    @Override public String chart2Label() { return null; }
+    @Override public LiveChart chart2()      { return gameScoreChart; }
+    @Override public String    chart2Label() {
+        return gameScoreChart.size() == 0 ? "game scores (game 1 in progress)"
+                : "game scores  ·  last " + Math.round(gameScoreChart.latest());
+    }
 }

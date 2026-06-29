@@ -12,7 +12,7 @@ subprojects {
     apply(plugin = "java")
 
     group = "dev.suika"
-    version = "0.4.1"
+    version = "0.4.2"
 
     java {
         toolchain {

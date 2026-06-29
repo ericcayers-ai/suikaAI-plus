@@ -105,6 +105,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
         delta = Math.min(delta, 0.05f);
         if (runner.acceptsHumanInput()) runner.setHover(hoverGameX);
         runner.update(delta);
+        game.scorePops.update(delta);
 
         Gdx.gl.glClearColor(0.05f, 0.06f, 0.10f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
@@ -133,10 +134,11 @@ public final class ControlCenterScreen extends ScreenAdapter {
         s.begin(ShapeRenderer.ShapeType.Filled);
         drawPanel(s);
         s.end();
-        // 4) panel + control text
+        // 4) panel + control text + score pops
         game.batch.begin();
         drawPanelText(gs);
         drawControlBarText();
+        game.scorePops.draw(game.batch, game.fontMed);
         game.batch.end();
 
         if (runner.modalActive()) drawModal();

@@ -2,6 +2,7 @@ package dev.suika.game;
 
 import dev.suika.ai.ActionSpec;
 import dev.suika.ai.AgentPlugin;
+import dev.suika.ai.GreedyOnePlyAgent;
 import dev.suika.ai.MctsAgent;
 import dev.suika.core.PhysicsConfig;
 
@@ -29,6 +30,10 @@ public abstract class AgentRunner extends LiveBoardRunner {
     private float markerX = Float.NaN;
     private float gameOverTimer = -1f;
     protected long bestScore = 0;
+
+    /** Per-game final scores for the game-score-history chart (chart2 in PlanningRunner). */
+    protected final LiveChart gameScoreChart = new LiveChart(200);
+    protected int gamesPlayed = 0;
 
     protected AgentRunner(SuikaGame game, PlaygroundConfig cfg) {
         super(game, cfg);
@@ -87,6 +92,13 @@ public abstract class AgentRunner extends LiveBoardRunner {
     }
 
     @Override
+    protected void newGame() {
+        if (core != null && core.getScore() > 0) gameScoreChart.add(core.getScore());
+        gamesPlayed++;
+        super.newGame();
+    }
+
+    @Override
     protected void onNewGame() {
         phase = Phase.WAIT;
         moveTimer = baseDelay();
@@ -100,6 +112,7 @@ public abstract class AgentRunner extends LiveBoardRunner {
     public int[] columnBars() {
         AgentPlugin a = agent;
         if (a instanceof MctsAgent m && m.lastVisits().length > 0) return m.lastVisits();
+        if (a instanceof GreedyOnePlyAgent g && g.lastScores().length > 0) return g.lastScores();
         return null;
     }
 
