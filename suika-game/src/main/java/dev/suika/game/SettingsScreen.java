@@ -52,7 +52,9 @@ public final class SettingsScreen extends ScreenAdapter {
 
     private final List<Row> rows = new ArrayList<>();
     private final Rectangle backBtn = new Rectangle(Theme.VW / 2f - 130, 70, 260, 70);
-    private volatile String pythonStatus = "Checking…";
+    private volatile String installStatus = PythonSetup.isReady()
+            ? "Ready  ·  ~/.suikai/venv" : "Not installed";
+    private volatile boolean installing = false;
 
     private static final float ROW_H       = 54f;
     private static final float ROW_GAP      = 6f;
@@ -97,25 +99,24 @@ public final class SettingsScreen extends ScreenAdapter {
         // AI Watch configuration lives inside the AI game itself (side toggle per technique).
 
         // ---- AI Environment ----
-        cycle("AI ENVIRONMENT", "Python", () -> pythonStatus, null, null);
-        button(null, "Copy: pip install torch torchvision", () ->
-                Gdx.app.getClipboard().setContents(
-                        "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"));
+        cycle("AI ENVIRONMENT", "Python env", () -> installStatus, null, null);
+        button(null, "Auto-setup PyTorch + CUDA (downloads to ~/.suikai/venv)",
+                () -> PythonSetup.isReady() ? "REINSTALL" : installing ? "WORKING…" : "SETUP",
+                this::startInstall);
     }
 
-    private void detectPython() {
-        Thread t = new Thread(() -> {
-            for (String cmd : new String[]{"python", "python3"}) {
-                try {
-                    Process p = new ProcessBuilder(cmd, "--version").redirectErrorStream(true).start();
-                    String out = new String(p.getInputStream().readAllBytes()).trim();
-                    if (p.waitFor() == 0 && !out.isEmpty()) { pythonStatus = "Found  ·  " + out; return; }
-                } catch (Exception ignored) {}
+    private void startInstall() {
+        if (installing) return;
+        installing = true;
+        installStatus = "Starting…";
+        PythonSetup.installAsync(msg -> {
+            installStatus = msg.length() > 54 ? msg.substring(0, 51) + "…" : msg;
+            if (msg.startsWith("Done") || msg.startsWith("Error") || msg.startsWith("Warning")
+                    || msg.startsWith("Python not found")) {
+                installing = false;
+                installStatus = msg;
             }
-            pythonStatus = "Not found — see pip button";
-        }, "python-detect");
-        t.setDaemon(true);
-        t.start();
+        });
     }
 
     // --- row builders ---
@@ -131,14 +132,13 @@ public final class SettingsScreen extends ScreenAdapter {
     private Row slider(String section, String label, DoubleSupplier frac, DoubleConsumer set) {
         Row r = add(section, label, Kind.SLIDER); r.frac = frac; r.setFrac = set; return r;
     }
-    private Row button(String section, String label, Runnable act) {
-        Row r = add(section, label, Kind.BUTTON); r.next = act; r.value = () -> label; return r;
+    private Row button(String section, String label, Supplier<String> btnText, Runnable act) {
+        Row r = add(section, label, Kind.BUTTON); r.next = act; r.value = btnText; return r;
     }
     private static int wrap(int i, int n) { return Math.floorMod(i, n); }
 
     @Override
     public void show() {
-        detectPython();
         Gdx.input.setInputProcessor(new InputAdapter() {
             @Override public boolean touchDown(int sx, int sy, int p, int b) {
                 camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
@@ -251,7 +251,7 @@ public final class SettingsScreen extends ScreenAdapter {
                 Ui.textRight(game.batch, game.fontSmall, r.value.get(),
                         r.area.x + r.area.width - 80f, labelY - 2f, Theme.TEXT_DIM);
             } else if (r.kind == Kind.BUTTON) {
-                Ui.textCenter(game.batch, game.fontSmall, "COPY",
+                Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
                         r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);
             }
             y = rowBot - ROW_GAP;

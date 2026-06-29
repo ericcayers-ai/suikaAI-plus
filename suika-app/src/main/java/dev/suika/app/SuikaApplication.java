@@ -24,13 +24,14 @@ import java.util.Map;
 public class SuikaApplication {
 
     public static void main(String[] args) throws Exception {
+        minimizeConsole();
         boolean headless = args.length > 0 && "--headless".equals(args[0]);
         if (!headless) {
             DesktopLauncher.launch();
             return;
         }
 
-        System.out.println("=== Suika AI Sandbox — v0.5.1 ===");
+        System.out.println("=== Suika AI Sandbox — v0.5.2 ===");
         System.out.println("Running headless demo (Explorer → Quick Learner preset)\n");
 
         // --- Explorer mode: use a friendly preset ---
@@ -89,5 +90,23 @@ public class SuikaApplication {
 
         System.out.println("\nDone. Run `./gradlew test` to execute the full test suite.");
         System.out.println("Run `./gradlew :suika-app:run` to launch the GUI game.");
+    }
+
+    /**
+     * Minimizes the console window that Windows attaches when the app is packaged
+     * with {@code --win-console}. The game window is unaffected.
+     */
+    private static void minimizeConsole() {
+        if (!System.getProperty("os.name", "").startsWith("Windows")) return;
+        try {
+            new ProcessBuilder(
+                "powershell.exe", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
+                "Add-Type -Name WC -Namespace SC -MemberDefinition " +
+                "'[DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h,int n);" +
+                "[DllImport(\"kernel32.dll\")] public static extern IntPtr GetConsoleWindow();';" +
+                "[SC.WC]::ShowWindow([SC.WC]::GetConsoleWindow(),6)"
+            ).start();
+            Thread.sleep(200);
+        } catch (Exception ignored) {}
     }
 }
