@@ -36,14 +36,23 @@ public final class CaptureHarness implements ApplicationListener {
         game.render();
 
         switch (stage) {
-            case 0 -> { if (t > 0.6f) { shoot("01-menu.png"); game.setScreen(new SettingsScreen(game, MainMenuScreen::new)); stage++; } }
-            case 1 -> { if (t > 1.3f) { shoot("02-settings.png"); game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN)); stage++; } }
-            case 2 -> { if (t > 2.0f) { shoot("03-human-empty.png"); game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.AI_WATCH)); stage++; } }
-            case 3 -> { if (t > 5.0f) { shoot("04-ai-early.png"); stage++; } }
-            case 4 -> { if (t > 10.0f) { shoot("05-ai-mid.png"); stage++; } }
-            case 5 -> { if (t > 16.0f) { shoot("06-ai-late.png"); stage++; Gdx.app.exit(); } }
+            case 0 -> { if (t > 0.6f)  { shoot("01-menu.png"); game.setScreen(new SettingsScreen(game, MainMenuScreen::new)); stage++; } }
+            case 1 -> { if (t > 1.3f)  { shoot("02-settings.png"); game.setScreen(new AiPlaygroundScreen(game)); stage++; } }
+            case 2 -> { if (t > 2.0f)  { shoot("03-playground.png"); game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN)); stage++; } }
+            case 3 -> { if (t > 2.6f)  { shoot("04-human.png"); launchControlCenter(AiTechnique.MCTS); stage++; } }
+            case 4 -> { if (t > 7.0f)  { shoot("05-mcts-cc.png"); launchControlCenter(AiTechnique.NEUROEVO); stage++; } }
+            case 5 -> { if (t > 14.0f) { shoot("06-neuroevo-cc.png"); launchControlCenter(AiTechnique.PPO); stage++; } }
+            case 6 -> { if (t > 18.0f) { shoot("07-ppo-cc.png"); launchControlCenter(AiTechnique.BC); stage++; } }
+            case 7 -> { if (t > 19.0f) { shoot("08-bc-modal.png"); stage++; Gdx.app.exit(); } }
             default -> { }
         }
+    }
+
+    private void launchControlCenter(AiTechnique tech) {
+        PlaygroundConfig c = new PlaygroundConfig();
+        c.selectDefaultsFor(tech);
+        c.actionBins = game.settings.actionBins();
+        game.setScreen(new ControlCenterScreen(game, c));
     }
 
     private void shoot(String name) {

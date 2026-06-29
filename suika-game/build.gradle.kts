@@ -3,6 +3,7 @@ val libgdxVersion: String by project
 dependencies {
     implementation(project(":suika-core"))
     implementation(project(":suika-assets"))
+    implementation(project(":suika-env"))
     implementation(project(":suika-ai"))
     implementation("com.badlogicgames.gdx:gdx:${libgdxVersion}")
     implementation("com.badlogicgames.gdx:gdx-backend-lwjgl3:${libgdxVersion}")

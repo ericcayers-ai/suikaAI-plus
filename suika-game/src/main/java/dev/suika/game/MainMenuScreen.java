@@ -59,7 +59,7 @@ public final class MainMenuScreen extends ScreenAdapter {
                 if (playBtn.contains(touch.x, touch.y))
                     game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN));
                 else if (watchBtn.contains(touch.x, touch.y))
-                    game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.AI_WATCH));
+                    game.setScreen(new AiPlaygroundScreen(game));
                 else if (settingsBtn.contains(touch.x, touch.y))
                     game.setScreen(new SettingsScreen(game, MainMenuScreen::new));
                 else if (quitBtn.contains(touch.x, touch.y))
@@ -127,7 +127,7 @@ public final class MainMenuScreen extends ScreenAdapter {
         // Footer
         Ui.textCenter(game.batch, game.fontSmall,
                 "Click / drag to aim · ESC pauses · R restarts", CX, 250, Theme.TEXT_FAINT);
-        Ui.text(game.batch, game.fontSmall, "v0.3.0", 14, 30, Theme.TEXT_FAINT);
+        Ui.text(game.batch, game.fontSmall, "v0.4.0", 14, 30, Theme.TEXT_FAINT);
         Ui.textRight(game.batch, game.fontSmall,
                 WatchAgents.get(game.settings.agentIndex).name() + " · " + game.settings.fpsLabel(),
                 Theme.VW - 14, 30, Theme.TEXT_FAINT);

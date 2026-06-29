@@ -8,14 +8,14 @@ A research-grade platform for training, benchmarking, and shipping AI agents tha
 
 ## Quick Start — Play or Watch AI
 
-**Download the latest release** from the [Releases page](https://github.com/ericcayers-ai/suikaAI-plus/releases/latest) and extract `suika-app-0.2.0.zip`:
+**Download the latest release** from the [Releases page](https://github.com/ericcayers-ai/suikaAI-plus/releases/latest) and extract `suika-app-0.4.0.zip`:
 
 ```bash
 # Linux / macOS
-cd suika-app-0.2.0/bin && ./suika-app
+cd suika-app-0.4.0/bin && ./suika-app
 
 # Windows
-cd suika-app-0.2.0\bin && suika-app.bat
+cd suika-app-0.4.0\bin && suika-app.bat
 ```
 
 **Java 21+ must be on your `PATH`.** The ZIP bundles all JVM dependencies — no Python or GPU required for the game.
@@ -31,12 +31,37 @@ cd suika-app-0.2.0\bin && suika-app.bat
 
 | Screen | What you see |
 |---|---|
-| **Main Menu** | SUIKA AI SANDBOX title, three buttons: **PLAY** / **AI WATCH** / **QUIT** |
-| **Game (Human)** | Drop fruits by clicking; HUD shows score, best score, next-fruit preview, controls |
-| **Game (AI Watch)** | MCTS agent drops every 0.85 s; you watch in real time |
-| **Game Over** | Final score, **PLAY AGAIN** restarts the same mode, **MAIN MENU** returns |
+| **Main Menu** | Title + **PLAY** / **WATCH AI** / **SETTINGS** / **QUIT**, ambient backdrop |
+| **Settings** | Live graphics (FPS 30–240/unlimited, V-Sync, shading, particles, guide, labels, shake), simulation (drop columns, seed), and AI-watch knobs |
+| **Game (Human)** | Real-time physics — aim with the mouse, click to drop, watch fruit fall and settle. HUD with score, best, next-fruit preview |
+| **AI Playground** | The full capability-matrix browser (21 techniques); pick one, configure it, **LAUNCH** |
+| **Control Center** | Per-technique diagnostics — live board, score/fitness/loss charts, "see it think" bars, runtime controls (pause, speed, restart) |
+| **Game Over** | Final score, highest fruit, fruit-on-board, seed; **PLAY AGAIN** / **MAIN MENU** |
 
-All rendering uses `ShapeRenderer` circles — tier numbers are labelled on each fruit. No external art files.
+Crisp anti-aliased text (bundled Apache-2.0 DroidSans via FreeType), glossy depth-shaded
+fruit, rounded glass container, merge particles — all procedural, **no external art files**.
+
+### AI Playground & Control Center
+
+Pressing **WATCH AI** opens the **AI Playground** — a self-contained browser of the
+entire [capability matrix](#ai-algorithms-suika-ai--100-jvm-native-no-python-required)
+(every technique, JVM and JVM+Python). Select a technique, tune its knobs
+(**speed**, **parallelism**, and a family-specific hyper-parameter), and **LAUNCH** its
+specialised control center:
+
+- **Planning** (Random, Heuristic, Greedy, MCTS, AlphaZero) — plays live with move-latency
+  and rollout diagnostics plus an MCTS visit-count "thinking" overlay on the well.
+- **Evolution** (Neuroevolution GA, CMA-ES, PBT) — trains generation-by-generation on a
+  background thread, hot-swaps each champion into the live board, and streams the
+  best/mean-fitness curve.
+- **Imitation** (Behavioral Cloning, DAgger) — a **"Train the AI"** card appears first; the
+  AI watches while you play one full game capturing every drop, then trains live as you
+  keep playing, charting loss and action-match accuracy and showing its predicted drop.
+- **Python-backed** (PPO, DQN, SAC, Diffusion, Flow, Decision Transformer, Offline RL,
+  GAIL, MuZero, Dreamer) — probes for a Python interpreter, shows the exact training
+  command and the ONNX deploy path, and runs a JVM-native surrogate live so the board and
+  charts are always populated. Train in Python → export ONNX → load with `OnnxPolicyRunner`
+  for in-game inference with no Python at runtime.
 
 ---
 

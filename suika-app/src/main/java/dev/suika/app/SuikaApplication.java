@@ -30,7 +30,7 @@ public class SuikaApplication {
             return;
         }
 
-        System.out.println("=== Suika AI Sandbox — v0.3.0 ===");
+        System.out.println("=== Suika AI Sandbox — v0.4.0 ===");
         System.out.println("Running headless demo (Explorer → Quick Learner preset)\n");
 
         // --- Explorer mode: use a friendly preset ---
