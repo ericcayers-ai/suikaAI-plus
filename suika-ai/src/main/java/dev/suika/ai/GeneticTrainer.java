@@ -48,14 +48,30 @@ public final class GeneticTrainer implements TrainerPlugin, AutoCloseable {
 
     public GeneticTrainer(int populationSize, int eliteCount, double mutationSigma,
                           int episodesPerEval, long seed) {
+        this(populationSize, eliteCount, mutationSigma, episodesPerEval, seed, 0);
+    }
+
+    /**
+     * @param threads worker threads for the evaluation pool. {@code 0} = auto (all cores).
+     *                A <em>bounded</em> pool is used so large populations (≤1000) evaluate
+     *                in capped-concurrency waves instead of spawning one live simulation per
+     *                genome at once — which previously exhausted the heap (OOM).
+     */
+    public GeneticTrainer(int populationSize, int eliteCount, double mutationSigma,
+                          int episodesPerEval, long seed, int threads) {
         this.populationSize  = populationSize;
         this.eliteCount      = eliteCount;
         this.mutationSigma   = mutationSigma;
-        this.episodesPerEval = episodesPerEval;
+        this.episodesPerEval = Math.max(1, episodesPerEval);
         this.tournamentSize  = Math.max(2, populationSize / 10);
         this.rng             = new Random(seed);
-        this.evaluator       = new FitnessEvaluator(episodesPerEval, 300, OUTPUT_BINS);
-        this.pool            = Executors.newVirtualThreadPerTaskExecutor();
+        this.evaluator       = new FitnessEvaluator(this.episodesPerEval, 300, OUTPUT_BINS);
+        int workers          = threads > 0 ? threads : Math.max(1, Runtime.getRuntime().availableProcessors());
+        this.pool            = Executors.newFixedThreadPool(workers, r -> {
+            Thread t = new Thread(r, "ga-eval");
+            t.setDaemon(true);
+            return t;
+        });
         initPopulation();
     }
 
@@ -82,18 +98,28 @@ public final class GeneticTrainer implements TrainerPlugin, AutoCloseable {
     }
 
     private void evolveOneGeneration() {
-        // 1. Evaluate in parallel
-        List<Future<Double>> futures = new ArrayList<>(populationSize);
+        // 1. Evaluate in parallel. Every (genome, episode) pair is its own task, so all
+        //    sims for the generation run simultaneously — bounded by the pool's thread
+        //    count rather than spawning one live simulation per genome at once.
+        long[][] scores = new long[populationSize][episodesPerEval];
+        List<Future<?>> futures = new ArrayList<>(populationSize * episodesPerEval);
         for (int i = 0; i < populationSize; i++) {
             final int idx = i;
-            futures.add(pool.submit(() -> {
-                NeuralAgent agent = buildAgent(population[idx]);
-                return evaluator.evaluate(agent, (long) generation * populationSize + idx);
-            }));
+            for (int ep = 0; ep < episodesPerEval; ep++) {
+                final int e = ep;
+                final long seed = (long) generation * populationSize * episodesPerEval
+                        + (long) idx * episodesPerEval + e;
+                futures.add(pool.submit(() ->
+                        scores[idx][e] = evaluator.runSingleEpisode(buildAgent(population[idx]), seed)));
+            }
+        }
+        for (Future<?> f : futures) {
+            try { f.get(); }
+            catch (Exception e) { throw new RuntimeException(e); }
         }
         for (int i = 0; i < populationSize; i++) {
-            try { fitness[i] = futures.get(i).get(); }
-            catch (Exception e) { throw new RuntimeException(e); }
+            long sum = 0; for (long v : scores[i]) sum += v;
+            fitness[i] = (double) sum / episodesPerEval;
         }
 
         // 2. Sort by fitness descending

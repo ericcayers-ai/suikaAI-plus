@@ -2,7 +2,6 @@ package dev.suika.game;
 
 import dev.suika.ai.AgentPlugin;
 import dev.suika.ai.CmaEsTrainer;
-import dev.suika.ai.FitnessEvaluator;
 import dev.suika.ai.GeneticTrainer;
 import dev.suika.core.GameCore;
 import dev.suika.core.GameState;
@@ -28,7 +27,6 @@ public final class EvolutionRunner extends AgentRunner {
 
     private final LiveChart fitnessChart  = new LiveChart(260);
     private final LiveChart meanFitChart  = new LiveChart(260);
-    private final FitnessEvaluator evaluator = new FitnessEvaluator(1, 250, 32);
 
     private volatile int    generation = 0;
     private volatile double bestFit = 0, meanFit = 0, bestSoFar = 0;
@@ -41,6 +39,7 @@ public final class EvolutionRunner extends AgentRunner {
     private final AgentPlugin[] ghostAgents = new AgentPlugin[GHOST_COUNT];
     private final double[]  ghostAccum      = new double[GHOST_COUNT];
     private final float[]   ghostTimer      = new float[GHOST_COUNT];
+    private final int[]     ghostStartGen   = new int[GHOST_COUNT]; // generation this ghost's game began
     private volatile List<AgentPlugin> topAgents = new ArrayList<>();
 
     public EvolutionRunner(SuikaGame game, PlaygroundConfig cfg) {
@@ -51,11 +50,13 @@ public final class EvolutionRunner extends AgentRunner {
     @Override
     public void start() {
         super.start();
+        int threads = cfg.evalThreads();
+        int sims    = Math.max(1, game.settings.simsPerGen());
         if (isCma) {
-            cma = new CmaEsTrainer(0.3, 2, seed);
+            cma = new CmaEsTrainer(0.3, sims, seed, threads);
         } else {
             int pop = Math.max(8, cfg.populationSize);
-            ga = new GeneticTrainer(pop, Math.max(2, pop / 6), cfg.mutationSigma, 1, seed);
+            ga = new GeneticTrainer(pop, Math.max(2, pop / 6), cfg.mutationSigma, sims, seed, threads);
         }
         running = true;
         worker = new Thread(this::trainLoop, "evolution-trainer");
@@ -68,6 +69,7 @@ public final class EvolutionRunner extends AgentRunner {
         for (int i = 0; i < GHOST_COUNT; i++) {
             ghostCores[i] = new GameCore(seed + i + 1);
             ghostTimer[i] = (i + 1) * 0.3f;
+            ghostStartGen[i] = 0;
         }
     }
 
@@ -78,9 +80,10 @@ public final class EvolutionRunner extends AgentRunner {
                     cma.update();
                     generation = cma.generation();
                     var champ = cma.bestAgent();
-                    bestFit = evaluator.evaluate(champ, 9000L + generation);
                     setAgent(champ);
                     topAgents = List.of(champ);
+                    bestFit = cma.bestFitness();
+                    meanFit = cma.meanFitness();
                 } else {
                     ga.update();
                     generation = ga.generation();
@@ -118,16 +121,23 @@ public final class EvolutionRunner extends AgentRunner {
         for (int i = 0; i < GHOST_COUNT; i++) {
             GameCore gc = ghostCores[i];
             if (gc == null) continue;
-            // physics
-            ghostAccum[i] += dt * speed;
-            while (ghostAccum[i] >= PhysicsConfig.FIXED_DT) {
+            // physics (capped per frame so 1024× speed doesn't freeze the UI)
+            ghostAccum[i] += Math.min(dt * speed, 4.0);
+            int gsteps = 0;
+            while (ghostAccum[i] >= PhysicsConfig.FIXED_DT && gsteps < 240) {
                 gc.tick();
                 ghostAccum[i] -= PhysicsConfig.FIXED_DT;
+                gsteps++;
             }
-            // auto-restart ghost if game over
-            if (gc.isGameOver()) {
+            // Cull a ghost whose current game has outlived the configured lineage window,
+            // so it restarts on the freshest elite instead of lingering for ever.
+            int cullGens = Math.max(1, game.settings.ghostCullGens());
+            boolean tooOld = generation - ghostStartGen[i] >= cullGens;
+            // auto-restart ghost if game over OR culled by age
+            if (gc.isGameOver() || tooOld) {
                 ghostCores[i] = new GameCore(seed + i + 1 + generation);
                 ghostTimer[i] = 0.3f;
+                ghostStartGen[i] = generation;
                 continue;
             }
             // ghost agent drops
@@ -183,12 +193,19 @@ public final class EvolutionRunner extends AgentRunner {
         return new String[]{
             "elite views  " + Math.min(GHOST_COUNT + 1, 4) + " live",
             "mutation rate " + String.format("%.3f", cfg.mutationSigma),
-            "best so far  " + Math.round(bestSoFar),
+            "sims/genome  " + Math.max(1, game.settings.simsPerGen()) + " parallel",
+            "ghost lineage " + Math.max(1, game.settings.ghostCullGens()) + " gens",
         };
     }
 
+    /** Short plain-language description of the live evolution step (for the subtitle). */
+    private String doingNow() {
+        if (generation == 0) return "evaluating gen 0";
+        return isCma ? "adapting distribution" : "breeding next gen";
+    }
+
     @Override public String title()    { return cfg.technique.display; }
-    @Override public String subtitle() { return "Evolution  ·  JVM  ·  gen " + generation; }
+    @Override public String subtitle() { return "Evolution  ·  gen " + generation + "  ·  " + doingNow(); }
 
     @Override
     public String[] stats() {
@@ -197,7 +214,7 @@ public final class EvolutionRunner extends AgentRunner {
             "best fitness " + Math.round(bestSoFar),
             (isCma ? "mode         separable CMA-ES" : "mean fitness " + Math.round(meanFit)),
             "population   " + (isCma ? "auto (λ)" : Math.max(8, cfg.populationSize)),
-            "eval threads " + cfg.parallelism,
+            "eval threads " + (cfg.parallelism > 0 ? Integer.toString(cfg.evalThreads()) : "auto " + cfg.evalThreads()),
             "champion sc. " + core.getScore(),
             "speed        " + cfg.speedLabel(),
         };

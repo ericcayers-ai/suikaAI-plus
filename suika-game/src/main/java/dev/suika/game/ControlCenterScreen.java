@@ -147,9 +147,20 @@ public final class ControlCenterScreen extends ScreenAdapter {
         if (viewCount() == 1) {
             float ox = landscape ? BoardRenderer.OX_L : BoardRenderer.OX;
             float sc = landscape ? BoardRenderer.SCALE_L : BoardRenderer.SCALE;
-            hoverGameX = MathUtils.clamp((mx - ox) / sc,
-                    (float) PhysicsConfig.DROP_X_MIN, (float) PhysicsConfig.DROP_X_MAX);
+            hoverGameX = clampDropHover((mx - ox) / sc, runner.board());
+        } else if (imitationDual()) {
+            float[] p = placements(2)[0];                 // YOU = left board
+            hoverGameX = clampDropHover((mx - p[0]) / p[2], runner.board());
         }
+    }
+
+    /** Clamp a hovered game-x so the previewed/dropped fruit stays fully inside the walls. */
+    private float clampDropHover(float gx, GameState gs) {
+        float r = gs != null && gs.currentFruitTier() != null ? gs.currentFruitTier().radius : 0.5f;
+        float lo = (float) PhysicsConfig.LEFT_WALL_X  + r;
+        float hi = (float) PhysicsConfig.RIGHT_WALL_X - r;
+        if (lo > hi) { lo = hi = (float) (PhysicsConfig.LEFT_WALL_X + PhysicsConfig.RIGHT_WALL_X) / 2f; }
+        return MathUtils.clamp(gx, lo, hi);
     }
 
     private void handleClick(float x, float y) {
@@ -169,7 +180,15 @@ public final class ControlCenterScreen extends ScreenAdapter {
         if (fastBtn.contains(x, y))    { changeSpeed(+1); return; }
         if (swapBtn.contains(x, y))    { openHotswap(); return; }
         if (restartBtn.contains(x, y)) { runner.restart(); return; }
-        if (viewCount() == 1 && runner.acceptsHumanInput()) runner.humanDrop(hoverGameX);
+        if (viewCount() == 1 && runner.acceptsHumanInput()) { runner.humanDrop(hoverGameX); return; }
+        // Imitation dual view: only the YOU board (left) accepts drops.
+        if (imitationDual() && runner.acceptsHumanInput()) {
+            float[] p = placements(2)[0];
+            float wallT = (float) PhysicsConfig.WALL_THICKNESS * p[2];
+            float left  = p[0] - wallT;
+            float right = p[0] + (float) PhysicsConfig.CONTAINER_WIDTH * p[2] + wallT;
+            if (x >= left && x <= right && y > 70f) runner.humanDrop(hoverGameX);
+        }
     }
 
     private void changeSpeed(int d) {
@@ -181,7 +200,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private int viewCount() {
         if (runner instanceof EvolutionRunner && !cfg.ghostView) return 4;
         if (cfg.technique == AiTechnique.SELF_PLAY)              return 2;
+        if (cfg.technique.family == AiTechnique.Family.IMITATION) return 2; // YOU | AI clone
         return 1;
+    }
+
+    private boolean imitationDual() {
+        return cfg.technique.family == AiTechnique.Family.IMITATION && viewCount() == 2;
     }
 
     // -------------------------------------------------------------------------
@@ -193,6 +217,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
 
     /** Test/QA hook: open the quick-settings modal (used by the capture harness). */
     void openHotswapForCapture() { openHotswap(); }
+
+    /** Test/QA hook: drop in the centre column (dismisses the imitation "play first" modal). */
+    void forceHumanDropForCapture() {
+        if (runner.acceptsHumanInput())
+            runner.humanDrop((float) ((PhysicsConfig.DROP_X_MIN + PhysicsConfig.DROP_X_MAX) / 2.0));
+    }
 
     private void openHotswap() {
         hotswapOpen = true;
@@ -290,6 +320,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
         delta = Math.min(delta, 0.05f);
         int views = viewCount();
         if (views == 1 && runner.acceptsHumanInput()) runner.setHover(hoverGameX);
+        else if (imitationDual()) runner.setHover(hoverGameX);
         runner.update(delta);
         // Score pops are positioned in full-board space, so they only make sense on the
         // single interactive board — clear them while a multi-board grid is shown.
@@ -357,9 +388,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private void renderGridShapes(ShapeRenderer s, int views) {
         GameState[] states = runner.multiStates();
         float[][] place = placements(views);
-        board.setHover(Float.NaN, null);
+        boolean dual = imitationDual();
         for (int i = 0; i < views; i++) {
             if (i >= states.length || states[i] == null) continue;
+            // Show the human drop-guide on the YOU board (index 0) only.
+            if (dual && i == 0) board.setHover(hoverGameX, states[0].currentFruitTier());
+            else                board.setHover(Float.NaN, null);
             board.useCustom(place[i][0], place[i][1], place[i][2]);
             board.drawBoard(s, states[i], game.settings, null, 1f);
         }
@@ -513,9 +547,14 @@ public final class ControlCenterScreen extends ScreenAdapter {
                 swapBtn.x + swapBtn.width / 2f, swapBtn.y + 28, Theme.BG_BOTTOM);
         Ui.textCenter(game.batch, game.fontSmall, "RESTART",
                 restartBtn.x + restartBtn.width / 2f, restartBtn.y + 28, Theme.TEXT);
-        if (viewCount() == 1 && runner.acceptsHumanInput())
+        // Live caption sits in the clear gap above the control bar — portrait only
+        // (landscape has no room below the well; its panel shows "doing now" instead).
+        if (!landscape && viewCount() == 1 && runner.acceptsHumanInput())
             Ui.textCenter(game.batch, game.fontSmall, "click the well to drop",
-                    landscape ? 960f : Theme.VW / 2f, 84, Theme.TEXT_FAINT);
+                    Theme.VW / 2f, 84, Theme.TEXT_FAINT);
+        else if (!landscape && viewCount() == 1)
+            Ui.textCenter(game.batch, game.fontSmall, "live · " + cfg.technique.liveHint(),
+                    Theme.VW / 2f, 84, Theme.ACCENT_BLUE);
     }
 
     // ---- hotswap (quick settings) modal ----
@@ -585,18 +624,20 @@ public final class ControlCenterScreen extends ScreenAdapter {
         float vh = landscape ? Theme.VH_L : Theme.VH;
         ShapeRenderer s = game.shapes;
         s.begin(ShapeRenderer.ShapeType.Filled);
+        float mw = 620f, mh = 420f;
+        float mx0 = vw / 2f - mw / 2f, my0 = vh / 2f - mh / 2f;
         s.setColor(0f, 0f, 0f, 0.72f);
         s.rect(0, 0, vw, vh);
         s.setColor(0.08f, 0.09f, 0.13f, 1f);
-        Ui.fillRoundRect(s, vw / 2f - 290, vh / 2f - 70, 580, 360, 18);
-        Ui.panel(s, vw / 2f - 290, vh / 2f - 70, 580, 360, 18, Theme.PANEL, Theme.GOLD);
+        Ui.fillRoundRect(s, mx0, my0, mw, mh, 18);
+        Ui.panel(s, mx0, my0, mw, mh, 18, Theme.PANEL, Theme.GOLD);
         s.end();
         game.batch.begin();
-        Ui.textCenter(game.batch, game.fontMed, runner.modalTitle(), vw / 2f, vh / 2f + 240, Theme.GOLD);
-        float y = vh / 2f + 160;
+        Ui.textCenter(game.batch, game.fontMed, runner.modalTitle(), vw / 2f, my0 + mh - 48, Theme.GOLD);
+        float y = my0 + mh - 110;
         for (String line : runner.modalBody()) {
-            Ui.textCenter(game.batch, game.font, line, vw / 2f, y, Theme.TEXT);
-            y -= 34;
+            Ui.textCenter(game.batch, game.fontSmall, line, vw / 2f, y, Theme.TEXT);
+            y -= 32;
         }
         game.batch.end();
     }

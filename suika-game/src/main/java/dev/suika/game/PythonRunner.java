@@ -109,11 +109,14 @@ public final class PythonRunner extends AgentRunner {
     protected void onUpdate(float dt) {
         super.onUpdate(dt);
         if (rival == null) return;
-        // Step rival physics in lock-step with the playback speed.
-        rivalAccum += dt * speed;
-        while (rivalAccum >= PhysicsConfig.FIXED_DT) {
+        // Step rival physics in lock-step with the playback speed (capped per frame
+        // so extreme speeds don't freeze the UI).
+        rivalAccum += Math.min(dt * speed, 4.0);
+        int rsteps = 0;
+        while (rivalAccum >= PhysicsConfig.FIXED_DT && rsteps < 240) {
             rival.tick();
             rivalAccum -= PhysicsConfig.FIXED_DT;
+            rsteps++;
         }
         if (rival.isGameOver()) { rival = new GameCore(seed + 777 + drops); rivalTimer = 0.3f; return; }
         rivalTimer -= dt;
@@ -159,13 +162,20 @@ public final class PythonRunner extends AgentRunner {
 
     @Override
     public String[] extendedStats() {
-        return new String[]{
-            "train       python -m " + trainModule(),
-            "deploy      export ONNX -> OnnxPolicyRunner",
-            PythonSetup.isReady()
+        java.util.List<String> s = new java.util.ArrayList<>();
+        s.add("train       python -m " + trainModule());
+        s.add("deploy      export ONNX -> OnnxPolicyRunner");
+        s.add(PythonSetup.isReady()
                 ? "env ready   GPU stack linked"
-                : "env setup   Settings -> AI ENVIRONMENT",
-        };
+                : "env setup   Settings -> AI ENVIRONMENT");
+        s.add("doing now   " + cfg.technique.liveHint());
+        // Live generative sampling detail (diffusion / flow surrogate).
+        if (agent() instanceof Agents.GenerativeAgent g && g.lastBin() >= 0) {
+            s.add(String.format("sampler     %d steps -> col %d/%d", g.steps(), g.lastBin() + 1, g.lastBins()));
+        } else if (cfg.technique == AiTechnique.DECISION_TRANSFORMER || cfg.technique == AiTechnique.OFFLINE_RL) {
+            s.add("conditioning target return " + (int) cfg.targetReturn);
+        }
+        return s.toArray(new String[0]);
     }
 
     private String surrogateLabel() {

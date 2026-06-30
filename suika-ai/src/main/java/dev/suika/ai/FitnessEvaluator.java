@@ -33,6 +33,12 @@ public final class FitnessEvaluator {
         return (double) totalScore / episodesPerEval;
     }
 
+    /** Run a single seeded episode and return its score. Public so callers can fan
+     *  individual episodes out across a thread pool (simultaneous sims). */
+    public long runSingleEpisode(AgentPlugin agent, long seed) {
+        return runEpisode(agent, seed);
+    }
+
     private long runEpisode(AgentPlugin agent, long seed) {
         GameCore core = new GameCore(seed);
         for (int step = 0; step < maxStepsPerEpisode && !core.isGameOver(); step++) {

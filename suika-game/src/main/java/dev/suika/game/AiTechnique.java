@@ -108,6 +108,123 @@ public enum AiTechnique {
 
     public boolean imitationBased() { return family == Family.IMITATION; }
 
+    /**
+     * A plain-English, no-prior-knowledge explanation of the technique, already split
+     * into short lines for the infocard. Think "explain it to a friend", not a paper.
+     */
+    public String[] explainerLines() {
+        return switch (this) {
+            case MCTS -> new String[]{
+                "Before each drop it plays out thousands of imaginary",
+                "futures in a perfect copy of the game, then picks the",
+                "column that led to the best outcomes. No training — it",
+                "just thinks hard every single move." };
+            case ALPHAZERO -> new String[]{
+                "Same look-ahead search as MCTS, but a neural network",
+                "learns to guess good moves so the search can focus on",
+                "the promising ones. It gets smarter the more it plays,",
+                "combining planning with learning." };
+            case GREEDY -> new String[]{
+                "For every possible column it actually drops the fruit",
+                "and checks the immediate score, then keeps the best.",
+                "Fast and surprisingly solid — but it never looks more",
+                "than one move ahead." };
+            case PPO, DQN, SAC -> new String[]{
+                "A neural network learns by trial and error, like a",
+                "player slowly getting good. It nudges its behaviour",
+                "toward moves that earned more points over millions of",
+                "practice drops. Training runs in Python." };
+            case MUZERO, DREAMER -> new String[]{
+                "It learns its own mental 'model' of how the game works,",
+                "then practises inside that imagination instead of the",
+                "real game — so it can plan ahead without a built-in",
+                "simulator." };
+            case NEUROEVO -> new String[]{
+                "Keeps a population of AI brains, lets them all play,",
+                "breeds the best ones together and randomly tweaks the",
+                "offspring — evolution, not gradients. Repeat for many",
+                "generations and watch the scores climb." };
+            case CMA_ES -> new String[]{
+                "A smarter evolution strategy: instead of random tweaks",
+                "it learns which directions of change tend to help and",
+                "samples new candidates from that adapting cloud. Strong",
+                "on fine-tuning many numbers at once." };
+            case PBT -> new String[]{
+                "A whole population trains at the same time. Losers copy",
+                "the winners' brains and settings, then shake them up a",
+                "little — so good ideas spread while the search keeps",
+                "exploring." };
+            case DAGGER -> new String[]{
+                "You play, the AI copies you — but it also asks an expert",
+                "what to do in the tricky spots it ends up in, so it",
+                "doesn't just inherit your mistakes. Imitation that fixes",
+                "its own blind spots." };
+            case BC -> new String[]{
+                "Pure copy-cat learning: it watches the drops YOU make",
+                "and trains a network to do the same thing in the same",
+                "situations. Play your way and it learns your style.",
+                "No reward signal needed — just your example." };
+            case GAIL -> new String[]{
+                "Instead of copying moves directly, it tries to figure",
+                "out WHY you play the way you do — the hidden goal — then",
+                "optimises for that. Learns the intent behind the demos,",
+                "not just the actions." };
+            case DECISION_TRANSFORMER -> new String[]{
+                "You tell it a target score and it treats playing like",
+                "finishing a sentence: given 'I want to reach X', predict",
+                "the next drop. Learned entirely from logged games, no",
+                "live trial-and-error." };
+            case OFFLINE_RL -> new String[]{
+                "Learns a good policy purely from a fixed pile of recorded",
+                "games — never touching the live game while training. Plays",
+                "it safe by staying close to moves it has actually seen",
+                "work." };
+            case DIFFUSION -> new String[]{
+                "Borrows the trick behind AI image generators: start from",
+                "random noise and repeatedly 'denoise' it into a sensible",
+                "drop. Great at capturing that many different drops can",
+                "all be good." };
+            case FLOW -> new String[]{
+                "A faster cousin of the diffusion approach — it learns a",
+                "smooth 'flow' that turns noise into a good drop in just a",
+                "few steps, so it can decide in real time." };
+            case SELF_PLAY -> new String[]{
+                "Two agents race on the exact same fruits; whoever scores",
+                "more wins. By constantly trying to beat a copy of itself,",
+                "it keeps pushing its own skill upward." };
+            case HEURISTIC -> new String[]{
+                "A hand-written rulebook: look for two equal fruits to",
+                "merge, otherwise keep the pile flat and low. No learning",
+                "at all — just common-sense instructions." };
+            case RANDOM -> new String[]{
+                "Drops in a completely random column every time. It exists",
+                "as the bottom of the leaderboard — the score every real",
+                "AI has to beat." };
+        };
+    }
+
+    /** One short line describing what this technique is doing moment-to-moment, live. */
+    public String liveHint() {
+        return switch (family) {
+            case PLANNING -> switch (this) {
+                case MCTS, ALPHAZERO -> "simulating many futures, then dropping the best";
+                case GREEDY          -> "trying every column, keeping the highest score";
+                case HEURISTIC       -> "following hand-written merge rules";
+                case RANDOM          -> "dropping in a random column";
+                default              -> "planning the next drop";
+            };
+            case EVOLUTION -> "breeding & mutating a population of AI brains";
+            case IMITATION -> "learning to copy your drops in real time";
+            case PYTHON    -> switch (this) {
+                case DIFFUSION, FLOW                  -> "denoising random noise into a drop";
+                case DECISION_TRANSFORMER, OFFLINE_RL -> "predicting drops from logged games";
+                case MUZERO, DREAMER                  -> "planning inside a learned world model";
+                case SELF_PLAY                        -> "racing a copy of itself for a better score";
+                default                               -> "running a learned policy (Python-trained)";
+            };
+        };
+    }
+
     /** Short environment badge: "JVM", "Python", or "JVM + Python". */
     public String envBadge() {
         if (jvmNative && python) return "JVM + Python";

@@ -28,7 +28,6 @@ public abstract class AgentRunner extends LiveBoardRunner {
     private volatile long lastThinkMs = 0;
 
     private float markerX = Float.NaN;
-    private float gameOverTimer = -1f;
     protected long bestScore = 0;
 
     /** Per-game final scores for the game-score-history chart (chart2 in PlanningRunner). */
@@ -52,9 +51,8 @@ public abstract class AgentRunner extends LiveBoardRunner {
     protected void onUpdate(float dt) {
         bestScore = Math.max(bestScore, core.getScore());
         if (core.isGameOver()) {
-            if (gameOverTimer < 0f) gameOverTimer = 0.4f;
-            gameOverTimer -= dt;
-            if (gameOverTimer <= 0f) { newGame(); gameOverTimer = -1f; }
+            // No pause between games — restart immediately so the agent keeps playing.
+            newGame();
             return;
         }
         switch (phase) {

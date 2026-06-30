@@ -34,6 +34,38 @@ public final class GameSettings {
     public float aiMoveDelay  = 0.6f;     // seconds the agent pauses between drops
     public boolean showThinking = true;   // MCTS visit-count overlay
 
+    // ---- AI Training (evolution / population learners) ----
+    /**
+     * Evaluation parallelism. Index 0 = "Auto" (all cores — the fastest, GPU-like
+     * fan-out). Other entries pin training to a fixed worker-thread count so heavy
+     * populations can't exhaust memory.
+     */
+    public static final int[] EVAL_THREAD_OPTIONS = {0, 1, 2, 4, 6, 8, 12, 16, 24, 32};
+    public int evalThreadsIndex = 0;      // default Auto
+
+    /**
+     * Simulations (independent game-overs) averaged per genome each generation. More
+     * sims = less noisy fitness, but more compute. They run <em>simultaneously</em>,
+     * not one after another.
+     */
+    public static final int[] SIMS_PER_GEN_OPTIONS = {1, 2, 3, 5, 8};
+    public int simsPerGenIndex = 0;       // default 1
+
+    /**
+     * How many generations of elites are kept alive as on-screen "ghost" boards before
+     * the oldest are culled. Higher = watch more of the population's lineage diverge.
+     */
+    public static final int[] GHOST_CULL_OPTIONS = {1, 2, 3, 5, 8, 12};
+    public int ghostCullIndex = 1;        // default 2 generations
+
+    public int evalThreadsSetting() { return EVAL_THREAD_OPTIONS[evalThreadsIndex]; }
+    public String evalThreadsLabel() {
+        int t = evalThreadsSetting();
+        return t == 0 ? "Auto (all cores)" : t + " threads";
+    }
+    public int simsPerGen()    { return SIMS_PER_GEN_OPTIONS[simsPerGenIndex]; }
+    public int ghostCullGens() { return GHOST_CULL_OPTIONS[ghostCullIndex]; }
+
     // -------------------------------------------------------------------------
 
     public int targetFps() { return FPS_OPTIONS[fpsIndex]; }

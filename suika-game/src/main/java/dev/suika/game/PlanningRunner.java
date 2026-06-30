@@ -45,6 +45,7 @@ public final class PlanningRunner extends AgentRunner {
         } else {
             s.add("policy       " + cfg.technique.kind);
         }
+        s.add("doing now    " + cfg.technique.liveHint());
         return s.toArray(new String[0]);
     }
 

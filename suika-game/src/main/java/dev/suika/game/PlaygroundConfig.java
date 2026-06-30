@@ -9,12 +9,21 @@ public final class PlaygroundConfig {
 
     public AiTechnique technique = AiTechnique.MCTS;
 
-    /** Playback / training speed multiplier — 0.5× (slow-mo) to 64× (turbo). */
-    public static final float[] SPEEDS = {0.5f, 1f, 2f, 4f, 8f, 16f, 32f, 64f};
+    /** Playback / training speed multiplier — 0.5× (slow-mo) up to 1024× (turbo). */
+    public static final float[] SPEEDS = {0.5f, 1f, 2f, 4f, 8f, 16f, 32f, 64f, 128f, 256f, 512f, 1024f};
     public int speedIndex = 1;   // default 1×
 
-    /** Worker threads for parallel evaluation / rollouts (where applicable). */
-    public int parallelism = Math.max(1, Runtime.getRuntime().availableProcessors() - 2);
+    /**
+     * Worker threads for parallel evaluation / rollouts (where applicable).
+     * {@code 0} means "Auto" — let the runtime pick (all available cores), which is the
+     * fastest, GPU-like fan-out setting. A positive value pins it to that many threads.
+     */
+    public int parallelism = 0;   // 0 = Auto (all cores)
+
+    /** Resolve {@link #parallelism} to an actual thread count (Auto → all cores). */
+    public int evalThreads() {
+        return parallelism > 0 ? parallelism : Math.max(1, Runtime.getRuntime().availableProcessors());
+    }
 
     public int actionBins = 32;
 

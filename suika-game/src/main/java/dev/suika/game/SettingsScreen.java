@@ -56,12 +56,12 @@ public final class SettingsScreen extends ScreenAdapter {
             ? "Ready  ·  venv" : "Not installed";
     private volatile boolean installing = false;
 
-    private static final float ROW_H       = 54f;
-    private static final float ROW_GAP      = 6f;
-    private static final float SECTION_GAP  = 50f;
+    private static final float ROW_H       = 46f;
+    private static final float ROW_GAP      = 4f;
+    private static final float SECTION_GAP  = 38f;
     private static final float CTRL_W       = 250f;
     private static final float MARGIN_X     = 60f;
-    private static final float TOP          = Theme.VH - 200f;
+    private static final float TOP          = Theme.VH - 150f;
 
     public SettingsScreen(SuikaGame game, Function<SuikaGame, Screen> back) {
         this.game = game;
@@ -95,6 +95,17 @@ public final class SettingsScreen extends ScreenAdapter {
         // ---- Gameplay ----
         toggle("GAMEPLAY", "Immediate game over (no safety delay)",
                 () -> cfg.immediateDeadline, () -> cfg.immediateDeadline = !cfg.immediateDeadline);
+
+        // ---- AI Training (evolution / population learners) ----
+        cycle("AI TRAINING", "Eval parallelism", () -> cfg.evalThreadsLabel(),
+                () -> cfg.evalThreadsIndex = wrap(cfg.evalThreadsIndex - 1, GameSettings.EVAL_THREAD_OPTIONS.length),
+                () -> cfg.evalThreadsIndex = wrap(cfg.evalThreadsIndex + 1, GameSettings.EVAL_THREAD_OPTIONS.length));
+        cycle(null, "Simulations per generation", () -> Integer.toString(cfg.simsPerGen()),
+                () -> cfg.simsPerGenIndex = wrap(cfg.simsPerGenIndex - 1, GameSettings.SIMS_PER_GEN_OPTIONS.length),
+                () -> cfg.simsPerGenIndex = wrap(cfg.simsPerGenIndex + 1, GameSettings.SIMS_PER_GEN_OPTIONS.length));
+        cycle(null, "Ghost lineage (generations)", () -> cfg.ghostCullGens() + " gens",
+                () -> cfg.ghostCullIndex = wrap(cfg.ghostCullIndex - 1, GameSettings.GHOST_CULL_OPTIONS.length),
+                () -> cfg.ghostCullIndex = wrap(cfg.ghostCullIndex + 1, GameSettings.GHOST_CULL_OPTIONS.length));
 
         // AI Watch configuration lives inside the AI game itself (side toggle per technique).
 

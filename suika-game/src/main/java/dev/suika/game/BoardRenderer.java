@@ -26,9 +26,11 @@ public final class BoardRenderer {
     public static final float OY    = 120f;  // screen y of the floor (gy = 0)
 
     // --- Landscape preset (1280×720 virtual canvas, board on right half) ---
-    public static final float SCALE_L = 44f;
-    public static final float OX_L    = 756f;
-    public static final float OY_L    = 30f;
+    // Sized so the whole well (and the fruit's drop-in position above it) stays on-screen
+    // and the right wall clears the RESTART button at x≈1138.
+    public static final float SCALE_L = 40f;
+    public static final float OX_L    = 655f;
+    public static final float OY_L    = 66f;
 
     private final GlyphLayout gl = new GlyphLayout();
     private final Color tmp  = new Color();

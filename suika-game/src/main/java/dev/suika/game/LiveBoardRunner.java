@@ -59,9 +59,15 @@ public abstract class LiveBoardRunner implements TechniqueRunner {
     /** Subclass logic each frame (e.g. trigger an agent drop, advance training). */
     protected abstract void onUpdate(float dt);
 
+    /** Hard ceiling on physics ticks per render frame. At extreme speeds (≥128×) we run
+     *  as many sub-steps as this allows and let the rest spill to the next frame, keeping
+     *  the UI responsive instead of freezing while thousands of ticks run. */
+    private static final int MAX_TICKS_PER_FRAME = 240;
+
     protected void stepPhysics(float dt) {
         accumulator += Math.min(dt, 0.10);
-        int maxSteps = (int) (PhysicsConfig.MAX_SUB_STEPS * Math.ceil(speed));
+        int maxSteps = Math.min(MAX_TICKS_PER_FRAME,
+                (int) (PhysicsConfig.MAX_SUB_STEPS * Math.ceil(speed)));
         int steps = 0;
         while (accumulator >= PhysicsConfig.FIXED_DT && steps < maxSteps) {
             List<MergeEvent> merges = core.tick();

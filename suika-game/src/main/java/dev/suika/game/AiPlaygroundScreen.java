@@ -67,6 +67,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         this.cfg  = existing != null ? existing : new PlaygroundConfig();
         if (existing == null) cfg.selectDefaultsFor(AiTechnique.MCTS);
         cfg.actionBins = game.settings.actionBins();
+        if (existing == null) cfg.parallelism = game.settings.evalThreadsSetting();
         viewport = new FitViewport(Theme.VW, Theme.VH, camera);
         camera.position.set(Theme.VW / 2f, Theme.VH / 2f, 0f);
         camera.update();
@@ -129,7 +130,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         }
         if (paraCtrl.contains(x, y) && cfg.technique.parallel) {
             int cores = Runtime.getRuntime().availableProcessors();
-            cfg.parallelism = MathUtils.clamp(cfg.parallelism + dir(x, paraCtrl), 1, cores); return;
+            cfg.parallelism = MathUtils.clamp(cfg.parallelism + dir(x, paraCtrl), 0, cores); return;
         }
         if (paramCtrl.contains(x, y) && paramApplicable()) { cycleParam(dir(x, paramCtrl)); return; }
         if (ghostCtrl.contains(x, y) && ghostApplicable()) { cfg.ghostView = !cfg.ghostView; return; }
@@ -323,21 +324,15 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             Ui.text(game.batch, game.fontSmall,
                     t.category + "  ·  " + t.kind + "  ·  obs: " + t.dataMode,
                     tx, mY + mH - 82, Theme.TEXT_DIM);
-            // blurb split into ≤52-char lines
-            String blurb = t.blurb;
-            if (blurb.length() > 52) {
-                int split = blurb.lastIndexOf(' ', 52);
-                if (split < 0) split = 52;
-                Ui.text(game.batch, game.fontSmall, blurb.substring(0, split),
-                        tx, mY + mH - 120, Theme.TEXT);
-                Ui.text(game.batch, game.fontSmall, blurb.substring(split).trim(),
-                        tx, mY + mH - 148, Theme.TEXT);
-            } else {
-                Ui.text(game.batch, game.fontSmall, blurb,
-                        tx, mY + mH - 120, Theme.TEXT);
+            // Plain-English explanation (no prior knowledge needed), pre-wrapped.
+            String[] lines = t.explainerLines();
+            float ey = mY + mH - 106;
+            for (int li = 0; li < Math.min(4, lines.length); li++) {
+                Ui.text(game.batch, game.fontSmall, lines[li], tx, ey, Theme.TEXT);
+                ey -= 22f;
             }
             // Attribute bars section
-            Ui.text(game.batch, game.fontSmall, "ATTRIBUTES", tx, mY + 204f, Theme.TEXT_DIM);
+            Ui.text(game.batch, game.fontSmall, "ATTRIBUTES", tx, mY + 192f, Theme.TEXT_DIM);
             Ui.text(game.batch, game.fontSmall, "Performance", tx, mY + 164f, Theme.TEXT_DIM);
             Ui.text(game.batch, game.fontSmall, "Speed",       tx, mY + 124f, Theme.TEXT_DIM);
             Ui.text(game.batch, game.fontSmall, "Setup ease",  tx, mY + 84f,  Theme.TEXT_DIM);
@@ -398,7 +393,8 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
                 CARD_X + 4, 330, Theme.TEXT_DIM);
 
         cyclerText("Speed",       cfg.speedLabel(),             speedCtrl, true);
-        cyclerText("Parallelism", cfg.parallelism + " threads", paraCtrl,  t.parallel);
+        cyclerText("Parallelism", cfg.parallelism == 0 ? "Auto (GPU/cores)" : cfg.parallelism + " threads",
+                paraCtrl,  t.parallel);
         cyclerText(paramLabel(),  paramValue(),                 paramCtrl, paramApplicable());
 
         boolean ghostEn = ghostApplicable();

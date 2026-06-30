@@ -46,9 +46,11 @@ public final class CaptureHarness implements ApplicationListener {
             case 5 -> { if (t > 6.5f)  { shoot("06-hotswap-modal.png"); launchControlCenter(AiTechnique.NEUROEVO, false); stage++; } }
             case 6 -> { if (t > 16.0f) { shoot("07-neuroevo-4grid.png"); launchControlCenter(AiTechnique.SELF_PLAY, false); stage++; } }
             case 7 -> { if (t > 22.0f) { shoot("08-selfplay-2view.png"); launchControlCenter(AiTechnique.NEUROEVO, true); stage++; } }
-            case 8 -> { if (t > 30.0f) { shoot("09-neuroevo-ghost.png"); game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN)); stage++; } }
-            case 9 -> { if (t > 31.5f) { shoot("10-human-play.png"); openGameOver(); stage++; } }
-            case 10-> { if (t > 32.5f) { shoot("11-game-over.png"); stage++; Gdx.app.exit(); } }
+            case 8 -> { if (t > 30.0f) { shoot("09-neuroevo-ghost.png"); launchControlCenter(AiTechnique.BC, false); stage++; } }
+            case 9 -> { if (t > 31.0f) { cc.forceHumanDropForCapture(); stage++; } }   // dismiss modal -> show YOU|AI dual board
+            case 10-> { if (t > 33.5f) { shoot("10-bc-dual.png"); game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN)); stage++; } }
+            case 11-> { if (t > 35.0f) { shoot("11-human-play.png"); openGameOver(); stage++; } }
+            case 12-> { if (t > 36.0f) { shoot("12-game-over.png"); stage++; Gdx.app.exit(); } }
             default -> { }
         }
     }

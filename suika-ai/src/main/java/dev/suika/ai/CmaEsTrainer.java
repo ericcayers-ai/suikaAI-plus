@@ -43,6 +43,12 @@ public final class CmaEsTrainer implements TrainerPlugin, AutoCloseable {
     public CmaEsTrainer() { this(0.3, 2, 0L); }
 
     public CmaEsTrainer(double sigma0, int episodesPerEval, long seed) {
+        this(sigma0, episodesPerEval, seed, 0);
+    }
+
+    /** @param threads evaluation worker threads ({@code 0} = auto / all cores). A bounded
+     *                 pool caps concurrent live simulations to avoid heap exhaustion. */
+    public CmaEsTrainer(double sigma0, int episodesPerEval, long seed, int threads) {
         int n         = MlpPolicy.paramCount(INPUT_SIZE, HIDDEN_SIZE, OUTPUT_BINS);
         this.sigma0   = sigma0;
         this.lambda   = 4 + (int) Math.floor(3 * Math.log(n));
@@ -50,7 +56,12 @@ public final class CmaEsTrainer implements TrainerPlugin, AutoCloseable {
         this.episodesPerEval = episodesPerEval;
         this.rng      = new Random(seed);
         this.evaluator = new FitnessEvaluator(episodesPerEval, 300, OUTPUT_BINS);
-        this.pool      = Executors.newVirtualThreadPerTaskExecutor();
+        int workers   = threads > 0 ? threads : Math.max(1, Runtime.getRuntime().availableProcessors());
+        this.pool     = Executors.newFixedThreadPool(workers, r -> {
+            Thread t = new Thread(r, "cma-eval");
+            t.setDaemon(true);
+            return t;
+        });
 
         // Initialise mean to zero, sigma uniform
         this.mean  = new double[n];
@@ -93,6 +104,10 @@ public final class CmaEsTrainer implements TrainerPlugin, AutoCloseable {
             try { fitness[k] = fts.get(k).get(); }
             catch (Exception e) { throw new RuntimeException(e); }
         }
+        double bsum = 0, bmax = Double.NEGATIVE_INFINITY;
+        for (double v : fitness) { bsum += v; bmax = Math.max(bmax, v); }
+        this.lastBestFitness = bmax;
+        this.lastMeanFitness = bsum / lambda;
 
         // 3. Sort by fitness descending
         Integer[] order = new Integer[lambda];
@@ -117,8 +132,12 @@ public final class CmaEsTrainer implements TrainerPlugin, AutoCloseable {
         generation++;
     }
 
-    public NeuralAgent bestAgent() { return buildAgent(mean); }
+    private volatile double lastBestFitness = 0, lastMeanFitness = 0;
+
+    public NeuralAgent bestAgent()  { return buildAgent(mean); }
     public int         generation() { return generation; }
+    public double      bestFitness(){ return lastBestFitness; }
+    public double      meanFitness(){ return lastMeanFitness; }
 
     private NeuralAgent buildAgent(double[] weights) {
         MlpPolicy p = new MlpPolicy(INPUT_SIZE, HIDDEN_SIZE, OUTPUT_BINS);

@@ -40,6 +40,13 @@ public final class ImitationRunner extends LiveBoardRunner {
     private float hoverX = (float) ((PhysicsConfig.DROP_X_MIN + PhysicsConfig.DROP_X_MAX) / 2.0);
     private float predictedX = Float.NaN;
 
+    // The AI clone: a second live board (shown on the RIGHT) that the cloned policy plays
+    // in real time, so you watch it copy your style on its own game while you play (LEFT).
+    private GameCore aiClone;
+    private double   cloneAccum;
+    private float    cloneTimer = 0.3f;
+    private int      cloneGames;
+
     private final LiveChart lossChart = new LiveChart(200);
     private final LiveChart accChart  = new LiveChart(200);
     private volatile double loss = 0, accuracy = 0;
@@ -59,6 +66,9 @@ public final class ImitationRunner extends LiveBoardRunner {
     protected void onNewGame() {
         // dataset + trainer persist across games; only the board resets.
         if (bc == null) bc = new BehavioralCloningTrainer(dataset, cfg.learningRate, 4);
+        // The AI clone is independent of the human board — created once, then it keeps
+        // playing its own games (auto-restarting) so it never resets when YOU restart.
+        if (aiClone == null) aiClone = new GameCore(seed + 4242L);
     }
 
     @Override public boolean acceptsHumanInput() { return true; }
@@ -84,6 +94,9 @@ public final class ImitationRunner extends LiveBoardRunner {
             predictedX = (float) spec.toDropX(act, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
         }
 
+        // Drive the AI clone's own live board (right) once a policy exists.
+        stepClone(dt);
+
         // periodic action-match accuracy on the captured demos
         accTimer -= dt;
         if (accTimer <= 0f && phase == Phase.TRAIN && dataset.size() > 0) {
@@ -98,6 +111,51 @@ public final class ImitationRunner extends LiveBoardRunner {
             restartTimer -= dt;
             if (restartTimer <= 0f) { newGame(); restartTimer = -1f; }
         }
+    }
+
+    /** Advance the AI clone's independent game: real-time physics + cloned-policy drops. */
+    private void stepClone(float dt) {
+        if (aiClone == null || phase != Phase.TRAIN || bc == null) return;
+        cloneAccum += Math.min(dt * speed, 4.0);
+        int st = 0;
+        while (cloneAccum >= PhysicsConfig.FIXED_DT && st < 240) {
+            aiClone.tick();
+            cloneAccum -= PhysicsConfig.FIXED_DT;
+            st++;
+        }
+        if (aiClone.isGameOver()) {                 // keep going immediately, no delay
+            cloneGames++;
+            aiClone = new GameCore(seed + 4242L + cloneGames);
+            cloneTimer = 0.2f;
+            return;
+        }
+        // clone drops on a steady cadence once its chute is clear
+        cloneTimer -= dt;
+        boolean chuteClear = true;
+        double thresh = PhysicsConfig.CONTAINER_HEIGHT - 0.5;
+        for (var f : aiClone.getState().fruits()) if (f.y() > thresh) { chuteClear = false; break; }
+        if (cloneTimer <= 0f && chuteClear) {
+            NeuralAgent a = bc.trainedAgent();
+            Object act = a.selectAction(aiClone.getState(), spec);
+            double x = spec.toDropX(act, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
+            aiClone.spawnDrop(x);
+            cloneTimer = Math.max(0.05f, 0.5f / Math.max(0.1f, speed));
+        }
+    }
+
+    /** Two boards: YOU (left) and the AI clone (right). */
+    @Override
+    public GameState[] multiStates() {
+        return new GameState[]{ core.getState(), aiClone != null ? aiClone.getState() : null };
+    }
+
+    @Override
+    public String[] multiLabels() {
+        return new String[]{
+            "YOU  ·  " + core.getScore(),
+            "AI CLONE  ·  " + (aiClone != null ? aiClone.getScore() : 0)
+                    + (phase == Phase.WATCH_FIRST ? "  (watching)" : ""),
+        };
     }
 
     private void startTraining() {
@@ -178,11 +236,12 @@ public final class ImitationRunner extends LiveBoardRunner {
         return new String[]{
             (isDagger ? "DAgger" : "Behavioral Cloning") + " — imitation learning",
             "",
-            "Play a full game. The AI watches and records every",
-            "drop you make. When the game ends it starts training",
-            "live, and keeps learning as you keep playing.",
+            "YOU play on the LEFT board. The AI watches and records",
+            "every drop you make. When your first game ends it starts",
+            "training live and plays its OWN game on the RIGHT,",
+            "copying your style as it learns.",
             "",
-            "Click in the well to drop and begin.",
+            "Click in the left well to drop and begin.",
         };
     }
 
@@ -201,6 +260,7 @@ public final class ImitationRunner extends LiveBoardRunner {
             "loss         " + String.format("%.3f", loss),
             "match acc.   " + String.format("%.0f%%", accuracy),
             "your score   " + core.getScore(),
+            "clone score  " + (aiClone != null ? aiClone.getScore() : 0),
             isDagger ? "expert       MCTS relabeling" : "method       supervised cloning",
         };
     }

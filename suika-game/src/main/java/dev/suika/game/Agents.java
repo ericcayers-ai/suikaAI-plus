@@ -41,13 +41,25 @@ public final class Agents {
     /** Adapter exposing a {@link GenerativeModelBridge} as an {@link AgentPlugin}. */
     public static final class GenerativeAgent implements AgentPlugin {
         private final GenerativeModelBridge bridge;
+        private volatile int lastBin = -1;
+        private volatile int lastBins = 32;
         public GenerativeAgent(GenerativeModelBridge.ModelType type) {
             this.bridge = new GenerativeModelBridge(type, 7L);
         }
         @Override public String id()          { return "generative-" + bridge.type(); }
         @Override public String displayName() { return bridge.type().toString(); }
         @Override public Object selectAction(GameState state, ActionSpec spec) {
-            return bridge.sampleAction(state, spec.discrete() ? spec.bins() : 32);
+            int bins = spec.discrete() ? spec.bins() : 32;
+            int bin = bridge.sampleAction(state, bins);
+            lastBin = bin; lastBins = bins;
+            return bin;
+        }
+        /** Last sampled drop column (−1 before the first sample). */
+        public int lastBin()  { return lastBin; }
+        public int lastBins() { return lastBins; }
+        /** Number of denoise / flow steps the sampler conceptually uses. */
+        public int steps() {
+            return bridge.type() == GenerativeModelBridge.ModelType.FLOW_MATCHING ? 4 : 16;
         }
     }
 }

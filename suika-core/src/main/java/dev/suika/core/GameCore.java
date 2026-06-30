@@ -151,7 +151,7 @@ public class GameCore {
      */
     public void spawnDrop(double x) {
         if (gameOver) return;
-        x = Math.clamp(x, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
+        x = clampDropForRadius(x, currentTier.radius);
         Body dropped = createFruitBody(currentTier, x, PhysicsConfig.DROP_Y);
         world.addBody(dropped);
         register(nextId++, dropped, currentTier);
@@ -182,6 +182,21 @@ public class GameCore {
         }
         return merges;
     }
+
+    /**
+     * Clamp a drop x so a fruit of the given {@code radius} lands fully inside the walls
+     * (its centre kept at least one radius from each inner wall). Prevents the fruit from
+     * spawning overlapping the side ledge and being shoved sideways by the physics.
+     */
+    public static double clampDropForRadius(double x, double radius) {
+        double lo = PhysicsConfig.LEFT_WALL_X  + radius;
+        double hi = PhysicsConfig.RIGHT_WALL_X - radius;
+        if (lo > hi) { double mid = (PhysicsConfig.LEFT_WALL_X + PhysicsConfig.RIGHT_WALL_X) / 2.0; lo = hi = mid; }
+        return Math.clamp(x, lo, hi);
+    }
+
+    /** Radius of the fruit that will drop next (for radius-aware drop-position guides). */
+    public double currentFruitRadius() { return currentTier.radius; }
 
     /** True when every live fruit body has settled — i.e. ready for the next drop. */
     public boolean allAtRest() { return isSettled(); }
