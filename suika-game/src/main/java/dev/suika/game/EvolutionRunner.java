@@ -3,12 +3,15 @@ package dev.suika.game;
 import dev.suika.ai.AgentPlugin;
 import dev.suika.ai.CmaEsTrainer;
 import dev.suika.ai.GeneticTrainer;
+import dev.suika.ai.MlpPolicy;
+import dev.suika.ai.NeuralAgent;
 import dev.suika.core.GameCore;
 import dev.suika.core.GameState;
 import dev.suika.core.PhysicsConfig;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Control center for the gradient-free learners (Neuroevolution GA, CMA-ES, PBT).
@@ -32,14 +35,30 @@ public final class EvolutionRunner extends AgentRunner {
     private volatile double bestFit = 0, meanFit = 0, bestSoFar = 0;
     private volatile boolean running = false;
     private Thread worker;
+    private volatile long trainStartNs = 0;
 
-    // Ghost boards: up to 3 extra parallel games driven by recent top agents
-    private static final int GHOST_COUNT = 3;
-    private final GameCore[]   ghostCores   = new GameCore[GHOST_COUNT];
-    private final AgentPlugin[] ghostAgents = new AgentPlugin[GHOST_COUNT];
-    private final double[]  ghostAccum      = new double[GHOST_COUNT];
-    private final float[]   ghostTimer      = new float[GHOST_COUNT];
-    private final int[]     ghostStartGen   = new int[GHOST_COUNT]; // generation this ghost's game began
+    /**
+     * Distinguishes worker "generations" across a RESTART. A shared boolean alone is
+     * racy here: an old worker thread, interrupted mid-iteration by restart(), could
+     * still be inside its catch block setting {@code running = false} right as the new
+     * worker (spawned moments later by the same restart()) sets it back to true —
+     * whichever write lands last wins, and could silently kill the new trainer. Each
+     * worker instead captures its own epoch snapshot at spawn time and only keeps
+     * looping while the shared counter still matches it; a dying old worker can never
+     * affect a newer one because it only ever compares against its own value.
+     */
+    private final AtomicLong epoch = new AtomicLong(0);
+
+    // Ghost boards: extra parallel games driven by recent top agents, alongside the
+    // champion. Count comes from cfg.eliteViewCount() (1-16, technique config) and is
+    // (re)allocated fresh in start()/restart() rather than fixed at construction, since
+    // the configured count can change between launches.
+    private int ghostCount;
+    private GameCore[]    ghostCores;
+    private AgentPlugin[] ghostAgents;
+    private double[]      ghostAccum;
+    private float[]       ghostTimer;
+    private int[]         ghostStartGen; // generation this ghost's game began
     private volatile List<AgentPlugin> topAgents = new ArrayList<>();
 
     public EvolutionRunner(SuikaGame game, PlaygroundConfig cfg) {
@@ -51,39 +70,70 @@ public final class EvolutionRunner extends AgentRunner {
     public void start() {
         super.start();
         int threads = cfg.evalThreads();
-        int sims    = Math.max(1, game.settings.simsPerGen());
+        int sims    = Math.max(1, cfg.simsPerGen());
         if (isCma) {
             cma = new CmaEsTrainer(0.3, sims, seed, threads);
         } else {
             int pop = Math.max(8, cfg.populationSize);
             ga = new GeneticTrainer(pop, Math.max(2, pop / 6), cfg.mutationSigma, sims, seed, threads);
         }
+        ghostCount    = Math.max(0, cfg.eliteViewCount() - 1);
+        ghostCores    = new GameCore[ghostCount];
+        ghostAgents   = new AgentPlugin[ghostCount];
+        ghostAccum    = new double[ghostCount];
+        ghostTimer    = new float[ghostCount];
+        ghostStartGen = new int[ghostCount];
+        trainStartNs = System.nanoTime();
         running = true;
-        worker = new Thread(this::trainLoop, "evolution-trainer");
+        long myEpoch = epoch.incrementAndGet();
+        worker = new Thread(() -> trainLoop(myEpoch), "evolution-trainer");
         worker.setDaemon(true);
         worker.start();
         initGhosts();
     }
 
+    /**
+     * Unlike the base RESTART (which only resets the live board), evolution's RESTART
+     * rebuilds the trainer from whatever the current config says — population size,
+     * eval threads, sims/generation. Without this, changing those knobs via the
+     * quick-settings hotswap would silently do nothing to an already-running trainer.
+     */
+    @Override
+    public void restart() {
+        epoch.incrementAndGet();   // old worker's loop condition goes false on its next check
+        if (worker != null) worker.interrupt();
+        if (ga  != null) { ga.close();  ga  = null; }
+        if (cma != null) { cma.close(); cma = null; }
+        generation = 0;
+        bestFit = 0; meanFit = 0; bestSoFar = 0;
+        fitnessChart.clear();
+        meanFitChart.clear();
+        topAgents = new ArrayList<>();
+        start();
+    }
+
     private void initGhosts() {
-        for (int i = 0; i < GHOST_COUNT; i++) {
+        for (int i = 0; i < ghostCount; i++) {
             ghostCores[i] = new GameCore(seed + i + 1);
             ghostTimer[i] = (i + 1) * 0.3f;
             ghostStartGen[i] = 0;
         }
     }
 
-    private void trainLoop() {
-        while (running) {
+    private void trainLoop(long myEpoch) {
+        while (running && epoch.get() == myEpoch) {
             try {
                 if (isCma) {
                     cma.update();
                     generation = cma.generation();
                     var champ = cma.bestAgent();
                     setAgent(champ);
-                    topAgents = List.of(champ);
                     bestFit = cma.bestFitness();
                     meanFit = cma.meanFitness();
+                    // this generation's top offspring, skipping index 0 (redundant with
+                    // the champion, already in agent())
+                    var top = cma.topAgents(ghostCount + 1);
+                    topAgents = top.size() > 1 ? top.subList(1, top.size()) : List.of();
                 } else {
                     ga.update();
                     generation = ga.generation();
@@ -91,21 +141,19 @@ public final class EvolutionRunner extends AgentRunner {
                     meanFit = ga.meanFitness();
                     setAgent(ga.bestAgent());
                     // expose top agents for ghost view (champion is already in agent())
-                    var elites = ga.eliteAgents();
-                    topAgents = elites != null && elites.size() > 1
-                            ? elites.subList(1, Math.min(elites.size(), GHOST_COUNT + 1))
-                            : List.of();
+                    var elites = ga.eliteAgents(ghostCount + 1);
+                    topAgents = elites.size() > 1 ? elites.subList(1, elites.size()) : List.of();
                 }
                 bestSoFar = Math.max(bestSoFar, bestFit);
                 fitnessChart.add((float) bestSoFar);
                 meanFitChart.add((float) meanFit);
                 // refresh ghost agents
                 List<AgentPlugin> ta = topAgents;
-                for (int i = 0; i < GHOST_COUNT; i++) {
+                for (int i = 0; i < ghostCount; i++) {
                     ghostAgents[i] = i < ta.size() ? ta.get(i) : agent();
                 }
             } catch (Exception e) {
-                running = false;
+                break; // this worker's run is over — don't touch the shared 'running' flag
             }
         }
     }
@@ -118,7 +166,7 @@ public final class EvolutionRunner extends AgentRunner {
     @Override
     protected void onUpdate(float dt) {
         super.onUpdate(dt);
-        for (int i = 0; i < GHOST_COUNT; i++) {
+        for (int i = 0; i < ghostCount; i++) {
             GameCore gc = ghostCores[i];
             if (gc == null) continue;
             // physics (capped per frame so 1024× speed doesn't freeze the UI)
@@ -131,7 +179,7 @@ public final class EvolutionRunner extends AgentRunner {
             }
             // Cull a ghost whose current game has outlived the configured lineage window,
             // so it restarts on the freshest elite instead of lingering for ever.
-            int cullGens = Math.max(1, game.settings.ghostCullGens());
+            int cullGens = Math.max(1, cfg.ghostCullGens());
             boolean tooOld = generation - ghostStartGen[i] >= cullGens;
             // auto-restart ghost if game over OR culled by age
             if (gc.isGameOver() || tooOld) {
@@ -157,19 +205,19 @@ public final class EvolutionRunner extends AgentRunner {
     /** Returns live game-states for the ghost boards (overlay mode; null entries skipped). */
     public GameState[] ghostStates() {
         if (!cfg.ghostView) return null;
-        GameState[] arr = new GameState[GHOST_COUNT];
-        for (int i = 0; i < GHOST_COUNT; i++) arr[i] = ghostCores[i] != null ? ghostCores[i].getState() : null;
+        GameState[] arr = new GameState[ghostCount];
+        for (int i = 0; i < ghostCount; i++) arr[i] = ghostCores[i] != null ? ghostCores[i].getState() : null;
         return arr;
     }
 
     /**
-     * Returns all 4 live game-states: [0]=champion, [1-3]=top elites.
-     * Used by the 4-quadrant grid when ghostView is off.
+     * Returns all configured live game-states: [0]=champion, [1..]=top elites.
+     * Used by the auto-grid when ghostView is off.
      */
     public GameState[] topStates() {
-        GameState[] arr = new GameState[4];
+        GameState[] arr = new GameState[ghostCount + 1];
         arr[0] = core.getState();
-        for (int i = 0; i < GHOST_COUNT; i++) arr[i + 1] = ghostCores[i] != null ? ghostCores[i].getState() : null;
+        for (int i = 0; i < ghostCount; i++) arr[i + 1] = ghostCores[i] != null ? ghostCores[i].getState() : null;
         return arr;
     }
 
@@ -177,25 +225,72 @@ public final class EvolutionRunner extends AgentRunner {
 
     @Override
     public String[] multiLabels() {
-        return new String[]{
-            "CHAMPION  ·  " + core.getScore(),
-            "ELITE #2",
-            "ELITE #3",
-            "ELITE #4",
-        };
+        String[] labels = new String[ghostCount + 1];
+        labels[0] = "CHAMPION  ·  " + core.getScore();
+        for (int i = 0; i < ghostCount; i++) {
+            labels[i + 1] = "ELITE #" + (i + 2) + "  ·  " + (ghostCores[i] != null ? ghostCores[i].getScore() : 0);
+        }
+        return labels;
     }
 
     @Override public LiveChart chart3()      { return meanFitChart; }
     @Override public String    chart3Label() { return "mean fitness  ·  " + Math.round(meanFit); }
 
+    /** Wall-clock seconds since this trainer started (resets on RESTART). */
+    private double trainingElapsedSeconds() {
+        return trainStartNs == 0 ? 0 : (System.nanoTime() - trainStartNs) / 1_000_000_000.0;
+    }
+
+    private String elapsedLabel() {
+        long s = (long) trainingElapsedSeconds();
+        return String.format("%02d:%02d", s / 60, s % 60);
+    }
+
+    private double gensPerMin() {
+        double mins = trainingElapsedSeconds() / 60.0;
+        return mins > 0.01 ? generation / mins : 0;
+    }
+
+    /** Population size actually being evaluated each generation (λ for CMA-ES). */
+    private int evalPopulation() {
+        if (isCma) return cma != null ? cma.lambda() : 0;
+        return Math.max(8, cfg.populationSize);
+    }
+
+    /** Cumulative average of full game simulations completed per second. */
+    private double evalsPerSec() {
+        double secs = trainingElapsedSeconds();
+        if (secs < 0.5) return 0;
+        long totalEpisodes = (long) generation * evalPopulation() * Math.max(1, cfg.simsPerGen());
+        return totalEpisodes / secs;
+    }
+
+    /** Population fitness spread (std-dev) — a live diversity signal, not just the mean. */
+    private double diversitySigma() {
+        if (isCma) return cma != null ? cma.stdDevFitness() : 0;
+        return ga != null ? ga.fitnessStdDev() : 0;
+    }
+
+    // NOTE ON LINE BUDGET: the landscape panel background is a FIXED height — text
+    // isn't clipped to it, so stats().length + extendedStats().length must stay at or
+    // below ~22 total or later lines render below the panel. stats() here is 8 lines.
     @Override
     public String[] extendedStats() {
-        return new String[]{
-            "elite views  " + Math.min(GHOST_COUNT + 1, 4) + " live",
-            "mutation rate " + String.format("%.3f", cfg.mutationSigma),
-            "sims/genome  " + Math.max(1, game.settings.simsPerGen()) + " parallel",
-            "ghost lineage " + Math.max(1, game.settings.ghostCullGens()) + " gens",
-        };
+        java.util.List<String> s = new java.util.ArrayList<>();
+        s.add("elapsed      " + elapsedLabel() + "  ·  " + String.format("%.1f", gensPerMin()) + " gens/min");
+        s.add("throughput   " + Math.round(evalsPerSec()) + " games/sec (parallel)");
+        s.add("diversity σ  " + Math.round(diversitySigma()) + "  ·  mutation " + String.format("%.3f", cfg.mutationSigma));
+        s.add("ghost lineage " + Math.max(1, cfg.ghostCullGens()) + " gens  ·  " + (ghostCount + 1) + " views");
+        s.add("genome       one MLP's weights, flattened to a single number list");
+        s.add("fitness      mean score over " + Math.max(1, cfg.simsPerGen())
+                + " seeded game" + (cfg.simsPerGen() > 1 ? "s" : "") + " per genome");
+        s.add(isCma
+                ? "search       adapts a Gaussian cloud toward top performers (no genome list)"
+                : "search       breeds elites + random mutation — gradient-free");
+        s.add("reads        584 numbers, not pixels: 8 global (score/tiers/fill) +");
+        s.add("             9 per fruit (position, speed, spin, tier, size, asleep)");
+        s.add("picks        1 of 32 drop columns (highest-scoring output wins)");
+        return s.toArray(new String[0]);
     }
 
     /** Short plain-language description of the live evolution step (for the subtitle). */
@@ -211,10 +306,11 @@ public final class EvolutionRunner extends AgentRunner {
     public String[] stats() {
         return new String[]{
             "generation   " + generation,
-            "best fitness " + Math.round(bestSoFar),
+            "best fitness " + Math.round(bestSoFar) + "  (this gen " + Math.round(bestFit) + ")",
             (isCma ? "mode         separable CMA-ES" : "mean fitness " + Math.round(meanFit)),
-            "population   " + (isCma ? "auto (λ)" : Math.max(8, cfg.populationSize)),
-            "eval threads " + (cfg.parallelism > 0 ? Integer.toString(cfg.evalThreads()) : "auto " + cfg.evalThreads()),
+            "population   " + evalPopulation() + (isCma ? " (λ, auto)" : ""),
+            "sims/genome  " + Math.max(1, cfg.simsPerGen()),
+            "eval threads " + cfg.parallelismLabel(),
             "champion sc. " + core.getScore(),
             "speed        " + cfg.speedLabel(),
         };
@@ -226,8 +322,38 @@ public final class EvolutionRunner extends AgentRunner {
     @Override
     public void dispose() {
         running = false;
+        epoch.incrementAndGet();
         if (worker != null) worker.interrupt();
         if (ga  != null) ga.close();
         if (cma != null) cma.close();
     }
+
+    // -------------------------------------------------------------------------
+    // Save / load — 3 slots per technique, persisted to disk (see ModelSlots).
+    // -------------------------------------------------------------------------
+
+    /** Persists the CURRENT champion's weights + best-so-far fitness into a slot. */
+    public boolean saveToSlot(int slot) {
+        if (!(agent() instanceof NeuralAgent na)) return false;
+        ModelSlots.save(cfg.technique.id, slot, na.policy(), bestSoFar);
+        return true;
+    }
+
+    /**
+     * Loads a slot and immediately adopts it as the live-playing agent. Also PAUSES
+     * training — the background trainer would otherwise overwrite this with its own
+     * next-generation champion within moments, since GA/CMA-ES don't have a concept of
+     * "resume evolving from an externally-loaded genome" (there's no population slot to
+     * put it in). Un-pause to keep evolving fresh from where the trainer already was,
+     * or hit RESTART to start a brand new run.
+     */
+    public boolean loadFromSlot(int slot) {
+        MlpPolicy p = ModelSlots.newCompatiblePolicy();
+        if (!ModelSlots.load(cfg.technique.id, slot, p)) return false;
+        setAgent(new NeuralAgent(p));
+        setPaused(true);
+        return true;
+    }
+
+    public ModelSlots.SlotInfo slotInfo(int slot) { return ModelSlots.info(cfg.technique.id, slot); }
 }

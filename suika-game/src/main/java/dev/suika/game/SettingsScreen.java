@@ -56,12 +56,21 @@ public final class SettingsScreen extends ScreenAdapter {
             ? "Ready  ·  venv" : "Not installed";
     private volatile boolean installing = false;
 
-    private static final float ROW_H       = 46f;
-    private static final float ROW_GAP      = 4f;
-    private static final float SECTION_GAP  = 38f;
+    private static final float ROW_H       = 54f;
+    private static final float ROW_GAP      = 6f;
+    private static final float SECTION_GAP  = 50f;
     private static final float CTRL_W       = 250f;
     private static final float MARGIN_X     = 60f;
-    private static final float TOP          = Theme.VH - 150f;
+    private static final float TOP          = Theme.VH - 200f;
+
+    // Scrollable list — the settings list has grown past a single screenful (adding
+    // "Bouncy fruit" + "Max GPU utilization" once pushed later rows behind the fixed
+    // BACK button with no way to reach them). LIST_BOT sits just above BACK with a
+    // small margin; anything scrolled above LIST_TOP or below LIST_BOT is masked out,
+    // mirroring AiPlaygroundScreen's technique-list scrolling.
+    private static final float LIST_TOP = TOP;
+    private static final float LIST_BOT = 170f;
+    private float scroll = 0f;
 
     public SettingsScreen(SuikaGame game, Function<SuikaGame, Screen> back) {
         this.game = game;
@@ -95,25 +104,23 @@ public final class SettingsScreen extends ScreenAdapter {
         // ---- Gameplay ----
         toggle("GAMEPLAY", "Immediate game over (no safety delay)",
                 () -> cfg.immediateDeadline, () -> cfg.immediateDeadline = !cfg.immediateDeadline);
+        toggle(null, "Bouncy fruit (no instant settle)",
+                () -> cfg.bounceEnabled, () -> { cfg.bounceEnabled = !cfg.bounceEnabled; cfg.applyPhysics(); });
 
-        // ---- AI Training (evolution / population learners) ----
-        cycle("AI TRAINING", "Eval parallelism", () -> cfg.evalThreadsLabel(),
-                () -> cfg.evalThreadsIndex = wrap(cfg.evalThreadsIndex - 1, GameSettings.EVAL_THREAD_OPTIONS.length),
-                () -> cfg.evalThreadsIndex = wrap(cfg.evalThreadsIndex + 1, GameSettings.EVAL_THREAD_OPTIONS.length));
-        cycle(null, "Simulations per generation", () -> Integer.toString(cfg.simsPerGen()),
-                () -> cfg.simsPerGenIndex = wrap(cfg.simsPerGenIndex - 1, GameSettings.SIMS_PER_GEN_OPTIONS.length),
-                () -> cfg.simsPerGenIndex = wrap(cfg.simsPerGenIndex + 1, GameSettings.SIMS_PER_GEN_OPTIONS.length));
-        cycle(null, "Ghost lineage (generations)", () -> cfg.ghostCullGens() + " gens",
-                () -> cfg.ghostCullIndex = wrap(cfg.ghostCullIndex - 1, GameSettings.GHOST_CULL_OPTIONS.length),
-                () -> cfg.ghostCullIndex = wrap(cfg.ghostCullIndex + 1, GameSettings.GHOST_CULL_OPTIONS.length));
-
-        // AI Watch configuration lives inside the AI game itself (side toggle per technique).
+        // AI training knobs (eval parallelism, sims/generation, ghost lineage) and AI
+        // Watch configuration both live inside the AI game itself (per-technique drawer
+        // in the AI Playground / quick-settings in the control center), not here —
+        // they only apply to specific techniques, not the app globally.
 
         // ---- AI Environment ----
         cycle("AI ENVIRONMENT", "Python env", () -> installStatus, null, null);
         button(null, "Download AI GPU deps",
                 () -> PythonSetup.isReady() ? "REINSTALL" : installing ? "WORKING…" : "SETUP",
                 this::startInstall);
+        slider(null, "Max GPU utilization (PPO training)",
+                () -> (cfg.gpuUtilPercent - 10) / 90.0,
+                f -> cfg.gpuUtilPercent = (int) (Math.round((10 + clamp01(f) * 90) / 5.0) * 5))
+                .value = () -> cfg.gpuUtilPercent + "%";
     }
 
     /** Shorten a progress line so it fits the ~250 px status cycler box. */
@@ -161,6 +168,10 @@ public final class SettingsScreen extends ScreenAdapter {
             @Override public boolean mouseMoved(int sx, int sy) {
                 camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight()); mx = touch.x; my = touch.y; return false;
             }
+            @Override public boolean scrolled(float ax, float ay) {
+                scroll = Math.max(0f, Math.min(scroll + ay * 46f, maxScroll()));
+                return true;
+            }
             @Override public boolean keyDown(int k) {
                 if (k == Input.Keys.ESCAPE) { game.setScreen(back.apply(game)); return true; }
                 return false;
@@ -168,10 +179,28 @@ public final class SettingsScreen extends ScreenAdapter {
         });
     }
 
+    /** Total vertical space every row + section header takes up, stacked top to bottom. */
+    private float contentHeight() {
+        float y = 0f;
+        for (Row r : rows) {
+            if (r.section != null) y -= SECTION_GAP;
+            y -= ROW_H;
+            y -= ROW_GAP;
+        }
+        return -y;
+    }
+
+    private float maxScroll() {
+        return Math.max(0f, contentHeight() - (LIST_TOP - LIST_BOT));
+    }
+
     private void handleClick(float x, float y) {
         if (backBtn.contains(x, y)) { game.setScreen(back.apply(game)); return; }
         for (Row r : rows) {
             if (!r.area.contains(x, y)) continue;
+            // Rows scrolled outside the visible list band are masked but their
+            // Rectangle still exists — don't let an off-screen row eat the click.
+            if (r.area.y + r.area.height > LIST_TOP || r.area.y < LIST_BOT) continue;
             switch (r.kind) {
                 case TOGGLE -> r.next.run();
                 case CYCLE  -> { if (r.prev != null && x < r.area.x + r.area.width / 2f) r.prev.run(); else if (r.next != null) r.next.run(); }
@@ -199,41 +228,46 @@ public final class SettingsScreen extends ScreenAdapter {
         s.begin(ShapeRenderer.ShapeType.Filled);
         s.rect(0, 0, Theme.VW, Theme.VH, Theme.BG_BOTTOM, Theme.BG_BOTTOM, Theme.BG_TOP, Theme.BG_TOP);
 
-        float y = TOP;
+        float y = LIST_TOP + scroll;
         for (Row r : rows) {
             if (r.section != null) y -= SECTION_GAP;     // reserve a band for the header
             float rowTop = y;
             float rowBot = y - ROW_H;
             r.area.set(ctrlX, rowBot + 9f, CTRL_W, ROW_H - 18f);
 
-            // row background
-            s.setColor(Theme.PANEL.r, Theme.PANEL.g, Theme.PANEL.b, 0.55f);
-            Ui.fillRoundRect(s, MARGIN_X, rowBot + 4f, Theme.VW - 2 * MARGIN_X, ROW_H - 8f, 10f);
+            // Rows scrolled outside the visible list band ([LIST_BOT, LIST_TOP]) are
+            // simply not drawn — the fixed-position title and BACK button live outside
+            // that band, so nothing else may render there either.
+            if (rowTop > LIST_BOT && rowBot < LIST_TOP) {
+                // row background
+                s.setColor(Theme.PANEL.r, Theme.PANEL.g, Theme.PANEL.b, 0.55f);
+                Ui.fillRoundRect(s, MARGIN_X, rowBot + 4f, Theme.VW - 2 * MARGIN_X, ROW_H - 8f, 10f);
 
-            switch (r.kind) {
-                case TOGGLE -> Ui.toggle(s, r.area.x + r.area.width - 70f, r.area.y + 3f, 60f, r.area.height - 6f, r.on.getAsBoolean());
-                case CYCLE  -> {
-                    boolean hov = r.area.contains(mx, my);
-                    s.setColor(Theme.PANEL_DEEP);
-                    Ui.fillRoundRect(s, r.area.x, r.area.y, r.area.width, r.area.height, 8f);
-                    s.setColor(hov && mx < r.area.x + r.area.width / 2f ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
-                    Ui.fillRoundRect(s, r.area.x + 4f, r.area.y + 4f, 32f, r.area.height - 8f, 6f);
-                    s.setColor(hov && mx >= r.area.x + r.area.width / 2f ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
-                    Ui.fillRoundRect(s, r.area.x + r.area.width - 36f, r.area.y + 4f, 32f, r.area.height - 8f, 6f);
-                }
-                case SLIDER -> {
-                    s.setColor(Theme.PANEL_DEEP);
-                    Ui.fillRoundRect(s, r.area.x, r.area.y + r.area.height / 2f - 5f, r.area.width, 10f, 5f);
-                    float f = (float) r.frac.getAsDouble();
-                    s.setColor(Theme.ACCENT_2);
-                    Ui.fillRoundRect(s, r.area.x, r.area.y + r.area.height / 2f - 5f, r.area.width * f, 10f, 5f);
-                    s.setColor(0.97f, 0.98f, 1f, 1f);
-                    s.circle(r.area.x + r.area.width * f, r.area.y + r.area.height / 2f, 11f, 18);
-                }
-                case BUTTON -> {
-                    boolean hov = r.area.contains(mx, my);
-                    s.setColor(hov ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
-                    Ui.fillRoundRect(s, r.area.x, r.area.y, r.area.width, r.area.height, 8f);
+                switch (r.kind) {
+                    case TOGGLE -> Ui.toggle(s, r.area.x + r.area.width - 70f, r.area.y + 3f, 60f, r.area.height - 6f, r.on.getAsBoolean());
+                    case CYCLE  -> {
+                        boolean hov = r.area.contains(mx, my);
+                        s.setColor(Theme.PANEL_DEEP);
+                        Ui.fillRoundRect(s, r.area.x, r.area.y, r.area.width, r.area.height, 8f);
+                        s.setColor(hov && mx < r.area.x + r.area.width / 2f ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
+                        Ui.fillRoundRect(s, r.area.x + 4f, r.area.y + 4f, 32f, r.area.height - 8f, 6f);
+                        s.setColor(hov && mx >= r.area.x + r.area.width / 2f ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
+                        Ui.fillRoundRect(s, r.area.x + r.area.width - 36f, r.area.y + 4f, 32f, r.area.height - 8f, 6f);
+                    }
+                    case SLIDER -> {
+                        s.setColor(Theme.PANEL_DEEP);
+                        Ui.fillRoundRect(s, r.area.x, r.area.y + r.area.height / 2f - 5f, r.area.width, 10f, 5f);
+                        float f = (float) r.frac.getAsDouble();
+                        s.setColor(Theme.ACCENT_2);
+                        Ui.fillRoundRect(s, r.area.x, r.area.y + r.area.height / 2f - 5f, r.area.width * f, 10f, 5f);
+                        s.setColor(0.97f, 0.98f, 1f, 1f);
+                        s.circle(r.area.x + r.area.width * f, r.area.y + r.area.height / 2f, 11f, 18);
+                    }
+                    case BUTTON -> {
+                        boolean hov = r.area.contains(mx, my);
+                        s.setColor(hov ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
+                        Ui.fillRoundRect(s, r.area.x, r.area.y, r.area.width, r.area.height, 8f);
+                    }
                 }
             }
             y = rowBot - ROW_GAP;
@@ -246,27 +280,33 @@ public final class SettingsScreen extends ScreenAdapter {
         game.batch.begin();
         Ui.textCenter(game.batch, game.fontBig, "SETTINGS", Theme.VW / 2f, Theme.VH - 120f, Theme.TEXT);
 
-        y = TOP;
+        y = LIST_TOP + scroll;
         for (Row r : rows) {
             if (r.section != null) {
-                Ui.text(game.batch, game.fontMed, r.section, MARGIN_X, y - 14f, Theme.GOLD);
+                if (y > LIST_BOT && y < LIST_TOP + SECTION_GAP) // mirrors the row visibility check below
+                    Ui.text(game.batch, game.fontMed, r.section, MARGIN_X, y - 14f, Theme.GOLD);
                 y -= SECTION_GAP;
             }
             float rowTop = y;
             float rowBot = y - ROW_H;
-            float labelY = rowBot + ROW_H / 2f + 8f;
-            Ui.text(game.batch, game.font, r.label, MARGIN_X + 16f, labelY, Theme.TEXT);
-            if (r.kind == Kind.CYCLE) {
-                Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
-                        r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);
-                if (r.prev != null) Ui.textCenter(game.batch, game.fontMed, "<", r.area.x + 20f, r.area.y + r.area.height / 2f + 1f, Theme.TEXT);
-                if (r.next != null) Ui.textCenter(game.batch, game.fontMed, ">", r.area.x + r.area.width - 20f, r.area.y + r.area.height / 2f + 1f, Theme.TEXT);
-            } else if (r.kind == Kind.TOGGLE && r.value != null) {
-                Ui.textRight(game.batch, game.fontSmall, r.value.get(),
-                        r.area.x + r.area.width - 80f, labelY - 2f, Theme.TEXT_DIM);
-            } else if (r.kind == Kind.BUTTON) {
-                Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
-                        r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);
+            if (rowTop > LIST_BOT && rowBot < LIST_TOP) {   // same band as the shape pass
+                float labelY = rowBot + ROW_H / 2f + 8f;
+                Ui.text(game.batch, game.font, r.label, MARGIN_X + 16f, labelY, Theme.TEXT);
+                if (r.kind == Kind.CYCLE) {
+                    Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
+                            r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);
+                    if (r.prev != null) Ui.textCenter(game.batch, game.fontMed, "<", r.area.x + 20f, r.area.y + r.area.height / 2f + 1f, Theme.TEXT);
+                    if (r.next != null) Ui.textCenter(game.batch, game.fontMed, ">", r.area.x + r.area.width - 20f, r.area.y + r.area.height / 2f + 1f, Theme.TEXT);
+                } else if (r.kind == Kind.TOGGLE && r.value != null) {
+                    Ui.textRight(game.batch, game.fontSmall, r.value.get(),
+                            r.area.x + r.area.width - 80f, labelY - 2f, Theme.TEXT_DIM);
+                } else if (r.kind == Kind.SLIDER && r.value != null) {
+                    Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
+                            r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f + 22f, Theme.TEXT);
+                } else if (r.kind == Kind.BUTTON) {
+                    Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
+                            r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);
+                }
             }
             y = rowBot - ROW_GAP;
         }

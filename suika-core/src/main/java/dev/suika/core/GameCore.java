@@ -272,7 +272,9 @@ public class GameCore {
         Body b = new Body();
         BodyFixture f = new BodyFixture(Geometry.createRectangle(w, h));
         f.setFriction(PhysicsConfig.FRICTION_STATIC);
-        f.setRestitution(0.0);
+        // Walls/floor share the same toggle as fruit — otherwise a 0-restitution wall
+        // could still fully absorb bounce on impact regardless of the fruit's own value.
+        f.setRestitution(PhysicsConfig.restitution);
         b.addFixture(f);
         b.setMass(MassType.INFINITE);
         b.translate(cx, cy);
@@ -282,7 +284,7 @@ public class GameCore {
     private Body createFruitBody(FruitTier tier, double x, double y) {
         Body b = new Body();
         BodyFixture f = new BodyFixture(Geometry.createCircle(tier.radius));
-        f.setRestitution(PhysicsConfig.RESTITUTION);
+        f.setRestitution(PhysicsConfig.restitution);
         f.setFriction(PhysicsConfig.FRICTION_DYNAMIC);
         f.setDensity(PhysicsConfig.BASE_DENSITY * tier.radius * tier.radius);
         b.addFixture(f);

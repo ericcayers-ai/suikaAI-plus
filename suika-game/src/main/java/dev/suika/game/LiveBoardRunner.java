@@ -26,10 +26,23 @@ public abstract class LiveBoardRunner implements TechniqueRunner {
     private double accumulator = 0;
     protected final LiveChart scoreChart = new LiveChart(260);
 
+    // Board-space transform for merge feedback (particle bursts, score pops). Defaults
+    // to the portrait constants so SuikaScreen (always portrait, never calls
+    // setPopTransform) keeps working unchanged; ControlCenterScreen calls
+    // setPopTransform once per frame with whichever orientation is actually on screen —
+    // without this, pops/particles for a landscape single-board view were computed with
+    // portrait's OX/SCALE and rendered far from the (differently-positioned) board.
+    private float popOx = BoardRenderer.OX, popOy = BoardRenderer.OY, popScale = BoardRenderer.SCALE;
+
     protected LiveBoardRunner(SuikaGame game, PlaygroundConfig cfg) {
         this.game = game;
         this.cfg  = cfg;
         this.speed = cfg.speed();
+    }
+
+    @Override
+    public void setPopTransform(float ox, float oy, float scale) {
+        popOx = ox; popOy = oy; popScale = scale;
     }
 
     protected void newGame() {
@@ -80,8 +93,8 @@ public abstract class LiveBoardRunner implements TechniqueRunner {
 
     protected void onMerge(MergeEvent m) {
         if (m.resultTier() != null) {
-            float vpx = BoardRenderer.vpx(m.spawnX());
-            float vpy = BoardRenderer.vpy(m.spawnY());
+            float vpx = popOx + (float) m.spawnX() * popScale;
+            float vpy = popOy + (float) m.spawnY() * popScale;
             if (game.settings.particles) {
                 game.particles.burst(vpx, vpy, FruitColors.of(m.resultTier()), 10 + m.resultTier().tier * 2);
             }

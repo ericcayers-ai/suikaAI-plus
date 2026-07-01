@@ -135,9 +135,18 @@ public final class SuikaScreen extends ScreenAdapter {
         });
     }
 
+    /**
+     * Converts the mouse position to a drop-x, clamped by the CURRENT fruit's own
+     * radius (not a fixed margin) so the ghost preview lands exactly where
+     * {@link GameCore#spawnDrop(double)} will actually place it — previously this used
+     * a small fixed {@code DROP_X_MIN}/{@code DROP_X_MAX} margin, so large fruit near a
+     * wall would preview closer to the wall than it actually settled.
+     */
     private void updateHoverFromScreen() {
         float gx = (touch.x - BoardRenderer.OX) / BoardRenderer.SCALE;
-        hoverGameX = MathUtils.clamp(gx, (float) PhysicsConfig.DROP_X_MIN, (float) PhysicsConfig.DROP_X_MAX);
+        float radius = core.getState().currentFruitTier() != null
+                ? core.getState().currentFruitTier().radius : 0.5f;
+        hoverGameX = (float) GameCore.clampDropForRadius(gx, radius);
     }
 
     private void handlePauseClick(float x, float y) {

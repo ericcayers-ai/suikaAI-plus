@@ -80,4 +80,78 @@ public final class MlpPolicy {
         for (int i = 1; i < logits.length; i++) if (logits[i] > logits[best]) best = i;
         return best;
     }
+
+    /**
+     * Analytical gradient of the average softmax cross-entropy loss over a batch, with
+     * respect to every weight — one forward pass + one backward pass per sample.
+     *
+     * <p>Replaces a finite-difference approximation that took a forward pass <em>per
+     * parameter</em> ({@link #paramCount()} of them — tens of thousands for this
+     * architecture's typical observation size) to estimate a single gradient; that made
+     * one training update take several seconds, which is why live imitation-learning
+     * training barely produced an update per session. This is the exact same gradient,
+     * computed the standard way, at a small constant multiple of one forward pass
+     * instead of {@code paramCount()} of them.
+     *
+     * @param inputs  batch of observation vectors
+     * @param targets batch of target action indices, one per input
+     * @return flat gradient array in the same layout as {@link #getWeights()}
+     */
+    public double[] backpropCrossEntropyGradient(float[][] inputs, int[] targets) {
+        int n = inputs.length;
+        double[] grad = new double[weights.length];
+        if (n == 0) return grad;
+
+        int w1Offset = 0;
+        int b1Offset = inputSize * hiddenSize;
+        int w2Offset = b1Offset + hiddenSize;
+        int b2Offset = w2Offset + hiddenSize * outputSize;
+
+        double[] hidden = new double[hiddenSize];
+        double[] logits = new double[outputSize];
+        double[] dz2    = new double[outputSize];
+        double[] da1    = new double[hiddenSize];
+
+        for (int s = 0; s < n; s++) {
+            float[] x = inputs[s];
+            int y = targets[s];
+
+            // ---- forward ----
+            for (int h = 0; h < hiddenSize; h++) {
+                double sum = weights[b1Offset + h];
+                for (int i = 0; i < inputSize; i++) sum += weights[w1Offset + h * inputSize + i] * x[i];
+                hidden[h] = Math.tanh(sum);
+            }
+            double maxL = Double.NEGATIVE_INFINITY;
+            for (int o = 0; o < outputSize; o++) {
+                double sum = weights[b2Offset + o];
+                for (int h = 0; h < hiddenSize; h++) sum += weights[w2Offset + o * hiddenSize + h] * hidden[h];
+                logits[o] = sum;
+                if (sum > maxL) maxL = sum;
+            }
+            double sumExp = 0;
+            for (int o = 0; o < outputSize; o++) { dz2[o] = Math.exp(logits[o] - maxL); sumExp += dz2[o]; }
+            // dz2 currently holds unnormalised exp(logit); turn it into the softmax
+            // cross-entropy gradient dL/dz2 = softmax(logits) - one_hot(y) in place.
+            for (int o = 0; o < outputSize; o++) dz2[o] = dz2[o] / sumExp - (o == y ? 1.0 : 0.0);
+
+            // ---- backward ----
+            java.util.Arrays.fill(da1, 0.0);
+            for (int o = 0; o < outputSize; o++) {
+                double d = dz2[o];
+                for (int h = 0; h < hiddenSize; h++) {
+                    grad[w2Offset + o * hiddenSize + h] += d * hidden[h];
+                    da1[h] += d * weights[w2Offset + o * hiddenSize + h];
+                }
+                grad[b2Offset + o] += d;
+            }
+            for (int h = 0; h < hiddenSize; h++) {
+                double dz1 = da1[h] * (1.0 - hidden[h] * hidden[h]); // tanh'(z) = 1 - tanh(z)^2
+                for (int i = 0; i < inputSize; i++) grad[w1Offset + h * inputSize + i] += dz1 * x[i];
+                grad[b1Offset + h] += dz1;
+            }
+        }
+        for (int i = 0; i < grad.length; i++) grad[i] /= n;
+        return grad;
+    }
 }

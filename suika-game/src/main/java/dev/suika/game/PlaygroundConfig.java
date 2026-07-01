@@ -16,13 +16,37 @@ public final class PlaygroundConfig {
     /**
      * Worker threads for parallel evaluation / rollouts (where applicable).
      * {@code 0} means "Auto" — let the runtime pick (all available cores), which is the
-     * fastest, GPU-like fan-out setting. A positive value pins it to that many threads.
+     * fastest fan-out setting. A positive value pins it to that many threads.
      */
     public int parallelism = 0;   // 0 = Auto (all cores)
 
     /** Resolve {@link #parallelism} to an actual thread count (Auto → all cores). */
     public int evalThreads() {
         return parallelism > 0 ? parallelism : Math.max(1, Runtime.getRuntime().availableProcessors());
+    }
+
+    /**
+     * Display label for the Parallelism cycler. Honest about compute: only
+     * {@link AiTechnique#gpuCapableTraining()} (currently just PPO's real
+     * {@code --device} flag) shows "GPU" when {@link GpuProbe} has detected one — every
+     * other technique's parallel work (evolution eval pool, root-parallel MCTS,
+     * column-parallel Greedy) runs on the JVM with dyn4j physics, which has no CUDA
+     * path, so those always read as a CPU thread/core count regardless of GPU presence.
+     */
+    public String parallelismLabel() {
+        if (parallelism > 0) return parallelism + (technique.gpuCapableTraining() ? " envs" : " threads");
+        if (technique.gpuCapableTraining()) {
+            Boolean gpu = GpuProbe.available();
+            if (gpu == null) return "Auto (probing GPU…)";
+            return gpu ? "Auto (GPU" + (GpuProbe.deviceName() != null ? ": " + shortDevice() : "") + ")"
+                       : "Auto (" + evalThreads() + " cores)";
+        }
+        return "Auto (" + evalThreads() + " cores)";
+    }
+
+    private String shortDevice() {
+        String d = GpuProbe.deviceName();
+        return d.length() > 18 ? d.substring(0, 17) + "…" : d;
     }
 
     public int actionBins = 32;
@@ -45,6 +69,36 @@ public final class PlaygroundConfig {
      * overlaid on the champion's live game, so you can see the population divergence.
      */
     public boolean ghostView = false;
+
+    // ---- Evolution-only launch config (Neuroevo / CMA-ES / PBT) ----
+
+    /**
+     * Simulations (independent game-overs) averaged per genome each generation. More
+     * sims = less noisy fitness, but more compute. They run <em>simultaneously</em>,
+     * not one after another — see {@link dev.suika.ai.GeneticTrainer}.
+     */
+    public static final int[] SIMS_PER_GEN_OPTIONS = {1, 2, 3, 5, 8};
+    public int simsPerGenIndex = 0;       // default 1
+
+    /**
+     * How many generations of elites are kept alive as on-screen "ghost" boards before
+     * the oldest are culled and restarted on the freshest elite. Higher = watch more of
+     * the population's lineage diverge before it's replaced.
+     */
+    public static final int[] GHOST_CULL_OPTIONS = {1, 2, 3, 5, 8, 12};
+    public int ghostCullIndex = 1;        // default 2 generations
+
+    /**
+     * How many live boards to show at once — the champion plus its top elites (GA) or
+     * this generation's top offspring (CMA-ES). The grid auto-arranges into
+     * {@code ceil(sqrt(n))} columns for whatever count is chosen.
+     */
+    public static final int[] ELITE_VIEW_OPTIONS = {1, 2, 3, 4, 6, 8, 10, 12, 16};
+    public int eliteViewIndex = 3;        // default 4 (existing champion + 3 elites)
+
+    public int simsPerGen()     { return SIMS_PER_GEN_OPTIONS[simsPerGenIndex]; }
+    public int ghostCullGens()  { return GHOST_CULL_OPTIONS[ghostCullIndex]; }
+    public int eliteViewCount() { return ELITE_VIEW_OPTIONS[eliteViewIndex]; }
 
     public float speed() { return SPEEDS[Math.floorMod(speedIndex, SPEEDS.length)]; }
 

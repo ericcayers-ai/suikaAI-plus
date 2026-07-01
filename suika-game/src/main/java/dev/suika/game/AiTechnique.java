@@ -25,10 +25,10 @@ public enum AiTechnique {
             false, true, true, true,
             "On-policy policy-gradient via Stable-Baselines3. Pairs with the vector env."),
     DQN("dqn", "DQN / Rainbow", "Deep RL", "either", "learning", Family.PYTHON,
-            false, true, true, true,
+            false, true, false, true,
             "Value-based off-policy learning with replay. Discrete drop columns."),
     SAC("sac", "SAC", "Deep RL", "state", "learning", Family.PYTHON,
-            false, true, true, true,
+            false, true, false, true,
             "Off-policy max-entropy actor-critic for continuous drop position."),
 
     // ---- Model-based: learn and plan inside a world model ----
@@ -58,7 +58,7 @@ public enum AiTechnique {
             true, false, false, true,
             "Learn to copy YOUR drops from your recorded games. Train-on-my-playstyle."),
     GAIL("gail", "Inverse RL / GAIL", "Imitation", "state", "imitation+RL", Family.PYTHON,
-            false, true, true, true,
+            false, true, false, true,
             "Recover the reward behind demos, then optimise it. Learns the why."),
 
     // ---- Offline: learn from logged data without live interaction ----
@@ -66,7 +66,7 @@ public enum AiTechnique {
             true, true, false, true,
             "Return-conditioned sequence modeling. 'Play to reach score X.'"),
     OFFLINE_RL("offline", "Offline RL (CQL/IQL)", "Offline", "either", "offline", Family.PYTHON,
-            false, true, true, true,
+            false, true, false, true,
             "Learn from logged games with no live interaction. Conservative value learning."),
 
     // ---- Generative: denoising / flow-based action generation ----
@@ -95,6 +95,14 @@ public enum AiTechnique {
 
     public final String id, display, category, dataMode, kind, blurb;
     public final Family family;
+    /**
+     * {@code parallel}: true only when the "Parallelism" control in the AI Playground
+     * drawer has a real, wired effect for this technique — root-parallel search
+     * (MCTS/AlphaZero/MuZero/Dreamer/SelfPlay), column-parallel evaluation (Greedy),
+     * the evolution eval pool (Neuroevo/CMA-ES/PBT), or PPO's {@code --n-envs}/
+     * {@code --device} training flags. Everywhere else it's {@code false} so the drawer
+     * honestly shows "n/a" instead of a knob that silently does nothing.
+     */
     public final boolean jvmNative, python, parallel, speed;
 
     AiTechnique(String id, String display, String category, String dataMode, String kind,
@@ -107,6 +115,15 @@ public enum AiTechnique {
     }
 
     public boolean imitationBased() { return family == Family.IMITATION; }
+
+    /**
+     * True only for the one technique whose shown training command has a real,
+     * existing {@code --device} flag that a detected GPU can actually satisfy
+     * ({@code python -m suika.train_ppo}). Every other Python-family technique's
+     * training script is either CPU-only or not yet implemented, so claiming
+     * GPU use there would be misleading — see {@link GpuProbe}'s class doc.
+     */
+    public boolean gpuCapableTraining() { return this == PPO; }
 
     /**
      * A plain-English, no-prior-knowledge explanation of the technique, already split

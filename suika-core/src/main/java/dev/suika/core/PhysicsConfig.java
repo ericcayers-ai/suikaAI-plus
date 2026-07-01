@@ -21,7 +21,16 @@ public final class PhysicsConfig {
     public static final double GRAVITY_Y = -43.0;
 
     // --- Material ---
-    public static final double RESTITUTION      = 0.0;   // no bounce; merge spawns land cleanly
+    /**
+     * Fruit/wall bounciness. Mutable (not {@code final}) so the "Bouncy fruit" setting
+     * can flip it at runtime — every other value here is a fixed calibration constant,
+     * but threading this through as a constructor parameter would touch the 50+
+     * {@code new GameCore(seed)} call sites across every trainer, runner, and test, for
+     * a pure gameplay-feel toggle. {@code volatile} since AI evaluation can run
+     * {@link GameCore} instances on background threads concurrently with the setting
+     * being flipped from the render thread.
+     */
+    public static volatile double restitution = 0.0;   // no bounce; merge spawns land cleanly
     public static final double FRICTION_STATIC  = 0.7;
     public static final double FRICTION_DYNAMIC = 0.5;
 

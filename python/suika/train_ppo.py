@@ -28,13 +28,14 @@ def make_env(seed: int = 0, action_bins: int = 32):
 
 
 def train(
-    timesteps:   int   = 500_000,
-    action_bins: int   = 32,
-    n_envs:      int   = 8,
-    lr:          float = 3e-4,
-    seed:        int   = 0,
-    out_dir:     str   = "models/ppo_suika",
-    device:      str   = "auto",
+    timesteps:        int   = 500_000,
+    action_bins:      int   = 32,
+    n_envs:           int   = 8,
+    lr:               float = 3e-4,
+    seed:             int   = 0,
+    out_dir:          str   = "models/ppo_suika",
+    device:           str   = "auto",
+    gpu_mem_fraction: float = 1.0,
 ) -> None:
     try:
         from stable_baselines3 import PPO
@@ -43,6 +44,17 @@ def train(
         raise SystemExit(
             "stable-baselines3 is required: pip install stable-baselines3 torch"
         ) from e
+
+    if 0.0 < gpu_mem_fraction < 1.0:
+        import torch
+        if torch.cuda.is_available():
+            # This caps the fraction of GPU memory this process is allowed to allocate —
+            # the closest honest, real lever torch exposes to a "max GPU utilization"
+            # setting; there's no first-class hard compute-throughput limiter in
+            # stock PyTorch/CUDA, only memory-fraction (which in practice constrains
+            # batch/model size and so indirectly limits how much of the card gets used).
+            torch.cuda.set_per_process_memory_fraction(gpu_mem_fraction)
+            print(f"GPU memory fraction capped at {gpu_mem_fraction:.0%}")
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -115,6 +127,8 @@ def main() -> None:
     parser.add_argument("--seed",        type=int,   default=0)
     parser.add_argument("--out",         type=str,   default="models/ppo_suika")
     parser.add_argument("--device",      type=str,   default="auto")
+    parser.add_argument("--gpu-mem-fraction", type=float, default=1.0,
+                         help="Cap this process's CUDA memory fraction (0-1); see train()'s docstring.")
     args = parser.parse_args()
 
     train(
@@ -125,6 +139,7 @@ def main() -> None:
         seed=args.seed,
         out_dir=args.out,
         device=args.device,
+        gpu_mem_fraction=args.gpu_mem_fraction,
     )
 
 

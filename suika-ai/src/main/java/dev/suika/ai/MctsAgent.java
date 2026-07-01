@@ -144,6 +144,23 @@ public final class MctsAgent implements AgentPlugin {
     /** Number of discrete drop columns this agent reasons over. */
     public int actionBins() { return actionBins; }
 
+    /** Max steps of heuristic-guided play simulated per rollout beyond the search tree. */
+    public int rolloutDepth() { return rolloutDepth; }
+    /** Configured rollout budget (nominal — the wall-clock deadline can cut this short). */
+    public int rollouts() { return rollouts; }
+
+    /**
+     * Returns a fresh, independent instance with identical hyperparameters (its own
+     * tree, its own {@link Random} stream). Used to run root-parallel search: several
+     * forks each build a full independent tree for the same decision on separate
+     * threads, and their visit counts are summed to make the final pick — "more
+     * simulations happening at the same time" for a single move, not just more total
+     * rollouts run serially.
+     */
+    public MctsAgent fork() {
+        return new MctsAgent(rollouts, explorationC, rolloutDepth, actionBins);
+    }
+
     // -------------------------------------------------------------------------
 
     private List<Integer> allActions() {

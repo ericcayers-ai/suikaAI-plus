@@ -60,6 +60,8 @@ public class SuikaGame extends Game {
         bold.dispose();
 
         settings.applyDisplay();
+        settings.applyPhysics();
+        GpuProbe.ensureStarted(); // background CUDA probe; resolves well before AI Playground is opened
         setScreen(new MainMenuScreen(this));
     }
 
@@ -68,9 +70,10 @@ public class SuikaGame extends Game {
         p.size       = size;
         p.color      = Color.WHITE;
         // Default ASCII plus the typographic glyphs the UI uses (em-dash, minus sign,
-        // ellipsis, dot, arrows). The minus sign (U+2212) is distinct from the ASCII
-        // hyphen and is used by the +/− cyclers.
-        p.characters = FreeTypeFontGenerator.DEFAULT_CHARS + "—−…·•≈→←×÷";
+        // ellipsis, dot, arrows, a few Greek letters ML stat labels favour — σ/λ/μ/α/β/θ).
+        // The minus sign (U+2212) is distinct from the ASCII hyphen and is used by the
+        // +/− cyclers.
+        p.characters = FreeTypeFontGenerator.DEFAULT_CHARS + "—−…·•≈→←×÷σ±λμαβθ";
         p.genMipMaps = true;
         p.minFilter  = Texture.TextureFilter.MipMapLinearLinear;
         p.magFilter  = Texture.TextureFilter.Linear;

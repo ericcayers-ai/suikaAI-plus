@@ -64,4 +64,12 @@ public interface TechniqueRunner {
     void restart();
     void setSpeed(float multiplier);
     void setParallelism(int threads);
+
+    /**
+     * Board-space transform (ox, oy, scale) the runner should use for merge feedback
+     * (particle bursts, score pops) — set once per frame by the owning screen so those
+     * effects land at the right place regardless of portrait/landscape orientation.
+     * No-op by default; only single-live-board runners ({@link LiveBoardRunner}) need it.
+     */
+    default void setPopTransform(float ox, float oy, float scale) { }
 }

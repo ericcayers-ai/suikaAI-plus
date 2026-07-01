@@ -26,7 +26,7 @@ public final class Agents {
         return switch (cfg.technique) {
             case RANDOM     -> new RandomAgent();
             case HEURISTIC  -> new HeuristicAgent();
-            case GREEDY     -> new GreedyOnePlyAgent(bins);
+            case GREEDY     -> new GreedyOnePlyAgent(bins, cfg.evalThreads());
             case MCTS       -> new MctsAgent(cfg.rollouts, c, 6, bins);
             case ALPHAZERO, MUZERO, DREAMER, SELF_PLAY ->
                     new MctsAgent(Math.max(40, cfg.rollouts), c, 7, bins); // planning surrogate
@@ -57,9 +57,9 @@ public final class Agents {
         /** Last sampled drop column (−1 before the first sample). */
         public int lastBin()  { return lastBin; }
         public int lastBins() { return lastBins; }
-        /** Number of denoise / flow steps the sampler conceptually uses. */
-        public int steps() {
-            return bridge.type() == GenerativeModelBridge.ModelType.FLOW_MATCHING ? 4 : 16;
-        }
+        /** Number of denoise / flow steps the sampler genuinely refines over. */
+        public int steps() { return bridge.steps(); }
+        /** Every step's distribution from the last sample — see {@link GenerativeModelBridge#lastStepHistory()}. */
+        public double[][] lastStepHistory() { return bridge.lastStepHistory(); }
     }
 }

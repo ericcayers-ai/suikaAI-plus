@@ -99,6 +99,18 @@ public final class BoardRenderer {
 
     /** Alpha-multiplied variant used for ghost overlay rendering. */
     public void drawBoard(ShapeRenderer s, GameState gs, GameSettings cfg, Particles particles, float alpha) {
+        drawBoard(s, gs, cfg, particles, alpha, Float.MAX_VALUE);
+    }
+
+    /**
+     * As above, but any fruit whose top edge would render more than
+     * {@code maxAboveTopPx} virtual pixels above the well's top wall is skipped instead
+     * of drawn. Used by the multi-board grid, where a tall/dense stack could otherwise
+     * bleed into the caption reserved just above each mini-board; the single-board view
+     * (via the other overload) has no such neighbour and never clips.
+     */
+    public void drawBoard(ShapeRenderer s, GameState gs, GameSettings cfg, Particles particles, float alpha,
+                          float maxAboveTopPx) {
         float wallT  = bvpr(PhysicsConfig.WALL_THICKNESS);
         float innerL = bvpx(0);
         float innerR = bvpx(PhysicsConfig.CONTAINER_WIDTH);
@@ -144,7 +156,10 @@ public final class BoardRenderer {
 
         // Fruits (glossy, depth-shaded)
         for (Fruit f : gs.fruits()) {
-            drawFruit(s, bvpx(f.x()), bvpy(f.y()), bvpr(f.radius()), f.tier(), cfg, alpha);
+            float fr = bvpr(f.radius());
+            float fcy = bvpy(f.y());
+            if (fcy + fr > topY + maxAboveTopPx) continue; // clipped: would bleed above this board's own region
+            drawFruit(s, bvpx(f.x()), fcy, fr, f.tier(), cfg, alpha);
         }
 
         // Merge particles (only on main board)

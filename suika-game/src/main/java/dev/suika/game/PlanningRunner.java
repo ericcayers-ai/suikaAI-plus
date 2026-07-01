@@ -1,11 +1,12 @@
 package dev.suika.game;
 
+import dev.suika.ai.GreedyOnePlyAgent;
 import dev.suika.ai.MctsAgent;
 
 /**
  * Control center for the baseline & planning techniques (Random, Heuristic, Greedy,
  * MCTS, AlphaZero search). The agent plays live; diagnostics expose move latency and,
- * for MCTS, the rollout budget and visit distribution.
+ * for MCTS/Greedy, the parallel search fan-out and visit/score distribution.
  */
 public final class PlanningRunner extends AgentRunner {
 
@@ -17,31 +18,64 @@ public final class PlanningRunner extends AgentRunner {
                 + (thinking() ? "  ·  thinking..." : "  ·  playing");
     }
 
+    private double dropsPerMin() {
+        double mins = elapsedSeconds() / 60.0;
+        return mins > 0.01 ? drops / mins : 0;
+    }
+
     @Override
     public String[] stats() {
         java.util.List<String> s = new java.util.ArrayList<>();
         s.add("score        " + core.getScore());
         s.add("best         " + bestScore());
         s.add("games        " + gamesPlayed);
-        s.add("drops        " + drops);
+        s.add("drops        " + drops + "  (" + String.format("%.0f", dropsPerMin()) + "/min)");
         s.add("think        " + thinkMs() + " ms");
         s.add("columns      " + cfg.actionBins);
         if (agent() instanceof MctsAgent) {
-            s.add("rollouts     " + cfg.rollouts + " / move");
-            s.add("planner      perfect-model MCTS");
+            s.add("rollouts     " + cfg.rollouts + " / move"
+                    + (parallelWorkers() > 1 ? " x " + parallelWorkers() + " trees" : "  ·  1 tree"));
+        } else if (agent() instanceof GreedyOnePlyAgent g && g.threads() > 1) {
+            s.add("eval         " + cfg.actionBins + " columns / " + g.threads() + " threads");
         }
         s.add("speed        " + cfg.speedLabel());
         return s.toArray(new String[0]);
     }
 
+    /** Actual rollouts executed for the last move — from the visit-count bars, which sum
+     *  to exactly the number of simulations run (each rollout increments one leaf's
+     *  count on backup). Can be less than {@code cfg.rollouts} if the ms budget cut the
+     *  search short, or more (x trees) when root-parallel search combined several trees. */
+    private long actualSimulatedFutures() {
+        int[] bars = columnBars();
+        if (bars == null) return 0;
+        long sum = 0;
+        for (int v : bars) sum += v;
+        return sum;
+    }
+
+    // NOTE ON LINE BUDGET: the landscape panel background is a FIXED height (see
+    // ControlCenterScreen.panelBounds()) — text isn't clipped to it, so stats().length +
+    // extendedStats().length must stay at or below ~22 total or later lines render
+    // below the panel, over the board/control bar. stats() here is 8 lines, so keep
+    // extendedStats() at roughly 12 or fewer.
     @Override
     public String[] extendedStats() {
         java.util.List<String> s = new java.util.ArrayList<>();
-        s.add("model        perfect simulator");
+        s.add("model        perfect simulator (exact physics, not learned)");
         s.add("action space " + cfg.actionBins + " drop columns");
-        if (agent() instanceof MctsAgent) {
-            s.add("budget       " + cfg.maxThinkMs + " ms / move");
-            s.add("selection    UCB1 + heuristic rollouts");
+        if (agent() instanceof MctsAgent m) {
+            int trees = Math.max(1, parallelWorkers());
+            s.add("budget       " + cfg.maxThinkMs + " ms/move — a time cutoff, not a rollout");
+            s.add("             count; a slow move just completes fewer of them");
+            s.add("simulated    " + actualSimulatedFutures() + " futures this move ("
+                    + cfg.rollouts + " rollouts x " + trees + (trees == 1 ? " tree" : " trees") + ")");
+            s.add("selection    UCB1 — mostly the best column so far, sometimes");
+            s.add("             an under-explored one, " + m.rolloutDepth() + "-step heuristic rollouts");
+            s.add("why rollouts more = better moves but slower — a real trade-off");
+            s.add("             (cycle Rollouts in SETUP, watch think-time move)");
+            s.add("compute      100% CPU — no GPU path here (only Python techniques");
+            s.add("             like PPO can actually use one)");
         } else {
             s.add("policy       " + cfg.technique.kind);
         }

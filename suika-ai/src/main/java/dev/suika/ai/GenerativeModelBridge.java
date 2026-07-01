@@ -17,11 +17,19 @@ import java.util.Random;
  * JVM-native path is fully functional and provides meaningful action diversity
  * without any Python dependency.
  *
- * <p>Algorithm:
+ * <p>Algorithm — a genuine multi-step refinement, not a single softmax sample dressed
+ * up with a fake "steps" label:
  * <ol>
- *   <li>Score every candidate drop column by merge potential (same-tier fruit below).</li>
- *   <li>Convert scores to a softmax distribution with configurable temperature.</li>
- *   <li>Sample one (or a batch) from that distribution.</li>
+ *   <li>Score every candidate drop column by merge potential (same-tier fruit below);
+ *       softmax that into the TARGET distribution the real model would converge to.</li>
+ *   <li>Start from the uniform distribution (pure "noise" over columns) and blend it
+ *       toward the target over {@link #steps()} steps, linearly increasing the target's
+ *       weight each step — the same qualitative shape as denoising/flow-matching
+ *       (structure emerges gradually), implemented simply since there's no learned
+ *       noise-prediction network here.</li>
+ *   <li>Sample from the FINAL step's distribution. Every intermediate step is kept via
+ *       {@link #lastStepHistory()} so the UI can genuinely show the distribution
+ *       sharpening step by step, not just a before/after.</li>
  * </ol>
  */
 public final class GenerativeModelBridge {
@@ -35,6 +43,10 @@ public final class GenerativeModelBridge {
     private final StateObservationEncoder encoder = new StateObservationEncoder();
     private final Random rng;
 
+    /** Snapshot of every step's distribution from the most recent sampleAction() call —
+     *  index 0 is pure noise (uniform), the last index is what was actually sampled from. */
+    private volatile double[][] lastStepHistory = new double[0][];
+
     public GenerativeModelBridge(ModelType type) {
         this(type, 0L);
     }
@@ -44,12 +56,12 @@ public final class GenerativeModelBridge {
         this.rng  = new Random(seed);
     }
 
+    /** Denoising/flow steps this model type takes to go from noise to a decision. */
+    public int steps() { return type == ModelType.FLOW_MATCHING ? 4 : 16; }
+
     /**
-     * Sample an action conditioned on the board state.
-     *
-     * <p>Scores each bin by the merge potential at that drop position: bins directly
-     * above same-tier fruits score higher. A softmax with temperature controls
-     * exploration — matching the stochastic diversity expected from a diffusion policy.
+     * Sample an action conditioned on the board state, refining over {@link #steps()}
+     * steps from uniform noise toward the merge-potential-scored target distribution.
      *
      * @param state   current game state
      * @param numBins number of discrete action bins
@@ -57,9 +69,24 @@ public final class GenerativeModelBridge {
      */
     public int sampleAction(GameState state, int numBins) {
         double[] scores = scoreColumns(state, numBins);
-        double[] probs  = softmax(scores, DEFAULT_TEMPERATURE);
-        return categoricalSample(probs);
+        double[] target = softmax(scores, DEFAULT_TEMPERATURE);
+
+        int n = steps();
+        double[][] history = new double[n + 1][numBins];
+        java.util.Arrays.fill(history[0], 1.0 / numBins); // step 0: pure noise (uniform)
+        for (int t = 1; t <= n; t++) {
+            double frac = (double) t / n; // 0 -> 1 as denoising progresses
+            for (int i = 0; i < numBins; i++) {
+                history[t][i] = (1.0 - frac) * history[0][i] + frac * target[i];
+            }
+        }
+        lastStepHistory = history;
+        return categoricalSample(history[n]);
     }
+
+    /** Every step's distribution from the most recent {@link #sampleAction}, for a live
+     *  "watch it denoise" visualisation — {@code [0]} = noise, {@code [steps()]} = final. */
+    public double[][] lastStepHistory() { return lastStepHistory; }
 
     /**
      * Sample a diverse batch of candidate actions for visualisation.

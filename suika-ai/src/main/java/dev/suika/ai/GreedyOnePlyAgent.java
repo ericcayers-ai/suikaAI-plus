@@ -15,6 +15,7 @@ import dev.suika.core.StepResult;
 public final class GreedyOnePlyAgent implements AgentPlugin {
 
     private final int actionBins;
+    private final int threads;
 
     /** Normalised per-bin scores (0–100) from the most recent selectAction call. */
     private volatile int[] lastBinScores = new int[0];
@@ -22,10 +23,26 @@ public final class GreedyOnePlyAgent implements AgentPlugin {
     /** No-arg constructor for {@link java.util.ServiceLoader} discovery. */
     public GreedyOnePlyAgent() { this(32); }
 
-    public GreedyOnePlyAgent(int actionBins) { this.actionBins = actionBins; }
+    public GreedyOnePlyAgent(int actionBins) { this(actionBins, 1); }
+
+    /**
+     * @param threads how many columns to simulate at once. Each column's "drop and
+     *                settle" is fully independent (its own {@code GameCore} fork), so
+     *                this fans the {@code actionBins} columns out across plain worker
+     *                threads (spun up and joined per decision — cheap relative to a
+     *                physics settle, and avoids any pool lifecycle to manage across
+     *                repeated launches). {@code 1} keeps the original sequential loop.
+     */
+    public GreedyOnePlyAgent(int actionBins, int threads) {
+        this.actionBins = actionBins;
+        this.threads = Math.max(1, threads);
+    }
 
     /** Returns a copy of the per-bin evaluation scores normalised to 0–100. */
     public int[] lastScores() { return lastBinScores; }
+
+    /** Worker threads this agent fans column evaluation out across ({@code 1} = sequential). */
+    public int threads() { return threads; }
 
     @Override public String id()          { return "greedy-1ply"; }
     @Override public String displayName() { return "Greedy One-Ply"; }
@@ -57,14 +74,29 @@ public final class GreedyOnePlyAgent implements AgentPlugin {
     public Object selectAction(GameCore liveCore, ActionSpec spec) {
         long     baseScore = liveCore.getScore();
         double[] scores    = new double[actionBins];
-        int      bestAction = 0;
-        double   bestValue  = Double.NEGATIVE_INFINITY;
 
+        if (threads <= 1) {
+            evaluateColumns(liveCore, baseScore, scores, 0, actionBins);
+        } else {
+            // Every column's "fork + drop + settle" is fully independent, so split the
+            // columns into contiguous chunks and simulate them on separate threads —
+            // real simultaneous simulation, not just a nicer-looking setting.
+            int n = Math.min(threads, actionBins);
+            Thread[] workers = new Thread[n];
+            for (int t = 0; t < n; t++) {
+                int lo = (int) ((long) actionBins * t / n);
+                int hi = (int) ((long) actionBins * (t + 1) / n);
+                workers[t] = new Thread(() -> evaluateColumns(liveCore, baseScore, scores, lo, hi), "greedy-eval-" + t);
+                workers[t].start();
+            }
+            for (Thread w : workers) {
+                try { w.join(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            }
+        }
+
+        int    bestAction = 0;
+        double bestValue  = Double.NEGATIVE_INFINITY;
         for (int a = 0; a < actionBins; a++) {
-            GameCore fork = liveCore.snapshot();
-            StepResult r  = fork.dropAndSettle(binToX(a));
-            scores[a] = r.observation().score() - baseScore;
-            if (r.terminated()) scores[a] -= 10.0;
             if (scores[a] > bestValue) { bestValue = scores[a]; bestAction = a; }
         }
 
@@ -81,6 +113,17 @@ public final class GreedyOnePlyAgent implements AgentPlugin {
         lastBinScores = norm;
 
         return spec.discrete() ? bestAction : binToX(bestAction);
+    }
+
+    /** Simulates columns {@code [lo, hi)} and writes their score-deltas into {@code scores}. */
+    private void evaluateColumns(GameCore liveCore, long baseScore, double[] scores, int lo, int hi) {
+        for (int a = lo; a < hi; a++) {
+            GameCore fork = liveCore.snapshot();
+            StepResult r  = fork.dropAndSettle(binToX(a));
+            double value = r.observation().score() - baseScore;
+            if (r.terminated()) value -= 10.0;
+            scores[a] = value;
+        }
     }
 
     private double binToX(int a) {

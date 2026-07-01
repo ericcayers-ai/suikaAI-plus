@@ -41,13 +41,19 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private static final float INFO_R  = 11f;
     private static final float INFO_CX = CARD_X + CARD_W - INFO_R - 12f;
 
-    // Drawer controls
-    private final Rectangle speedCtrl = new Rectangle(420, 252, 260, 34);
-    private final Rectangle paraCtrl  = new Rectangle(420, 210, 260, 34);
-    private final Rectangle paramCtrl = new Rectangle(420, 168, 260, 34);
-    private final Rectangle ghostCtrl = new Rectangle(420, 126, 260, 34);
-    private final Rectangle backBtn   = new Rectangle(36, 36, 300, 64);
-    private final Rectangle launchBtn = new Rectangle(Theme.VW - 336, 36, 300, 64);
+    // Drawer controls — 7 stacked rows so evolution's launch knobs (sims/gen, ghost
+    // lineage, elite view count) fit in the same drawer as everything else, "n/a"
+    // elsewhere just like Parallelism/Param/Ghost-view already are for techniques that
+    // don't use them.
+    private final Rectangle speedCtrl     = new Rectangle(420, 286, 260, 24);
+    private final Rectangle paraCtrl      = new Rectangle(420, 256, 260, 24);
+    private final Rectangle paramCtrl     = new Rectangle(420, 226, 260, 24);
+    private final Rectangle simsCtrl      = new Rectangle(420, 196, 260, 24);
+    private final Rectangle ghostCullCtrl = new Rectangle(420, 166, 260, 24);
+    private final Rectangle eliteViewCtrl = new Rectangle(420, 136, 260, 24);
+    private final Rectangle ghostCtrl     = new Rectangle(420, 106, 260, 24);
+    private final Rectangle backBtn       = new Rectangle(36, 16, 300, 64);
+    private final Rectangle launchBtn     = new Rectangle(Theme.VW - 336, 16, 300, 64);
 
     // Infocard modal (null = closed)
     private AiTechnique infocardTech = null;
@@ -67,7 +73,6 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         this.cfg  = existing != null ? existing : new PlaygroundConfig();
         if (existing == null) cfg.selectDefaultsFor(AiTechnique.MCTS);
         cfg.actionBins = game.settings.actionBins();
-        if (existing == null) cfg.parallelism = game.settings.evalThreadsSetting();
         viewport = new FitViewport(Theme.VW, Theme.VH, camera);
         camera.position.set(Theme.VW / 2f, Theme.VH / 2f, 0f);
         camera.update();
@@ -133,6 +138,18 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             cfg.parallelism = MathUtils.clamp(cfg.parallelism + dir(x, paraCtrl), 0, cores); return;
         }
         if (paramCtrl.contains(x, y) && paramApplicable()) { cycleParam(dir(x, paramCtrl)); return; }
+        if (simsCtrl.contains(x, y) && ghostApplicable()) {
+            cfg.simsPerGenIndex = wrap(cfg.simsPerGenIndex + dir(x, simsCtrl), PlaygroundConfig.SIMS_PER_GEN_OPTIONS.length);
+            return;
+        }
+        if (ghostCullCtrl.contains(x, y) && ghostApplicable()) {
+            cfg.ghostCullIndex = wrap(cfg.ghostCullIndex + dir(x, ghostCullCtrl), PlaygroundConfig.GHOST_CULL_OPTIONS.length);
+            return;
+        }
+        if (eliteViewCtrl.contains(x, y) && ghostApplicable()) {
+            cfg.eliteViewIndex = wrap(cfg.eliteViewIndex + dir(x, eliteViewCtrl), PlaygroundConfig.ELITE_VIEW_OPTIONS.length);
+            return;
+        }
         if (ghostCtrl.contains(x, y) && ghostApplicable()) { cfg.ghostView = !cfg.ghostView; return; }
 
         for (int i = 0; i < techs.length; i++) {
@@ -250,15 +267,18 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         Ui.fillRoundRect(s, 0, 0, Theme.VW, LIST_BOT, 0);
 
         // Drawer controls
+        boolean ghostEn = ghostApplicable();
         drawCycler(s, speedCtrl, true);
         drawCycler(s, paraCtrl,  cfg.technique.parallel);
         drawCycler(s, paramCtrl, paramApplicable());
-        boolean ghostEn = ghostApplicable();
+        drawCycler(s, simsCtrl,      ghostEn);
+        drawCycler(s, ghostCullCtrl, ghostEn);
+        drawCycler(s, eliteViewCtrl, ghostEn);
         s.setColor(ghostEn ? Theme.PANEL_DEEP : new Color(0.10f, 0.11f, 0.16f, 0.6f));
         Ui.fillRoundRect(s, ghostCtrl.x, ghostCtrl.y, ghostCtrl.width, ghostCtrl.height, 8);
         if (ghostEn) Ui.toggle(s,
-                ghostCtrl.x + ghostCtrl.width - 64f, ghostCtrl.y + 5f,
-                58f, ghostCtrl.height - 10f, cfg.ghostView);
+                ghostCtrl.x + ghostCtrl.width - 64f, ghostCtrl.y + 3f,
+                58f, ghostCtrl.height - 6f, cfg.ghostView);
         Ui.button(s, backBtn,   Theme.PANEL_EDGE, backBtn.contains(mx, my),   true);
         Ui.button(s, launchBtn, Theme.ACCENT_2,   launchBtn.contains(mx, my), true);
 
@@ -392,12 +412,15 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
                 t.category + "  ·  " + t.kind,
                 CARD_X + 4, 330, Theme.TEXT_DIM);
 
-        cyclerText("Speed",       cfg.speedLabel(),             speedCtrl, true);
-        cyclerText("Parallelism", cfg.parallelism == 0 ? "Auto (GPU/cores)" : cfg.parallelism + " threads",
-                paraCtrl,  t.parallel);
-        cyclerText(paramLabel(),  paramValue(),                 paramCtrl, paramApplicable());
+        cyclerText("Speed",       cfg.speedLabel(),      speedCtrl, true);
+        cyclerText("Parallelism", cfg.parallelismLabel(), paraCtrl,  t.parallel);
+        cyclerText(paramLabel(),  paramValue(),          paramCtrl, paramApplicable());
 
         boolean ghostEn = ghostApplicable();
+        cyclerText("Sims/generation", Integer.toString(cfg.simsPerGen()),   simsCtrl,      ghostEn);
+        cyclerText("Ghost lineage",   cfg.ghostCullGens() + " gens",        ghostCullCtrl, ghostEn);
+        cyclerText("Elite views",     cfg.eliteViewCount() + "x",           eliteViewCtrl, ghostEn);
+
         Color glc = ghostEn ? Theme.TEXT : Theme.TEXT_FAINT;
         Ui.text(game.batch, game.font, "Ghost overlay",
                 CARD_X + 4, ghostCtrl.y + ghostCtrl.height / 2f + 8, glc);
@@ -413,13 +436,13 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
     private void cyclerText(String label, String value, Rectangle r, boolean enabled) {
         Color lc = enabled ? Theme.TEXT : Theme.TEXT_FAINT;
-        Ui.text(game.batch, game.font, label, CARD_X + 4, r.y + r.height / 2f + 8, lc);
+        Ui.text(game.batch, game.fontSmall, label, CARD_X + 4, r.y + r.height / 2f + 7, lc);
         if (!enabled) {
             Ui.textCenter(game.batch, game.fontSmall, "n/a",
                     r.x + r.width / 2f, r.y + r.height / 2f, Theme.TEXT_FAINT);
             return;
         }
-        Ui.textCenter(game.batch, game.font,    value,
+        Ui.textCenter(game.batch, game.fontSmall, value,
                 r.x + r.width / 2f, r.y + r.height / 2f, Theme.TEXT);
         Ui.textCenter(game.batch, game.fontMed, "<",
                 r.x + 19,           r.y + r.height / 2f + 1, Theme.TEXT);

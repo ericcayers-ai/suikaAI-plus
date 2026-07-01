@@ -49,12 +49,22 @@ public final class ImitationRunner extends LiveBoardRunner {
 
     private final LiveChart lossChart = new LiveChart(200);
     private final LiveChart accChart  = new LiveChart(200);
+    // chart3: how far ahead of (or behind) the clone you are, sampled once per drop of
+    // yours so a 260-sample buffer covers a real chunk of playing history.
+    private final LiveChart leadChart = new LiveChart(260);
+    private int lastLeadSampleDrops = -1;
     private volatile double loss = 0, accuracy = 0;
     private volatile int updates = 0;
     private float accTimer = 0f;
 
     private volatile boolean running = false;
     private Thread worker;
+
+    private final long sessionStartNs = System.nanoTime();
+    private double updatesPerSec() {
+        double secs = (System.nanoTime() - sessionStartNs) / 1_000_000_000.0;
+        return secs > 0.5 ? updates / secs : 0;
+    }
 
     public ImitationRunner(SuikaGame game, PlaygroundConfig cfg) {
         super(game, cfg);
@@ -96,6 +106,11 @@ public final class ImitationRunner extends LiveBoardRunner {
 
         // Drive the AI clone's own live board (right) once a policy exists.
         stepClone(dt);
+
+        if (drops != lastLeadSampleDrops) {
+            lastLeadSampleDrops = drops;
+            leadChart.add((float) (core.getScore() - (aiClone != null ? aiClone.getScore() : 0)));
+        }
 
         // periodic action-match accuracy on the captured demos
         accTimer -= dt;
@@ -158,6 +173,23 @@ public final class ImitationRunner extends LiveBoardRunner {
         };
     }
 
+    /**
+     * Test/QA hook: jump straight to the TRAIN phase without waiting for a full live
+     * game to actually end. Real gravity-paced physics makes finishing an entire game
+     * take tens of real-time seconds — far too slow for an automated capture sweep —
+     * so this seeds a few extra synthetic demos on top of whatever was already
+     * captured live and starts training immediately.
+     */
+    void forceTrainPhaseForCapture() {
+        if (phase == Phase.TRAIN) return;
+        for (int i = 0; dataset.size() < 8; i++) {
+            float[] obs = encoder.encode(core.getState());
+            dataset.add(new Demonstration(obs, xToBin(2.0f + (i % 6)), 0.0, false));
+        }
+        firstDropDone = true;
+        startTraining();
+    }
+
     private void startTraining() {
         phase = Phase.TRAIN;
         if (bc == null) bc = new BehavioralCloningTrainer(dataset, cfg.learningRate, 4);
@@ -167,10 +199,21 @@ public final class ImitationRunner extends LiveBoardRunner {
         worker.start();
     }
 
+    /**
+     * Floor on time between training iterations (~25/s). Before the backprop fix (see
+     * {@link dev.suika.ai.MlpPolicy#backpropCrossEntropyGradient}), one {@code bc.update()}
+     * took several seconds, so this loop was naturally paced by its own cost. Now an
+     * update takes milliseconds, so left unthrottled this would spin at effectively
+     * unlimited updates/sec, pegging a full CPU core for no real benefit — the loss
+     * chart doesn't need more than a few dozen fresh points a second to read as "live".
+     */
+    private static final long MIN_ITERATION_NANOS = 40_000_000L; // 25/s
+
     private void trainLoop() {
         MctsAgent expert = isDagger ? new MctsAgent(40, Math.sqrt(2), 5, cfg.actionBins) : null;
         long expertSeed = 4242L;
         while (running) {
+            long t0 = System.nanoTime();
             try {
                 // DAgger: aggregate MCTS-expert labels from fresh states.
                 if (isDagger) {
@@ -191,6 +234,12 @@ public final class ImitationRunner extends LiveBoardRunner {
                 }
             } catch (Exception e) {
                 running = false;
+                break;
+            }
+            long remaining = MIN_ITERATION_NANOS - (System.nanoTime() - t0);
+            if (remaining > 0) {
+                try { Thread.sleep(remaining / 1_000_000L, (int) (remaining % 1_000_000L)); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
             }
         }
     }
@@ -253,26 +302,88 @@ public final class ImitationRunner extends LiveBoardRunner {
 
     @Override
     public String[] stats() {
+        long you = core.getScore();
+        long clone = aiClone != null ? aiClone.getScore() : 0;
+        long delta = clone - you;
         return new String[]{
             "phase        " + (phase == Phase.WATCH_FIRST ? "capture (game 1)" : "train + play"),
             "demos        " + dataset.size(),
-            "bc updates   " + updates,
+            "bc updates   " + updates + "  (" + String.format("%.1f", updatesPerSec()) + "/s)",
             "loss         " + String.format("%.3f", loss),
             "match acc.   " + String.format("%.0f%%", accuracy),
-            "your score   " + core.getScore(),
-            "clone score  " + (aiClone != null ? aiClone.getScore() : 0),
+            "scores       you " + you + "  ·  clone " + clone
+                    + "  (" + (delta >= 0 ? "+" : "") + delta + ")",
+            "clone games  " + cloneGames,
             isDagger ? "expert       MCTS relabeling" : "method       supervised cloning",
         };
+    }
+
+    /** Plain-language read on where the current loss sits, since a bare number means
+     *  little without context (cross-entropy over 32 columns starts around ln(32)≈3.47
+     *  for a random guess and trends toward 0 as it learns your pattern). */
+    private String lossReading() {
+        if (updates == 0) return "not trained yet";
+        if (loss > 3.0)   return "still near random — early days";
+        if (loss > 1.5)   return "learning — starting to prefer some columns";
+        if (loss > 0.5)   return "converging — clearly favours certain columns";
+        return "confident — closely tracking your pattern";
+    }
+
+    // NOTE ON LINE BUDGET: the landscape panel background is a FIXED height — text
+    // isn't clipped to it, so stats().length + extendedStats().length must stay at or
+    // below ~22 total or later lines render below the panel. stats() here is 8 lines.
+    @Override
+    public String[] extendedStats() {
+        java.util.List<String> s = new java.util.ArrayList<>();
+        s.add("learning rate " + String.format("%.0e", cfg.learningRate) + "  ·  " + lossReading());
+        s.add("higher LR    learns faster but can overshoot (loss bounces instead");
+        s.add("             of settling); lower LR is steadier but slower to learn");
+        s.add("             (cycle Learning rate in SETUP, watch the loss chart's shape)");
+        s.add("reads        584 numbers, not pixels: 8 global (fruit/score/danger");
+        s.add("             timer/fill) + 9 per fruit (position, speed, spin, tier,");
+        s.add("             size, settled) — " + core.getState().fruits().size() + "/64 slots used right now");
+        if (isDagger) {
+            s.add("DAgger       a 40-rollout MCTS expert also relabels states between");
+            s.add("             your drops, so the clone learns beyond what you've shown it");
+        }
+        return s.toArray(new String[0]);
     }
 
     @Override public LiveChart chart1()      { return accChart; }
     @Override public String    chart1Label() { return "match accuracy  ·  " + String.format("%.0f%%", accuracy); }
     @Override public LiveChart chart2()      { return lossChart; }
     @Override public String    chart2Label() { return "BC loss  ·  " + String.format("%.3f", loss); }
+    @Override public LiveChart chart3()      { return leadChart; }
+    @Override public String    chart3Label() {
+        return leadChart.size() == 0 ? "lead (you − clone)" : "lead (you − clone)  ·  " + Math.round(leadChart.latest());
+    }
 
     @Override
     public void dispose() {
         running = false;
         if (worker != null) worker.interrupt();
     }
+
+    // -------------------------------------------------------------------------
+    // Save / load — 3 slots per technique, persisted to disk (see ModelSlots).
+    // -------------------------------------------------------------------------
+
+    /** Persists the current cloned policy's weights + match accuracy into a slot. */
+    public boolean saveToSlot(int slot) {
+        if (bc == null) return false;
+        ModelSlots.save(cfg.technique.id, slot, bc.policy(), accuracy);
+        return true;
+    }
+
+    /**
+     * Loads a slot's weights directly into the live policy. Unlike evolution, no pause
+     * is needed — BC/DAgger keep fine-tuning whatever policy is currently loaded with
+     * ordinary SGD steps, so this just resumes training from the saved point.
+     */
+    public boolean loadFromSlot(int slot) {
+        if (bc == null) bc = new dev.suika.ai.BehavioralCloningTrainer(dataset, cfg.learningRate, 4);
+        return ModelSlots.load(cfg.technique.id, slot, bc.policy());
+    }
+
+    public ModelSlots.SlotInfo slotInfo(int slot) { return ModelSlots.info(cfg.technique.id, slot); }
 }

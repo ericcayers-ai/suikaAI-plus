@@ -7,7 +7,8 @@ import java.util.List;
  *
  * <p>Trains an {@link MlpPolicy} by minimising cross-entropy loss between
  * the policy's action-logits and the expert's action labels (argmin supervised learning).
- * Uses SGD with a configurable learning rate.
+ * Uses SGD (analytical backprop gradient — see {@link MlpPolicy#backpropCrossEntropyGradient})
+ * with a configurable learning rate.
  *
  * <p>This is the JVM-native "train an AI on my playstyle" trainer.
  * A gradient-based deep-network version runs in Python (see {@code python/suika/bc.py}).
@@ -47,8 +48,15 @@ public final class BehavioralCloningTrainer implements TrainerPlugin {
         if (dataset.size() == 0) return;
         List<Demonstration> batch = dataset.sample(batchSize);
 
+        float[][] inputs  = new float[batch.size()][];
+        int[]     targets = new int[batch.size()];
+        for (int i = 0; i < batch.size(); i++) {
+            inputs[i]  = batch.get(i).observation();
+            targets[i] = batch.get(i).action();
+        }
+
         double[] weights = policy.getWeights();
-        double[] grad    = computeGradient(batch, weights);
+        double[] grad    = policy.backpropCrossEntropyGradient(inputs, targets);
 
         // SGD step
         for (int i = 0; i < weights.length; i++) {
@@ -62,37 +70,4 @@ public final class BehavioralCloningTrainer implements TrainerPlugin {
     public NeuralAgent trainedAgent() { return new NeuralAgent(policy); }
     public MlpPolicy   policy()        { return policy; }
     public int         updateCount()   { return updateCount; }
-
-    /**
-     * Finite-difference gradient estimate of cross-entropy loss w.r.t. weights.
-     * Production implementation would use backprop; this is correct but slow.
-     * The Python BC trainer uses autograd for large networks.
-     */
-    private double[] computeGradient(List<Demonstration> batch, double[] weights) {
-        double eps    = 1e-4;
-        double[] grad = new double[weights.length];
-        double baseLoss = crossEntropyLoss(batch, weights);
-
-        for (int i = 0; i < weights.length; i++) {
-            weights[i] += eps;
-            double plusLoss = crossEntropyLoss(batch, weights);
-            weights[i] -= eps;
-            grad[i] = (plusLoss - baseLoss) / eps;
-        }
-        return grad;
-    }
-
-    private double crossEntropyLoss(List<Demonstration> batch, double[] weights) {
-        policy.setWeights(weights);
-        double loss = 0.0;
-        for (Demonstration d : batch) {
-            double[] logits = policy.forward(d.observation());
-            double maxL = Double.NEGATIVE_INFINITY;
-            for (double l : logits) if (l > maxL) maxL = l;
-            double sumExp = 0.0;
-            for (double l : logits) sumExp += Math.exp(l - maxL);
-            loss -= (logits[d.action()] - maxL) - Math.log(sumExp);
-        }
-        return loss / batch.size();
-    }
 }

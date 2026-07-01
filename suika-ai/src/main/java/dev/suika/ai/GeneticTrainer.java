@@ -177,15 +177,31 @@ public final class GeneticTrainer implements TrainerPlugin, AutoCloseable {
 
     public double bestFitness()  { return Arrays.stream(fitness).max().orElse(0); }
     public double meanFitness()  { return Arrays.stream(fitness).average().orElse(0); }
+    /** Population fitness spread (standard deviation) — a live diversity signal. */
+    public double fitnessStdDev() {
+        double mean = meanFitness();
+        double sq = Arrays.stream(fitness).map(v -> (v - mean) * (v - mean)).sum();
+        return Math.sqrt(sq / Math.max(1, fitness.length));
+    }
+    /** Configured population size. */
+    public int populationSize() { return populationSize; }
     public int    generation()   { return generation; }
 
-    /** Returns the top-N agents by fitness (index 0 = champion). */
-    public List<AgentPlugin> eliteAgents() {
+    /** Returns the top-{@link #eliteCount} agents by fitness (index 0 = champion). */
+    public List<AgentPlugin> eliteAgents() { return eliteAgents(eliteCount); }
+
+    /**
+     * Returns the top-{@code topN} agents by fitness (index 0 = champion), independent
+     * of the breeding elite count — used so the UI can show more (or fewer) live
+     * "ghost" boards than the GA actually keeps for reproduction.
+     */
+    public List<AgentPlugin> eliteAgents(int topN) {
         Integer[] order = new Integer[populationSize];
         for (int i = 0; i < populationSize; i++) order[i] = i;
         Arrays.sort(order, Comparator.comparingDouble((Integer i) -> fitness[i]).reversed());
-        List<AgentPlugin> result = new ArrayList<>(eliteCount);
-        for (int e = 0; e < Math.min(eliteCount, populationSize); e++) result.add(buildAgent(population[order[e]]));
+        int n = Math.min(Math.max(0, topN), populationSize);
+        List<AgentPlugin> result = new ArrayList<>(n);
+        for (int e = 0; e < n; e++) result.add(buildAgent(population[order[e]]));
         return result;
     }
 

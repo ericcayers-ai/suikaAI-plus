@@ -22,49 +22,45 @@ public final class GameSettings {
     public boolean screenShake   = true;  // small camera kick on big merges
 
     // ---- Simulation ----
-    public static final int[] BIN_OPTIONS = {16, 32, 64};
+    public static final int[] BIN_OPTIONS = {16, 32, 64, 128};
     public int     binIndex        = 1;     // default 32 drop columns
     public boolean randomSeed      = true;
     public long    fixedSeed       = 42L;
     /** When true the game ends the instant any fruit touches the deadline. */
     public boolean immediateDeadline = false;
 
+    /**
+     * When true, fruit and walls bounce a little on impact instead of settling dead —
+     * flips {@link dev.suika.core.PhysicsConfig#restitution} at runtime (see its javadoc
+     * for why this isn't a per-{@code GameCore} constructor parameter).
+     */
+    public boolean bounceEnabled = false;
+    private static final double BOUNCE_RESTITUTION = 0.35;
+
+    public void applyPhysics() {
+        dev.suika.core.PhysicsConfig.restitution = bounceEnabled ? BOUNCE_RESTITUTION : 0.0;
+    }
+
     // ---- AI Watch ----
     public int   agentIndex   = WatchAgents.DEFAULT_INDEX;
     public float aiMoveDelay  = 0.6f;     // seconds the agent pauses between drops
     public boolean showThinking = true;   // MCTS visit-count overlay
 
-    // ---- AI Training (evolution / population learners) ----
-    /**
-     * Evaluation parallelism. Index 0 = "Auto" (all cores — the fastest, GPU-like
-     * fan-out). Other entries pin training to a fixed worker-thread count so heavy
-     * populations can't exhaust memory.
-     */
-    public static final int[] EVAL_THREAD_OPTIONS = {0, 1, 2, 4, 6, 8, 12, 16, 24, 32};
-    public int evalThreadsIndex = 0;      // default Auto
+    // AI training knobs (eval parallelism, simulations/generation, ghost lineage) are
+    // per-technique launch config, not global settings — see PlaygroundConfig and the
+    // AI Playground drawer / control-center quick-settings modal.
 
     /**
-     * Simulations (independent game-overs) averaged per genome each generation. More
-     * sims = less noisy fitness, but more compute. They run <em>simultaneously</em>,
-     * not one after another.
+     * Caps how much GPU memory the Python training command is allowed to claim, as a
+     * percentage (10-100). Honest about what this actually does: PyTorch/CUDA has no
+     * first-class hard compute-throughput limiter, so this maps to
+     * {@code torch.cuda.set_per_process_memory_fraction} (a real, working flag added to
+     * {@code train_ppo.py}) — the closest real lever to "max GPU utilization" available
+     * without deeper NVIDIA MPS-level tooling. Only affects the shown/copyable training
+     * command for {@link AiTechnique#gpuCapableTraining()} techniques (currently PPO);
+     * has no effect on any JVM-native technique, which never touches the GPU at all.
      */
-    public static final int[] SIMS_PER_GEN_OPTIONS = {1, 2, 3, 5, 8};
-    public int simsPerGenIndex = 0;       // default 1
-
-    /**
-     * How many generations of elites are kept alive as on-screen "ghost" boards before
-     * the oldest are culled. Higher = watch more of the population's lineage diverge.
-     */
-    public static final int[] GHOST_CULL_OPTIONS = {1, 2, 3, 5, 8, 12};
-    public int ghostCullIndex = 1;        // default 2 generations
-
-    public int evalThreadsSetting() { return EVAL_THREAD_OPTIONS[evalThreadsIndex]; }
-    public String evalThreadsLabel() {
-        int t = evalThreadsSetting();
-        return t == 0 ? "Auto (all cores)" : t + " threads";
-    }
-    public int simsPerGen()    { return SIMS_PER_GEN_OPTIONS[simsPerGenIndex]; }
-    public int ghostCullGens() { return GHOST_CULL_OPTIONS[ghostCullIndex]; }
+    public int gpuUtilPercent = 100;   // 10-100
 
     // -------------------------------------------------------------------------
 
