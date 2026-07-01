@@ -1,0 +1,213 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+
+// Ray generation — owns ALL shading and light transport for the RT game view.
+//
+// Structure: an ITERATIVE segment loop instead of recursive tracing from the
+// closest-hit shader. The closest-hit shader only DESCRIBES the surface it found
+// (position/normal/albedo/roughness/material class, via the HitInfo payload);
+// this shader then decides what to do — shade an opaque hit, or pass through the
+// jar's thin glass and keep going. Portability is the reason: several RT GPUs
+// (notably AMD) report maxRayRecursionDepth == 1, so any design that traces rays
+// FROM the hit shader is non-portable. Here every traceRayEXT call originates in
+// raygen, which is always depth 1.
+//
+// Also implements:
+//  * Thin-lens depth of field — the camera focuses on the jar; the tan wall
+//    behind it lands well past the focal plane and melts into bokeh.
+//  * Soft shadows (jittered area-light samples, denoised by denoise.comp).
+//  * Per-frame exponential temporal accumulation (cheap TAA) to converge the
+//    DoF + shadow noise while staying responsive to falling fruit.
+
+layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
+layout(binding = 1, set = 0, rgba32f) uniform image2D outputImage;
+
+layout(binding = 2, set = 0) uniform CameraUBO {
+    vec4  position;     // xyz = world position
+    vec4  forward;      // xyz = normalized view direction
+    vec4  right;        // xyz = normalized right vector
+    vec4  up;           // xyz = normalized up vector
+    float tanHalfFov;   // vertical half-fov tangent
+    float time;         // seconds — jitters shadow/DoF sampling per frame
+    float aperture;     // lens radius in world units (0 = pinhole, no bokeh)
+    float focusDist;    // distance to the focal plane (the jar)
+    float blend;        // temporal EMA weight for THIS frame (1.0 = no history)
+    float aspect;       // width / height
+    float pad0, pad1;
+} cam;
+
+// Matches the struct written by closesthit.rchit exactly (member-for-member).
+struct HitInfo {
+    vec4 posT;        // xyz = world hit position, w = hit distance (miss: w < 0)
+    vec4 normalRough; // xyz = shading normal, w = roughness 0..1
+    vec4 albedoMat;   // rgb = linear albedo, w = material class (see MAT_*)
+};
+
+const int MAT_FRUIT = 0;
+const int MAT_WOOD  = 1;
+const int MAT_WALL  = 2;
+const int MAT_GLASS = 3;
+
+// Cull masks: glass is excluded from shadow rays (mask 0x01) so the jar doesn't
+// cast a hard dark shadow over its own contents — physically light refracts
+// through; skipping the glass on shadow rays is the standard cheap stand-in.
+const uint MASK_SOLID = 0x01u;
+const uint MASK_GLASS = 0x02u;
+
+layout(location = 0) rayPayloadEXT HitInfo hit;
+layout(location = 1) rayPayloadEXT float shadowVisibility;
+
+// ---- per-pixel-per-frame hash (Monte-Carlo sample jitter) ----
+vec2 hash2(vec2 p, float seed) {
+    float a = fract(sin(dot(p, vec2(12.9898, 78.233)) + seed * 37.719) * 43758.5453);
+    float b = fract(sin(dot(p, vec2(39.346, 11.135)) + seed * 71.221) * 12765.2341);
+    return vec2(a, b);
+}
+
+// ---- environment: a bright, warm, professionally-lit studio ----
+// What rays see when they escape the scene — also what the glass "reflects".
+// Deliberately high-key and even (soft daylight studio) so the whole scene reads
+// as brightly lit without any harsh gradient.
+vec3 envColor(vec3 d) {
+    float t = clamp(d.y * 0.5 + 0.5, 0.0, 1.0);
+    vec3 low  = vec3(0.62, 0.54, 0.44);   // warm floor bounce
+    vec3 mid  = vec3(1.02, 0.94, 0.80);   // tan wall tone, brightly lit
+    vec3 high = vec3(1.35, 1.30, 1.18);   // soft ceiling light
+    vec3 c = t < 0.5 ? mix(low, mid, t * 2.0) : mix(mid, high, (t - 0.5) * 2.0);
+    return c;
+}
+
+// Key light: one big warm softbox up-right-front. Direction TOWARD the light.
+const vec3  LIGHT_DIR   = normalize(vec3(0.35, 0.90, 0.55));
+const vec3  LIGHT_COLOR = vec3(1.00, 0.97, 0.90);
+const float LIGHT_INTENSITY = 2.35;
+const float LIGHT_RADIUS = 0.16;      // disk jitter -> penumbra width
+const float FILL = 0.34;              // ambient/fill fraction (professional = well-filled)
+
+float fresnelSchlick(float cosTheta) {
+    float f0 = 0.04;
+    return f0 + (1.0 - f0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+// One soft-shadow visibility sample toward the jittered key light.
+float traceShadow(vec3 origin, vec3 lightDir) {
+    shadowVisibility = 0.0;
+    traceRayEXT(topLevelAS,
+            gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT,
+            MASK_SOLID, 0, 0, 1,
+            origin, 0.001, lightDir, 1000.0, 1);
+    return shadowVisibility;
+}
+
+vec3 shadeOpaque(vec3 P, vec3 N, vec3 rd, vec3 albedo, float rough, int mat, vec2 seed) {
+    // Jitter the light direction on a disk for a soft penumbra.
+    vec3 arb = abs(LIGHT_DIR.y) < 0.99 ? vec3(0, 1, 0) : vec3(1, 0, 0);
+    vec3 lt = normalize(cross(arb, LIGHT_DIR));
+    vec3 lb = cross(LIGHT_DIR, lt);
+    float r = sqrt(seed.x) * LIGHT_RADIUS;
+    float th = seed.y * 6.28318530718;
+    vec3 L = normalize(LIGHT_DIR + r * cos(th) * lt + r * sin(th) * lb);
+
+    float ndotl = max(dot(N, L), 0.0);
+    float vis = ndotl > 0.0 ? traceShadow(P + N * 0.01, L) : 0.0;
+
+    // Fill/ambient from the environment in the normal direction — keeps shadowed
+    // areas alive (a brightly lit studio has strong bounce fill, not black shadows).
+    vec3 ambient = albedo * envColor(N) * FILL;
+    vec3 diffuse = albedo * LIGHT_COLOR * (LIGHT_INTENSITY * ndotl * vis);
+
+    // Blinn-Phong gloss driven by the (textured) roughness.
+    vec3 V = -rd;
+    vec3 H = normalize(L + V);
+    float shininess = mix(110.0, 10.0, clamp(rough, 0.0, 1.0));
+    float specStrength = mix(0.55, 0.06, clamp(rough, 0.0, 1.0));
+    vec3 spec = LIGHT_COLOR * (pow(max(dot(N, H), 0.0), shininess) * specStrength * vis);
+
+    vec3 c = ambient + diffuse + spec;
+
+    if (mat == MAT_WALL) {
+        // "Professionally lit backdrop": a broad, subtle softbox hotspot high on
+        // the wall, falling off smoothly — the photography-studio look, not a
+        // harsh spotlight. Positions are world-space (wall spans x, y up).
+        float d2 = dot(P.xy - vec2(0.0, 14.0), P.xy - vec2(0.0, 14.0));
+        c *= 1.0 + 0.30 * exp(-d2 / 260.0);
+    }
+    return c;
+}
+
+void main() {
+    vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+    vec2 uv = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
+    // y is FLIPPED: launch row 0 is the TOP of the presented image, so the top of
+    // the window must map to +up (the old version skipped this and rendered the
+    // world upside down — unnoticeable with its symmetric orbit showcase).
+    vec2 d = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+
+    vec3 pixelDir = normalize(cam.forward.xyz
+            + d.x * cam.tanHalfFov * cam.aspect * cam.right.xyz
+            + d.y * cam.tanHalfFov * cam.up.xyz);
+
+    // ---- thin-lens depth of field ----
+    // Focal point stays fixed; the ray origin wanders over the lens aperture.
+    // Surfaces near focusDist converge sharp; the wall far behind blurs to bokeh.
+    vec2 lensSeed = hash2(pixelCenter, cam.time);
+    float lr = sqrt(lensSeed.x) * cam.aperture;
+    float la = lensSeed.y * 6.28318530718;
+    vec3 lensOffset = lr * (cos(la) * cam.right.xyz + sin(la) * cam.up.xyz);
+    vec3 focal = cam.position.xyz + pixelDir * cam.focusDist;
+    vec3 ro = cam.position.xyz + lensOffset;
+    vec3 rd = normalize(focal - ro);
+
+    vec2 shadeSeed = hash2(pixelCenter + 17.31, cam.time);
+
+    vec3 color = vec3(0.0);
+    vec3 tint = vec3(1.0);
+
+    // Segment loop: pass through up to 3 glass surfaces (near wall, far wall,
+    // grazing re-entry) before giving up and taking the environment.
+    const int MAX_SEGMENTS = 5;
+    for (int seg = 0; seg < MAX_SEGMENTS; seg++) {
+        hit.posT = vec4(0.0, 0.0, 0.0, -1.0);
+        traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, ro, 0.001, rd, 1000.0, 0);
+
+        if (hit.posT.w < 0.0) {              // escaped the scene
+            color += tint * envColor(rd);
+            break;
+        }
+
+        int mat = int(hit.albedoMat.w + 0.5);
+        vec3 P = hit.posT.xyz;
+        vec3 N = hit.normalRough.xyz;
+
+        if (mat == MAT_GLASS) {
+            // Thin glass: parallel surfaces cancel refraction bend, so the ray
+            // continues straight with a slight tint; the reflective side of the
+            // Fresnel split is approximated with an environment lookup plus the
+            // key light's specular ping — cheap, but reads unmistakably as glass.
+            float cosI = clamp(dot(-rd, N), 0.0, 1.0);
+            float fres = fresnelSchlick(cosI);
+            vec3 R = reflect(rd, N);
+            color += tint * fres * envColor(R) * 0.85;
+            vec3 H = normalize(LIGHT_DIR - rd);
+            color += tint * LIGHT_COLOR * pow(max(dot(N, H), 0.0), 320.0) * 1.4;
+            tint *= vec3(0.955, 0.985, 0.975) * (1.0 - fres * 0.55);
+            ro = P + rd * 0.004;             // continue through the pane
+            continue;
+        }
+
+        color += tint * shadeOpaque(P, N, rd, hit.albedoMat.rgb, hit.normalRough.w, mat, shadeSeed);
+        break;
+    }
+
+    // Filmic-ish finish: soft Reinhard highlight rolloff, then gamma. The bright
+    // studio look intentionally pushes values past 1.0; this brings them back
+    // smoothly instead of clipping.
+    color = color / (1.0 + color * 0.35);
+    color = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
+
+    // Temporal EMA against last frame's value already in the output image.
+    ivec2 pix = ivec2(gl_LaunchIDEXT.xy);
+    vec3 history = imageLoad(outputImage, pix).rgb;
+    vec3 blended = mix(history, color, clamp(cam.blend, 0.0, 1.0));
+    imageStore(outputImage, pix, vec4(blended, 1.0));
+}

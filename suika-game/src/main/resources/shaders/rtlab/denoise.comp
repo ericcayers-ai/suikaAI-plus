@@ -1,0 +1,44 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0, rgba32f) uniform readonly image2D noisyImage;
+layout(binding = 1, rgba32f) uniform writeonly image2D denoisedImage;
+
+// A joint/cross-bilateral filter: blurs spatially nearby pixels together, but
+// weights each contribution down the more its luminance differs from the centre
+// pixel's — so it smooths the Monte-Carlo shadow noise from closesthit.rchit's
+// jittered light samples without blurring across real object edges/silhouettes
+// (a hard edge has a big luminance jump, which the range weight suppresses).
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(noisyImage);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec4 centerColor = imageLoad(noisyImage, coord);
+    float centerLum = dot(centerColor.rgb, vec3(0.299, 0.587, 0.114));
+
+    const int radius = 3;
+    const float spatialSigma = 2.0;
+    const float rangeSigma = 0.12;
+
+    vec4 sum = vec4(0.0);
+    float weightSum = 0.0;
+    for (int dy = -radius; dy <= radius; dy++) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            ivec2 sampleCoord = clamp(coord + ivec2(dx, dy), ivec2(0), size - ivec2(1));
+            vec4 sampleColor = imageLoad(noisyImage, sampleCoord);
+            float sampleLum = dot(sampleColor.rgb, vec3(0.299, 0.587, 0.114));
+
+            float spatialWeight = exp(-float(dx * dx + dy * dy) / (2.0 * spatialSigma * spatialSigma));
+            float lumDiff = centerLum - sampleLum;
+            float rangeWeight = exp(-(lumDiff * lumDiff) / (2.0 * rangeSigma * rangeSigma));
+            float weight = spatialWeight * rangeWeight;
+
+            sum += sampleColor * weight;
+            weightSum += weight;
+        }
+    }
+
+    vec4 result = weightSum > 0.0001 ? sum / weightSum : centerColor;
+    imageStore(denoisedImage, coord, result);
+}

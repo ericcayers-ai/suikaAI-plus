@@ -1,0 +1,18 @@
+Bundled environment PBR textures
+================================
+
+Source: TextureCan (https://www.texturecan.com).
+License: CC0 1.0 Universal (public domain) — see https://www.texturecan.com/terms/
+  "All textures can be used for any purposes, including commercial use.
+   The textures are allowed to be redistributed together with your projects
+   and 3D assets. No credit or attribution is required."
+
+Downloaded 2026-07-02, 1K resolution, for the RT Lab environment.
+
+  table_wood/  -> "Pine Wood (Wood 0054)", https://www.texturecan.com/details/535/
+                  Used as the table surface the glass jar sits on.
+                  albedo.jpg, normal.png (OpenGL/+Y convention),
+                  roughness.jpg, ao.jpg.
+
+The tan wall behind the table is a procedural material (flat tan albedo with
+subtle noise), not a downloaded texture.

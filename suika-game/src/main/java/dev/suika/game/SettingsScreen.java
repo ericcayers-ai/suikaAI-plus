@@ -112,6 +112,13 @@ public final class SettingsScreen extends ScreenAdapter {
         // in the AI Playground / quick-settings in the control center), not here —
         // they only apply to specific techniques, not the app globally.
 
+        // ---- Experimental ----
+        toggle("EXPERIMENTAL", "Experimental mode (ray tracing / 3D)",
+                () -> cfg.experimentalMode, () -> cfg.experimentalMode = !cfg.experimentalMode);
+        cycle(null, "RT Lab gameplay physics", () -> cfg.rt3dPhysics ? "3D (true 3D)" : "2D (classic)",
+                () -> cfg.rt3dPhysics = !cfg.rt3dPhysics,
+                () -> cfg.rt3dPhysics = !cfg.rt3dPhysics);
+
         // ---- AI Environment ----
         cycle("AI ENVIRONMENT", "Python env", () -> installStatus, null, null);
         button(null, "Download AI GPU deps",
@@ -193,6 +200,10 @@ public final class SettingsScreen extends ScreenAdapter {
     private float maxScroll() {
         return Math.max(0f, contentHeight() - (LIST_TOP - LIST_BOT));
     }
+
+    /** Test/QA hook: jump the list to the bottom (used by the capture harness to
+     *  photograph the late sections — EXPERIMENTAL, AI ENVIRONMENT). */
+    public void scrollToBottomForCapture() { scroll = maxScroll(); }
 
     private void handleClick(float x, float y) {
         if (backBtn.contains(x, y)) { game.setScreen(back.apply(game)); return; }

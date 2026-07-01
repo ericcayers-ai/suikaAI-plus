@@ -24,6 +24,14 @@ import java.util.Map;
 public class SuikaApplication {
 
     public static void main(String[] args) throws Exception {
+        // Must happen before ANY LWJGL class is touched anywhere in the process (the
+        // main game's own OpenGL rendering counts) — LWJGL's per-thread MemoryStack
+        // default size is decided once, early, and setting Configuration.STACK_SIZE
+        // later (e.g. from inside RtLabLauncher, on its own thread, after the game has
+        // been running a while) is too late to take effect. The experimental RT Lab's
+        // Vulkan calls need a bigger stack than LWJGL's small default for the nested
+        // struct chains involved in ray-tracing pipeline/acceleration-structure setup.
+        System.setProperty("org.lwjgl.system.stackSize", String.valueOf(dev.suika.game.rtlab.RtContext.STACK_SIZE_KB));
         minimizeConsole();
         boolean headless = args.length > 0 && "--headless".equals(args[0]);
         if (!headless) {

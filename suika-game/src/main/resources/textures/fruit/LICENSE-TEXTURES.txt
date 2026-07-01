@@ -1,0 +1,28 @@
+Bundled fruit PBR textures
+==========================
+
+Source: TextureCan (https://www.texturecan.com), "Food" texture category.
+License: CC0 1.0 Universal (public domain) — see https://www.texturecan.com/terms/
+  "All textures can be used for any purposes, including commercial use.
+   The textures are allowed to be redistributed together with your projects
+   and 3D assets. No credit or attribution is required."
+
+Downloaded 2026-07-02, 1K resolution, for the Realistic Textures mode
+(RayTraceLab / PbrFruitMaterials). Each folder holds albedo.jpg, normal.png
+(OpenGL/+Y tangent-space convention), roughness.jpg, ao.jpg, height.png.
+
+Mapping to in-game fruit tiers (chosen for closest visual/botanical match —
+this game has no exact texture for every tier, so several tiers below fall
+back to the procedural PBR generator instead of a photo-sourced texture):
+
+  watermelon/  -> tier 11 WATERMELON (exact match)
+  apple/       -> tier 6  APPLE      (exact match)
+  strawberry/  -> tier 2  STRAWBERRY (exact match)
+  grape/       -> tier 3  GRAPE      (sourced as TextureCan's "Blackberry" —
+                                       closest available small dark berry skin)
+  dekopon/     -> tier 4  DEKOPON    (sourced as TextureCan's "Orange Peel" —
+                                       dekopon is itself a citrus, genuine match)
+
+Tiers 1 (cherry), 5 (persimmon), 7 (pear), 8 (peach), 9 (pineapple), and
+10 (melon) have no bundled photo texture and use the procedural PBR
+generator (see PbrFruitMaterials.java) instead.

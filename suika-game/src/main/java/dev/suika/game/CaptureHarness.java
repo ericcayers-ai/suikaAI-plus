@@ -31,6 +31,7 @@ public final class CaptureHarness implements ApplicationListener {
 
     private AiPlaygroundScreen playground;
     private ControlCenterScreen cc;
+    private SettingsScreen settings;
 
     private static final AiTechnique[] TECHS = AiTechnique.values();
     private int techIndex = 0;
@@ -60,18 +61,25 @@ public final class CaptureHarness implements ApplicationListener {
         game.render();
 
         switch (stage) {
-            case 0 -> { if (stageT > 0.6f) { shoot("00-menu.png"); game.setScreen(new SettingsScreen(game, MainMenuScreen::new)); nextStage(); } }
-            case 1 -> { if (stageT > 0.7f) { shoot("01-settings.png"); openPlayground(); nextStage(); } }
-            case 2 -> { if (stageT > 0.6f) { shoot("02-playground.png"); playground.openInfocardForCapture(AiTechnique.PPO); nextStage(); } }
-            case 3 -> { if (stageT > 0.4f) { shoot("03-infocard-modal.png"); playground.openInfocardForCapture(null); launchControlCenter(AiTechnique.MCTS, false); nextStage(); } }
-            case 4 -> { if (stageT > 3.5f) { shoot("04-mcts-cc.png"); cc.openHotswapForCapture(); nextStage(); } }
-            case 5 -> { if (stageT > 0.5f) { shoot("05-hotswap-modal.png"); launchControlCenter(AiTechnique.NEUROEVO, false); nextStage(); } }
-            case 6 -> { if (stageT > 3.0f) { cc.openSlotsForCapture(); nextStage(); } }
-            case 7 -> { if (stageT > 0.5f) { shoot("06-slots-modal.png"); startSixteenXGrid(); nextStage(); } }
-            case 8 -> { if (stageT > 9.0f) { shoot("07-neuroevo-16x-grid.png"); techIndex = 0; startTechnique(TECHS[techIndex]); nextStage(); } }
+            case 0 -> { if (stageT > 0.6f) { shoot("00-menu.png"); settings = new SettingsScreen(game, MainMenuScreen::new); game.setScreen(settings); nextStage(); } }
+            case 1 -> { if (stageT > 0.7f) { shoot("01-settings.png"); settings.scrollToBottomForCapture(); nextStage(); } }
+            // New in v0.7: the EXPERIMENTAL section (ray tracing / 3D toggles) lives at
+            // the bottom of the settings list, and the menu's RT LAB button un-dims
+            // once experimental mode is on — capture both states.
+            case 2 -> { if (stageT > 0.4f) { shoot("01b-settings-experimental.png");
+                        game.settings.experimentalMode = true;
+                        game.setScreen(new MainMenuScreen(game)); nextStage(); } }
+            case 3 -> { if (stageT > 0.5f) { shoot("00b-menu-experimental.png"); openPlayground(); nextStage(); } }
+            case 4 -> { if (stageT > 0.6f) { shoot("02-playground.png"); playground.openInfocardForCapture(AiTechnique.PPO); nextStage(); } }
+            case 5 -> { if (stageT > 0.4f) { shoot("03-infocard-modal.png"); playground.openInfocardForCapture(null); launchControlCenter(AiTechnique.MCTS, false); nextStage(); } }
+            case 6 -> { if (stageT > 3.5f) { shoot("04-mcts-cc.png"); cc.openHotswapForCapture(); nextStage(); } }
+            case 7 -> { if (stageT > 0.5f) { shoot("05-hotswap-modal.png"); launchControlCenter(AiTechnique.NEUROEVO, false); nextStage(); } }
+            case 8 -> { if (stageT > 3.0f) { cc.openSlotsForCapture(); nextStage(); } }
+            case 9 -> { if (stageT > 0.5f) { shoot("06-slots-modal.png"); startSixteenXGrid(); nextStage(); } }
+            case 10 -> { if (stageT > 9.0f) { shoot("07-neuroevo-16x-grid.png"); techIndex = 0; startTechnique(TECHS[techIndex]); nextStage(); } }
 
             // ---- full technique sweep: one screenshot per AiTechnique ----
-            case 9 -> {
+            case 11 -> {
                 AiTechnique tech = TECHS[techIndex];
                 if (tech.family == AiTechnique.Family.IMITATION) {
                     driveImitationAutoPlay(dt);
@@ -90,13 +98,13 @@ public final class CaptureHarness implements ApplicationListener {
             }
 
             // ---- extra curated views the default sweep doesn't cover ----
-            case 10-> { if (stageT > 0.2f) { launchControlCenter(AiTechnique.SELF_PLAY, false); nextStage(); } }
-            case 11-> { if (stageT > 5.0f) { shoot("90-selfplay-2view.png"); launchControlCenter(AiTechnique.NEUROEVO, true); nextStage(); } }
-            case 12-> { if (stageT > 9.0f) { shoot("91-neuroevo-ghost.png"); nextStage(); } }
+            case 12-> { if (stageT > 0.2f) { launchControlCenter(AiTechnique.SELF_PLAY, false); nextStage(); } }
+            case 13-> { if (stageT > 5.0f) { shoot("90-selfplay-2view.png"); launchControlCenter(AiTechnique.NEUROEVO, true); nextStage(); } }
+            case 14-> { if (stageT > 9.0f) { shoot("91-neuroevo-ghost.png"); nextStage(); } }
 
-            case 13-> { if (stageT > 0.2f) { game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN)); nextStage(); } }
-            case 14-> { if (stageT > 1.5f) { shoot("92-human-play.png"); openGameOver(); nextStage(); } }
-            case 15-> { if (stageT > 1.0f) { shoot("93-game-over.png"); nextStage(); Gdx.app.exit(); } }
+            case 15-> { if (stageT > 0.2f) { game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN)); nextStage(); } }
+            case 16-> { if (stageT > 1.5f) { shoot("92-human-play.png"); openGameOver(); nextStage(); } }
+            case 17-> { if (stageT > 1.0f) { shoot("93-game-over.png"); nextStage(); Gdx.app.exit(); } }
             default -> { }
         }
     }

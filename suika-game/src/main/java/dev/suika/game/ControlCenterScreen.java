@@ -275,6 +275,11 @@ public final class ControlCenterScreen extends ScreenAdapter {
 
     // ---- view-count rule ----
     private int viewCount() {
+        // While the experimental ray-traced window is open, both renderers share one
+        // GPU — clamp the control center to a single board so the multi-board tiling
+        // (evolution elites, self-play rivals, imitation dual) doesn't pile extra
+        // per-frame physics + rendering on top of the RT workload.
+        if (game.settings.experimentalMode && dev.suika.game.rtlab.RtLabLauncher.isRunning()) return 1;
         if (runner instanceof EvolutionRunner && !cfg.ghostView) return cfg.eliteViewCount();
         if (cfg.technique == AiTechnique.SELF_PLAY)              return 2;
         if (cfg.technique.family == AiTechnique.Family.IMITATION) return 2; // YOU | AI clone

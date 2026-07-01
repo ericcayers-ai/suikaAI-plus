@@ -23,14 +23,22 @@ public final class MainMenuScreen extends ScreenAdapter {
     private final Vector3            touch = new Vector3();
 
     private static final float CX = Theme.VW / 2f;
+    private static final com.badlogic.gdx.graphics.Color RT_LAB_VIOLET =
+            new com.badlogic.gdx.graphics.Color(0.55f, 0.35f, 0.85f, 1f);
 
     private final Rectangle playBtn     = new Rectangle(CX - 170, 660, 340, 78);
     private final Rectangle watchBtn    = new Rectangle(CX - 170, 566, 340, 78);
     private final Rectangle settingsBtn = new Rectangle(CX - 170, 472, 340, 78);
     private final Rectangle quitBtn     = new Rectangle(CX - 170, 378, 340, 78);
+    // Smaller and visually distinct (violet) — this launches a genuinely experimental
+    // feature (raw Vulkan hardware ray tracing in a separate window/GPU context, not
+    // the game's own OpenGL rendering) that may not work on every GPU/driver.
+    private final Rectangle rtLabBtn    = new Rectangle(CX - 130, 296, 260, 56);
 
     private float time = 0f;
     private float mx, my;
+    /** Seconds left to show the "enable Experimental mode" hint under the RT button. */
+    private float rtHintTimer = 0f;
 
     // ambient floating fruit (x, baseY, speed, tier)
     private final float[][] motes = new float[9][];
@@ -64,6 +72,14 @@ public final class MainMenuScreen extends ScreenAdapter {
                     game.setScreen(new SettingsScreen(game, MainMenuScreen::new));
                 else if (quitBtn.contains(touch.x, touch.y))
                     Gdx.app.exit();
+                else if (rtLabBtn.contains(touch.x, touch.y)) {
+                    // Gated behind the Experimental settings toggle — the ray-traced
+                    // game (and its 3D-physics option) only exists in experimental mode.
+                    if (game.settings.experimentalMode)
+                        dev.suika.game.rtlab.RtLabLauncher.launch(game.settings.rt3dPhysics);
+                    else
+                        rtHintTimer = 3.5f;
+                }
                 return true;
             }
             @Override public boolean mouseMoved(int sx, int sy) {
@@ -107,6 +123,13 @@ public final class MainMenuScreen extends ScreenAdapter {
         Ui.button(s, watchBtn,    Theme.ACCENT_BLUE, watchBtn.contains(mx, my),    true);
         Ui.button(s, settingsBtn, Theme.PANEL_EDGE,  settingsBtn.contains(mx, my), true);
         Ui.button(s, quitBtn,     Theme.ACCENT,      quitBtn.contains(mx, my),     true);
+        // Dimmed until Experimental mode is enabled in Settings.
+        if (game.settings.experimentalMode) {
+            Ui.button(s, rtLabBtn, RT_LAB_VIOLET, rtLabBtn.contains(mx, my), true);
+        } else {
+            s.setColor(RT_LAB_VIOLET.r * 0.45f, RT_LAB_VIOLET.g * 0.45f, RT_LAB_VIOLET.b * 0.45f, 0.6f);
+            Ui.fillRoundRect(s, rtLabBtn.x, rtLabBtn.y, rtLabBtn.width, rtLabBtn.height, 12f);
+        }
 
         s.end();
 
@@ -123,6 +146,18 @@ public final class MainMenuScreen extends ScreenAdapter {
         Ui.textCenter(game.batch, game.fontMed, "WATCH AI", CX, watchBtn.y + 39,    Theme.TEXT);
         Ui.textCenter(game.batch, game.fontMed, "SETTINGS", CX, settingsBtn.y + 39, Theme.TEXT);
         Ui.textCenter(game.batch, game.fontMed, "QUIT",     CX, quitBtn.y + 39,     Theme.TEXT);
+        if (game.settings.experimentalMode) {
+            String mode = game.settings.rt3dPhysics ? "3D" : "2D";
+            Ui.textCenter(game.batch, game.fontSmall, "RT LAB · " + mode + " (experimental)",
+                    CX, rtLabBtn.y + 30, Theme.TEXT);
+        } else {
+            Ui.textCenter(game.batch, game.fontSmall, "RT LAB (experimental)", CX, rtLabBtn.y + 30, Theme.TEXT_DIM);
+        }
+        if (rtHintTimer > 0f) {
+            rtHintTimer -= delta;
+            Ui.textCenter(game.batch, game.fontSmall, "Enable Experimental mode in Settings first",
+                    CX, rtLabBtn.y - 12, Theme.GOLD);
+        }
 
         // Footer
         Ui.textCenter(game.batch, game.fontSmall,

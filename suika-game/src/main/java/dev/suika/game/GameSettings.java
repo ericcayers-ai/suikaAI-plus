@@ -41,6 +41,20 @@ public final class GameSettings {
         dev.suika.core.PhysicsConfig.restitution = bounceEnabled ? BOUNCE_RESTITUTION : 0.0;
     }
 
+    // ---- Experimental (RT Lab) ----
+    /**
+     * Master switch for the experimental feature set: the hardware ray-traced game
+     * window (RT Lab) and, within it, true 3D physics. Off by default — it needs an
+     * RT-capable GPU and is explicitly labelled experimental. While an RT Lab window
+     * is open the AI control center also clamps its multi-board tiling to a single
+     * board (see {@link dev.suika.game.rtlab.RtLabLauncher#isRunning()}) so both
+     * renderers aren't fighting over the same GPU.
+     */
+    public boolean experimentalMode = false;
+    /** RT Lab gameplay physics: false = classic 2D engine shown inside the jar,
+     *  true = true 3D physics (only reachable with {@link #experimentalMode} on). */
+    public boolean rt3dPhysics = false;
+
     // ---- AI Watch ----
     public int   agentIndex   = WatchAgents.DEFAULT_INDEX;
     public float aiMoveDelay  = 0.6f;     // seconds the agent pauses between drops
