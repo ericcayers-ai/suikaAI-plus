@@ -31,6 +31,10 @@ public final class RtTraceTest {
     public static void main(String[] args) throws Exception {
         Configuration.STACK_SIZE.set(RtContext.STACK_SIZE_KB);
         String outDir = args.length > 0 ? args[0] : ".";
+        // "3d": scatter the pile across the jar's depth axis like true-3D gameplay
+        // produces, so the 3D mode's look (off-plane shadows, depth-of-field falloff
+        // INSIDE the jar) gets screenshot coverage too, not just the 2D slice.
+        boolean scatter3d = args.length > 1 && "3d".equalsIgnoreCase(args[1]);
 
         PointerBuffer noSurfaceExtensions = org.lwjgl.system.MemoryUtil.memAllocPointer(0);
 
@@ -52,17 +56,29 @@ public final class RtTraceTest {
 
                 // A representative mid-game pile: settled fruits of several tiers, one
                 // falling, plus the hover fruit and next-up chip the launcher adds.
+                // In 3D-scatter mode the same pile spreads across the depth axis the
+                // way Jar3DPhysics settles it — each z-offset is sized so
+                // sqrt(x^2+z^2)+radius stays inside RtScene.JAR_RADIUS (5.45); the two
+                // largest fruits (watermelon, melon) already sit at/near that limit at
+                // their given x alone, so they get little or no z-scatter — a bigger
+                // offset there would poke the fruit visibly through the glass, which an
+                // earlier version of this test did (a QA-harness bug, not a physics one:
+                // real Jar3DPhysics clamps every drop to PLAY_RADIUS via clampDrop()).
+                float z1 = scatter3d ? 0.5f : 0f, z2 = 0f,
+                      z3 = scatter3d ? -2.0f : 0f, z4 = scatter3d ? 1.8f : 0f,
+                      z5 = scatter3d ? 0.9f : 0f, z6 = scatter3d ? -1.1f : 0f;
                 List<RtScene.FruitInstance> fruits = new ArrayList<>(List.of(
-                        new RtScene.FruitInstance(-2.0f, 3.26f, 0f, 3.2f, FruitTier.WATERMELON),
-                        new RtScene.FruitInstance( 2.6f, 2.86f, 0f, 2.8f, FruitTier.MELON),
-                        new RtScene.FruitInstance( 0.6f, 7.10f, 0f, 1.65f, FruitTier.APPLE),
-                        new RtScene.FruitInstance(-3.4f, 7.60f, 0f, 1.15f, FruitTier.DEKOPON),
-                        new RtScene.FruitInstance( 3.9f, 6.30f, 0f, 0.9f, FruitTier.GRAPE),
-                        new RtScene.FruitInstance(-1.2f, 9.20f, 0f, 0.7f, FruitTier.STRAWBERRY),
-                        new RtScene.FruitInstance( 1.8f, 12.0f, 0f, 0.5f, FruitTier.CHERRY),     // falling
-                        new RtScene.FruitInstance( 0.0f, 16.0f, 0f, 0.5f, FruitTier.CHERRY),     // hover
+                        new RtScene.FruitInstance(-2.0f, 3.26f, z1, 3.2f, FruitTier.WATERMELON),
+                        new RtScene.FruitInstance( 2.6f, 2.86f, z2, 2.8f, FruitTier.MELON),
+                        new RtScene.FruitInstance( 0.6f, 7.10f, z5, 1.65f, FruitTier.APPLE),
+                        new RtScene.FruitInstance(-3.4f, 7.60f, z3, 1.15f, FruitTier.DEKOPON),
+                        new RtScene.FruitInstance( 3.9f, 6.30f, z4, 0.9f, FruitTier.GRAPE),
+                        new RtScene.FruitInstance(-1.2f, 9.20f, z6, 0.7f, FruitTier.STRAWBERRY),
+                        new RtScene.FruitInstance( 1.8f, 12.0f, z5, 0.5f, FruitTier.CHERRY),     // falling
+                        new RtScene.FruitInstance( 0.0f, 16.0f, z6, 0.5f, FruitTier.CHERRY),     // hover
                         new RtScene.FruitInstance(-6.9f, 16.6f, 0f, 0.65f, FruitTier.STRAWBERRY) // next chip
                 ));
+                String suffix = scatter3d ? "_3d" : "";
 
                 // Same camera as RtLabLauncher (kept in sync by hand — it's 6 numbers).
                 float px = 0f, py = 10.5f, pz = 21f, tx = 0f, ty = 6.8f, tz = 0f;
@@ -85,13 +101,13 @@ public final class RtTraceTest {
                     traceOneFrame(ctx.device, ctx.graphicsQueue, commandPool, pipeline, width, height);
                 }
                 savePng(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, raw, width, height,
-                        new File(outDir, "rtlab_accumulated.png").getPath());
-                System.out.println("wrote rtlab_accumulated.png (" + frames + " temporal frames, no spatial denoise)");
+                        new File(outDir, "rtlab_accumulated" + suffix + ".png").getPath());
+                System.out.println("wrote rtlab_accumulated" + suffix + ".png (" + frames + " temporal frames, no spatial denoise)");
 
                 OneShotCommands.submit(ctx.device, commandPool, ctx.graphicsQueue, cmd -> denoiser.dispatch(cmd, width, height));
                 savePng(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, denoised, width, height,
-                        new File(outDir, "rtlab_denoised.png").getPath());
-                System.out.println("SUCCESS: wrote rtlab_denoised.png (temporal + bilateral, what the player sees)");
+                        new File(outDir, "rtlab_denoised" + suffix + ".png").getPath());
+                System.out.println("SUCCESS: wrote rtlab_denoised" + suffix + ".png (temporal + bilateral, what the player sees)");
             }
             vkDestroyCommandPool(ctx.device, commandPool, null);
         }

@@ -89,7 +89,13 @@ public final class RtLabLauncher {
         try (RtContext ctx = new RtContext(surfaceExtensions);
              RtWindow window = new RtWindow(ctx.instance, width, height, "Suika RT Lab (experimental)")) {
 
-            System.out.println("[RT Lab] " + ctx.deviceName + " — " + session.modeName());
+            // Plain ASCII here (not the em-dash used in the window title below): this
+            // goes through System.out, which on Windows renders via the console's OEM
+            // codepage (cp437 by default) — no em-dash glyph there, so it would print
+            // as mojibake. glfwSetWindowTitle instead goes through Win32's Unicode
+            // SetWindowTextW, so the window title itself is unaffected and keeps the
+            // nicer punctuation.
+            System.out.println("[RT Lab] " + ctx.deviceName + " - " + session.modeName());
             RtSwapchain swap = new RtSwapchain(ctx.physicalDevice, ctx.device, window.surface, width, height);
 
             long commandPool = createCommandPool(ctx.device, ctx.graphicsQueueFamily);
@@ -189,7 +195,7 @@ public final class RtLabLauncher {
             swap.close();
             vkDestroyCommandPool(ctx.device, commandPool, null);
         }
-        System.out.println("[RT Lab] closed — final score " + session.score());
+        System.out.println("[RT Lab] closed - final score " + session.score());
     }
 
     /** Fixed studio camera: in front of the jar, slightly above, focused on the
