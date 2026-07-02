@@ -207,10 +207,9 @@ public final class PythonRunner extends AgentRunner {
         return flags;
     }
 
-    // NOTE ON LINE BUDGET: the landscape panel background is a FIXED height — text
-    // isn't clipped to it, so stats().length + extendedStats().length must stay at or
-    // below ~22 total or later lines render below the panel. stats() here is up to 8
-    // lines, and this header block is always 4, so keep each family's block to ~9 max.
+    // The landscape panel scrolls with the mouse wheel once stats() + extendedStats()
+    // exceed its visible height, so there's no hard line cap — see ControlCenterScreen's
+    // drawPanelText()/maxStatsScroll().
     @Override
     public String[] extendedStats() {
         java.util.List<String> s = new java.util.ArrayList<>();

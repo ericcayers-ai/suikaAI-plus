@@ -54,11 +54,10 @@ public final class PlanningRunner extends AgentRunner {
         return sum;
     }
 
-    // NOTE ON LINE BUDGET: the landscape panel background is a FIXED height (see
-    // ControlCenterScreen.panelBounds()) — text isn't clipped to it, so stats().length +
-    // extendedStats().length must stay at or below ~22 total or later lines render
-    // below the panel, over the board/control bar. stats() here is 8 lines, so keep
-    // extendedStats() at roughly 12 or fewer.
+    // The landscape panel (ControlCenterScreen.panelBounds()) scrolls with the mouse
+    // wheel once stats() + extendedStats() exceed its visible height, so there's no
+    // hard line cap any more — MCTS/AlphaZero's explainer block below runs well past
+    // the panel's ~22-line unscrolled window and that's fine, it just scrolls.
     @Override
     public String[] extendedStats() {
         java.util.List<String> s = new java.util.ArrayList<>();

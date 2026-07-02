@@ -8,10 +8,14 @@ import org.lwjgl.vulkan.*;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.GradientPaint;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.LongBuffer;
@@ -45,17 +49,35 @@ final class RtHud implements AutoCloseable {
     private final int width, height;
     private boolean dirty = false;
 
-    private static final Color PANEL   = new Color(10, 12, 20, 185);
-    private static final Color TEXT    = new Color(235, 238, 245, 255);
-    private static final Color DIM     = new Color(160, 166, 180, 255);
-    private static final Color GOLD    = new Color(245, 195, 80, 255);
-    private static final Color DANGER  = new Color(235, 90, 80, 255);
-    private static final Color VIOLET  = new Color(150, 100, 220, 255);
+    // A restrained, high-contrast palette — one accent (gold) reserved for the score
+    // and emphasis, a cooler violet only when an AI is driving, everything else a
+    // graded scale of near-black/grey so the accents actually read as accents.
+    private static final Color PANEL_TOP    = new Color(17, 19, 28, 205);
+    private static final Color PANEL_BOTTOM = new Color(9, 10, 16, 205);
+    private static final Color PANEL_EDGE   = new Color(255, 255, 255, 24);
+    private static final Color TEXT    = new Color(240, 242, 248, 255);
+    private static final Color DIM     = new Color(158, 164, 180, 255);
+    private static final Color FAINT   = new Color(110, 116, 132, 255);
+    private static final Color GOLD    = new Color(247, 197, 90, 255);
+    private static final Color GOLD_DEEP = new Color(196, 146, 44, 255);
+    private static final Color DANGER  = new Color(232, 96, 88, 255);
+    private static final Color VIOLET  = new Color(168, 122, 235, 255);
 
-    private final Font fontCaption = new Font(Font.SANS_SERIF, Font.BOLD, 20);
-    private final Font fontBig     = new Font(Font.SANS_SERIF, Font.BOLD, 46);
-    private final Font fontMed     = new Font(Font.SANS_SERIF, Font.BOLD, 30);
-    private final Font fontSmall   = new Font(Font.SANS_SERIF, Font.PLAIN, 18);
+    // The game's own bundled typeface (see SuikaGame.java's FreeType setup for the
+    // libGDX side) loaded straight from the same TTF via AWT, instead of a generic
+    // system sans-serif — the RT window's HUD now reads as the SAME app as the rest
+    // of the game, not a bolted-on placeholder overlay. Falls back to SANS_SERIF if
+    // the resource is ever missing so a font problem never takes the whole HUD down.
+    private final Font fontCaption, fontBig, fontMed, fontSmall, fontTiny;
+
+    private static Font loadBaseFont(String resourcePath, Font fallback) {
+        try (InputStream in = RtHud.class.getResourceAsStream(resourcePath)) {
+            if (in == null) return fallback;
+            return Font.createFont(Font.TRUETYPE_FONT, in);
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
 
     RtHud(VkPhysicalDevice pd, VkDevice device, long commandPool, VkQueue queue, int width, int height) {
         this.device = device;
@@ -63,6 +85,14 @@ final class RtHud implements AutoCloseable {
         this.height = height;
         this.canvas = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         this.pixels = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder());
+
+        Font base     = loadBaseFont("/fonts/DroidSans.ttf", new Font(Font.SANS_SERIF, Font.PLAIN, 1));
+        Font baseBold = loadBaseFont("/fonts/DroidSans-Bold.ttf", new Font(Font.SANS_SERIF, Font.BOLD, 1));
+        this.fontCaption = baseBold.deriveFont(19f);
+        this.fontBig     = baseBold.deriveFont(48f);
+        this.fontMed     = baseBold.deriveFont(29f);
+        this.fontSmall   = base.deriveFont(17f);
+        this.fontTiny    = base.deriveFont(13f);
         this.staging = new RtBuffer(pd, device, (long) width * height * 4,
                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -136,76 +166,80 @@ final class RtHud implements AutoCloseable {
         g.setComposite(java.awt.AlphaComposite.SrcOver);
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
 
         // ---- top-left: score + mode ----
-        g.setColor(PANEL);
-        g.fillRoundRect(16, 16, 320, 128, 22, 22);
-        g.setColor(DIM);
-        g.setFont(fontCaption);
-        g.drawString("SCORE", 38, 52);
+        int scoreW = 320, scoreH = 128;
+        panel(g, 16, 16, scoreW, scoreH, 22, GOLD);
+        drawTracked(g, fontCaption, "SCORE", 38, 50, DIM, 2.2f);
+        g.setColor(GOLD_DEEP);
+        g.fillRect(38, 60, 30, 3);
         g.setColor(GOLD);
         g.setFont(fontBig);
-        g.drawString(Long.toString(score), 38, 104);
-        g.setColor(aiName != null ? VIOLET : DIM);
+        g.drawString(Long.toString(score), 38, 106);
+        g.setColor(aiName != null ? VIOLET : FAINT);
         g.setFont(fontSmall);
         g.drawString(aiName != null ? modeName + "  ·  AI: " + aiName : modeName, 38, 132);
 
         // ---- top-right: next-fruit chip ----
         int panelW = 168, px = width - 16 - panelW;
-        g.setColor(PANEL);
-        g.fillRoundRect(px, 16, panelW, 128, 22, 22);
-        g.setColor(DIM);
-        g.setFont(fontCaption);
-        g.drawString("NEXT", px + 22, 52);
+        panel(g, px, 16, panelW, scoreH, 22, null);
+        drawTracked(g, fontCaption, "NEXT", px + 22, 50, DIM, 2.2f);
+        g.setColor(FAINT);
+        g.fillRect(px + 22, 60, 20, 3);
         var c = FruitColors.of(next);
         int cx = px + panelW / 2, cy = 96, r = 30;
-        g.setColor(new Color(c.r, c.g, c.b, 1f));
+        Color fruitColor = new Color(c.r, c.g, c.b, 1f);
+        // Soft duotone disc (a bright core fading to the fruit's true color at the
+        // rim) instead of a flat fill — reads as a small rendered object, not an icon.
+        g.setPaint(new java.awt.RadialGradientPaint(
+                new java.awt.geom.Point2D.Float(cx - r * 0.35f, cy - r * 0.35f), r * 1.6f,
+                new float[]{0f, 1f}, new Color[]{brighten(fruitColor, 0.55f), fruitColor}));
         g.fillOval(cx - r, cy - r, 2 * r, 2 * r);
-        g.setColor(new Color(0f, 0f, 0f, 0.45f));
-        g.setStroke(new BasicStroke(3f));
+        g.setPaint(new Color(0f, 0f, 0f, 0.35f));
+        g.setStroke(new BasicStroke(2f));
         g.drawOval(cx - r, cy - r, 2 * r, 2 * r);
-        g.setColor(TEXT);
+        g.setColor(new Color(0, 0, 0, 200));
         g.setFont(fontCaption);
         String tierNum = Integer.toString(next.tier);
         var fm = g.getFontMetrics();
-        g.drawString(tierNum, cx - fm.stringWidth(tierNum) / 2, cy + fm.getAscent() / 2 - 2);
+        g.drawString(tierNum, cx - fm.stringWidth(tierNum) / 2, cy + fm.getAscent() / 2 - 1);
 
         // ---- bottom: control hints ----
-        g.setFont(fontSmall);
+        g.setFont(fontTiny);
         String hints = aiName != null
-                ? (use3d ? "right-drag orbit · scroll zoom · R restart · D denoise · ESC close"
-                         : "scroll zoom · R restart · D denoise · ESC close")
-                : (use3d ? "click drop · right-drag orbit · scroll zoom · R restart · D denoise"
-                         : "click drop · scroll zoom · R restart · D denoise");
-        var fmS = g.getFontMetrics();
-        int hw = fmS.stringWidth(hints);
-        g.setColor(PANEL);
-        g.fillRoundRect(width / 2 - hw / 2 - 16, height - 52, hw + 32, 36, 16, 16);
-        g.setColor(DIM);
-        g.drawString(hints, width / 2 - hw / 2, height - 28);
+                ? (use3d ? "RIGHT-DRAG ORBIT   ·   SCROLL ZOOM   ·   R RESTART   ·   D DENOISE   ·   ESC CLOSE"
+                         : "SCROLL ZOOM   ·   R RESTART   ·   D DENOISE   ·   ESC CLOSE")
+                : (use3d ? "CLICK DROP   ·   RIGHT-DRAG ORBIT   ·   SCROLL ZOOM   ·   R RESTART   ·   D DENOISE"
+                         : "CLICK DROP   ·   SCROLL ZOOM   ·   R RESTART   ·   D DENOISE");
+        float hintTracking = 1.1f;
+        int hw = trackedWidth(g.getFontMetrics(), hints, hintTracking);
+        int hpx = width / 2 - hw / 2;
+        panel(g, hpx - 18, height - 54, hw + 36, 38, 17, null);
+        drawTracked(g, fontTiny, hints, hpx, height - 29, FAINT, hintTracking);
 
         // ---- game-over banner ----
         if (gameOver) {
-            int bw = 460, bh = 170, bx = width / 2 - bw / 2, by = height / 2 - bh / 2;
-            g.setColor(new Color(8, 9, 15, 225));
-            g.fillRoundRect(bx, by, bw, bh, 26, 26);
+            int bw = 470, bh = 178, bx = width / 2 - bw / 2, by = height / 2 - bh / 2;
+            panel(g, bx, by, bw, bh, 26, DANGER);
             g.setColor(DANGER);
-            g.setStroke(new BasicStroke(3f));
+            g.setStroke(new BasicStroke(1.5f));
             g.drawRoundRect(bx, by, bw, bh, 26, 26);
             g.setFont(fontMed);
+            g.setColor(DANGER);
             var fmM = g.getFontMetrics();
             String over = "GAME OVER";
-            g.drawString(over, width / 2 - fmM.stringWidth(over) / 2, by + 58);
+            g.drawString(over, width / 2 - fmM.stringWidth(over) / 2, by + 62);
             g.setColor(TEXT);
             g.setFont(fontCaption);
             var fmC = g.getFontMetrics();
-            String fin = "final score  " + score;
-            g.drawString(fin, width / 2 - fmC.stringWidth(fin) / 2, by + 98);
-            g.setColor(DIM);
+            String fin = "FINAL SCORE   " + score;
+            g.drawString(fin, width / 2 - fmC.stringWidth(fin) / 2, by + 104);
+            g.setColor(FAINT);
             g.setFont(fontSmall);
             String sub = aiName != null ? "next round starting…" : "press R to restart";
             var fmS2 = g.getFontMetrics();
-            g.drawString(sub, width / 2 - fmS2.stringWidth(sub) / 2, by + 134);
+            g.drawString(sub, width / 2 - fmS2.stringWidth(sub) / 2, by + 142);
         }
         g.dispose();
 
@@ -218,6 +252,57 @@ final class RtHud implements AutoCloseable {
         pixels.flip();
         staging.uploadHostVisible(pixels);
         dirty = true;
+    }
+
+    /** A rounded panel with a subtle top-to-bottom gradient (flat fills read as cheap
+     *  "boxes"; a graded one reads as a rendered surface, matching the studio-lit
+     *  jar/table it floats over) plus a hairline edge and, when {@code accent} is
+     *  given, a thin colored strip along the panel's top — the SAME "colored top
+     *  strip on a dark card" motif every modal in the 2D game already uses
+     *  (ControlCenterScreen's SETUP/SAVES panels, MainMenuScreen's AI picker), so this
+     *  HUD reads as the same app's design language instead of a bolted-on overlay. */
+    private void panel(Graphics2D g, int x, int y, int w, int h, int radius, Color accent) {
+        RoundRectangle2D shape = new RoundRectangle2D.Float(x, y, w, h, radius, radius);
+        g.setPaint(new GradientPaint(x, y, PANEL_TOP, x, y + h, PANEL_BOTTOM));
+        g.fill(shape);
+        g.setPaint(PANEL_EDGE);
+        g.setStroke(new BasicStroke(1f));
+        g.draw(shape);
+        if (accent != null) {
+            g.setColor(accent);
+            g.fill(new RoundRectangle2D.Float(x + 1, y + h - 3f, w - 2, 3f, 3f, 3f));
+        }
+    }
+
+    /** Manual letter-spacing: AWT/Java2D has no font-tracking API, but a little extra
+     *  air between all-caps caption letters ("SCORE", "NEXT", the control hints) is
+     *  the single cheapest thing that makes small UI text look designed rather than
+     *  just printed. */
+    private void drawTracked(Graphics2D g, Font font, String text, int x, int y, Color color, float tracking) {
+        g.setFont(font);
+        g.setColor(color);
+        FontMetrics fm = g.getFontMetrics();
+        float cx = x;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            g.drawString(String.valueOf(ch), cx, y);
+            cx += fm.charWidth(ch) + tracking;
+        }
+    }
+
+    private int trackedWidth(FontMetrics fm, String text, float tracking) {
+        float w = 0;
+        for (int i = 0; i < text.length(); i++) w += fm.charWidth(text.charAt(i)) + tracking;
+        return Math.round(w);
+    }
+
+    /** Lightens {@code c} toward white by {@code amount} (0..1) — used for the
+     *  next-fruit chip's soft highlight core. */
+    private static Color brighten(Color c, float amount) {
+        int r = c.getRed()   + Math.round((255 - c.getRed())   * amount);
+        int g = c.getGreen() + Math.round((255 - c.getGreen()) * amount);
+        int b = c.getBlue()  + Math.round((255 - c.getBlue())  * amount);
+        return new Color(Math.min(255, r), Math.min(255, g), Math.min(255, b));
     }
 
     /** Records the staged HUD upload into this frame's command buffer (no-op unless

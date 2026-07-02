@@ -315,9 +315,9 @@ public final class EvolutionRunner extends AgentRunner {
         return ga != null ? ga.fitnessStdDev() : 0;
     }
 
-    // NOTE ON LINE BUDGET: the landscape panel background is a FIXED height — text
-    // isn't clipped to it, so stats().length + extendedStats().length must stay at or
-    // below ~22 total or later lines render below the panel. stats() here is 8 lines.
+    // The landscape panel scrolls with the mouse wheel once stats() + extendedStats()
+    // exceed its visible height, so there's no hard line cap — see ControlCenterScreen's
+    // drawPanelText()/maxStatsScroll().
     @Override
     public String[] extendedStats() {
         java.util.List<String> s = new java.util.ArrayList<>();

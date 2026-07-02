@@ -55,7 +55,9 @@ public final class RtTraceTest {
                 System.out.println("pipeline + " + textures.all().size() + " textures + HDRI env + 6 BLAS meshes ready");
 
                 // A representative mid-game pile: settled fruits of several tiers, one
-                // falling, plus the hover fruit and next-up chip the launcher adds.
+                // falling, plus the hover fruit hanging in the chute's mouth — matching
+                // exactly what RtLabLauncher's live loop adds to the scene (no separate
+                // "next" chip floating in 3D any more; that lives in the HUD overlay now).
                 // In 3D-scatter mode the same pile spreads across the depth axis the
                 // way Jar3DPhysics settles it — each z-offset is sized so
                 // sqrt(x^2+z^2)+radius stays inside RtScene.JAR_RADIUS (5.45); the two
@@ -79,9 +81,8 @@ public final class RtTraceTest {
                         new RtScene.FruitInstance( 3.9f, 6.30f, z4, FruitTier.GRAPE.radius, FruitTier.GRAPE),
                         new RtScene.FruitInstance(-1.2f, 9.20f, z6, FruitTier.STRAWBERRY.radius, FruitTier.STRAWBERRY),
                         new RtScene.FruitInstance( 1.8f, 12.0f, z5, FruitTier.CHERRY.radius, FruitTier.CHERRY),     // falling
-                        new RtScene.FruitInstance(chuteX, RtScene.CHUTE_BOTTOM_Y - 0.2f, chuteZ,
-                                FruitTier.CHERRY.radius, FruitTier.CHERRY),                                          // hover, at chute exit
-                        new RtScene.FruitInstance(-6.9f, 17.6f, 0f, 0.65f, FruitTier.STRAWBERRY) // next chip (UI-scaled, not gameplay radius)
+                        new RtScene.FruitInstance(chuteX, RtScene.CHUTE_BOTTOM_Y - FruitTier.CHERRY.radius * 0.75f, chuteZ,
+                                FruitTier.CHERRY.radius, FruitTier.CHERRY)                                           // held in the chute's mouth
                 ));
                 String suffix = scatter3d ? "_3d" : "";
 
