@@ -33,8 +33,8 @@ public final class RtMeshLibrary implements AutoCloseable {
     public static final int VERTEX_STRIDE_BYTES = 32;
 
     public final RtBuffer vertexBuffer, indexBuffer;
-    public final Mesh sphere, tableQuad, wallQuad, cylinderSide, disc;
-    public final RtAccelerationStructure sphereBlas, tableBlas, wallBlas, cylinderBlas, discBlas;
+    public final Mesh sphere, tableQuad, wallQuad, cylinderSide, disc, jar;
+    public final RtAccelerationStructure sphereBlas, tableBlas, wallBlas, cylinderBlas, discBlas, jarBlas;
 
     private static final int SPHERE_SUBDIVISIONS = 3;   // 1280 triangles
     private static final int CYLINDER_SEGMENTS   = 96;  // smooth enough for close-up glass
@@ -49,11 +49,13 @@ public final class RtMeshLibrary implements AutoCloseable {
         meshes.add(appendWallQuad(vertices, indices));
         meshes.add(appendCylinderSide(vertices, indices));
         meshes.add(appendDisc(vertices, indices));
+        meshes.add(appendJar(vertices, indices));
         this.sphere = meshes.get(0);
         this.tableQuad = meshes.get(1);
         this.wallQuad = meshes.get(2);
         this.cylinderSide = meshes.get(3);
         this.disc = meshes.get(4);
+        this.jar = meshes.get(5);
 
         int usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
                 | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
@@ -76,6 +78,7 @@ public final class RtMeshLibrary implements AutoCloseable {
         this.wallBlas     = blas(pd, device, commandPool, queue, wallQuad);
         this.cylinderBlas = blas(pd, device, commandPool, queue, cylinderSide);
         this.discBlas     = blas(pd, device, commandPool, queue, disc);
+        this.jarBlas      = blas(pd, device, commandPool, queue, jar);
     }
 
     private RtAccelerationStructure blas(VkPhysicalDevice pd, VkDevice device, long commandPool, VkQueue queue, Mesh m) {
@@ -152,6 +155,83 @@ public final class RtMeshLibrary implements AutoCloseable {
         return new Mesh(v0, (segs + 1) * 2, i0, segs * 2);
     }
 
+    /**
+     * The mason jar as a surface of revolution, authored at WORLD scale (no
+     * instance scaling): rounded bottom corner, straight body, curved shoulder,
+     * two thread ribs on the neck, flared lip, and an inward rim ring at the top
+     * so the mouth reads as a real open glass edge. The profile is anchored to
+     * {@link JarShape}'s dimensions so the 3D physics containment and this render
+     * mesh can never drift apart. Rendered two-sided (glass), separate base disc.
+     */
+    private static Mesh appendJar(List<float[]> vs, List<Integer> is) {
+        float body = (float) JarShape.BODY_RADIUS;
+        float bodyTop = (float) JarShape.BODY_TOP;
+        float neck = (float) JarShape.NECK_RADIUS;
+        float shoulderTop = (float) JarShape.SHOULDER_TOP;
+        float mouthTop = (float) JarShape.MOUTH_TOP;
+        float mouthIn = (float) JarShape.MOUTH_INNER_RADIUS;
+
+        List<float[]> profile = new ArrayList<>();   // (radius, y) pairs, bottom -> rim
+        // rounded bottom corner
+        profile.add(new float[]{body - 0.85f, 0.02f});
+        profile.add(new float[]{body - 0.25f, 0.15f});
+        profile.add(new float[]{body - 0.04f, 0.55f});
+        profile.add(new float[]{body, 1.2f});
+        // straight body
+        profile.add(new float[]{body, bodyTop});
+        // shoulder: sample JarShape's own curve so physics and glass agree exactly
+        for (int i = 1; i <= 6; i++) {
+            double y = bodyTop + (shoulderTop - bodyTop) * i / 6.0;
+            profile.add(new float[]{(float) JarShape.radiusAt(y), (float) y});
+        }
+        // neck with two thread ribs
+        profile.add(new float[]{neck + 0.17f, 17.55f});
+        profile.add(new float[]{neck, 17.85f});
+        profile.add(new float[]{neck + 0.17f, 18.15f});
+        profile.add(new float[]{neck, 18.45f});
+        // flared lip, then the rim folds inward to the open mouth edge
+        profile.add(new float[]{neck + 0.20f, 18.70f});
+        profile.add(new float[]{neck + 0.20f, mouthTop - 0.05f});
+        profile.add(new float[]{mouthIn, mouthTop});
+        return appendLathe(vs, is, profile);
+    }
+
+    /** Revolves a (radius, y) profile around the Y axis with smooth normals
+     *  computed from the profile's tangent (central differences). */
+    private static Mesh appendLathe(List<float[]> vs, List<Integer> is, List<float[]> profile) {
+        int v0 = vs.size(), i0 = is.size();
+        int segs = CYLINDER_SEGMENTS;
+        int rings = profile.size();
+
+        for (int p = 0; p < rings; p++) {
+            float r = profile.get(p)[0], y = profile.get(p)[1];
+            // 2D outward normal of the profile polyline: perpendicular to the
+            // tangent (dr, dy), oriented away from the axis.
+            float[] prev = profile.get(Math.max(0, p - 1));
+            float[] next = profile.get(Math.min(rings - 1, p + 1));
+            float tr = next[0] - prev[0], ty = next[1] - prev[1];
+            float len = (float) Math.sqrt(tr * tr + ty * ty);
+            float nr = ty / len, ny = -tr / len;
+            if (nr < 0) { nr = -nr; ny = -ny; }   // keep pointing outward
+
+            float v = p / (float) (rings - 1);
+            for (int i = 0; i <= segs; i++) {
+                float a = (float) (2 * Math.PI * i / segs);
+                float cos = (float) Math.cos(a), sin = (float) Math.sin(a);
+                vert(vs, r * cos, y, r * sin, (float) i / segs, nr * cos, ny, nr * sin, v);
+            }
+        }
+        int stride = segs + 1;
+        for (int p = 0; p < rings - 1; p++) {
+            for (int i = 0; i < segs; i++) {
+                int b = p * stride + i;
+                is.add(b); is.add(b + 1); is.add(b + stride);
+                is.add(b + stride); is.add(b + 1); is.add(b + stride + 1);
+            }
+        }
+        return new Mesh(v0, rings * stride, i0, (rings - 1) * segs * 2);
+    }
+
     /** Unit disc in the XZ plane at y=0, facing +Y (the jar's glass base). */
     private static Mesh appendDisc(List<float[]> vs, List<Integer> is) {
         int v0 = vs.size(), i0 = is.size();
@@ -175,6 +255,7 @@ public final class RtMeshLibrary implements AutoCloseable {
         wallBlas.close();
         cylinderBlas.close();
         discBlas.close();
+        jarBlas.close();
         vertexBuffer.close();
         indexBuffer.close();
     }

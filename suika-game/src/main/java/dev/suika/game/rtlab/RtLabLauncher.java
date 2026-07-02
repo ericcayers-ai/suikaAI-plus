@@ -107,7 +107,7 @@ public final class RtLabLauncher {
                  RtMeshLibrary meshes = new RtMeshLibrary(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue);
                  RtScene scene = new RtScene(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, meshes, textures)) {
 
-                pipeline.writeTextures(textures.all());
+                pipeline.writeTextures(textures.all(), textures.environment());
 
                 boolean[] denoiseOn = {true};
                 glfwSetKeyCallback(window.handle, (win, key, scancode, action, mods) -> {
@@ -166,21 +166,26 @@ public final class RtLabLauncher {
                     for (RtGameSession.Ball b : session.fruits()) {
                         instances.add(new RtScene.FruitInstance(b.x(), b.y(), b.z(), b.radius(), b.tier()));
                     }
-                    if (!session.gameOver()) {
-                        // The not-yet-dropped fruit hovers over the aim point at the rim.
+                    boolean playing = !session.gameOver();
+                    if (playing) {
+                        // The not-yet-dropped fruit peeks out of the chute's lower
+                        // opening, over the aim point — like the reference scene's
+                        // strawberries emerging from the metal tube.
                         FruitTier cur = session.currentTier();
-                        instances.add(new RtScene.FruitInstance(session.hoverX(), (float) Jar3DPhysics.DROP_Y,
+                        instances.add(new RtScene.FruitInstance(session.hoverX(),
+                                RtScene.CHUTE_BOTTOM_Y - cur.radius * 0.4f,
                                 session.hoverZ(), cur.radius, cur));
-                        // Next-up preview floats beside the jar's rim, always tier-sized
+                        // Next-up preview floats beside the jar's neck, always tier-sized
                         // relative to a fixed chip scale so it reads as UI, not gameplay.
                         FruitTier next = session.nextTier();
-                        instances.add(new RtScene.FruitInstance(-6.9f, 16.6f, 0f,
+                        instances.add(new RtScene.FruitInstance(-6.9f, 17.6f, 0f,
                                 0.45f + 0.22f * next.radius, next));
                     }
 
                     // First frame has no history to blend against — write through fully.
                     float blend = frame == 0 ? 1.0f : 0.30f;
-                    scene.updateFrame(pipeline, raw, instances, cam.frame(time, blend));
+                    scene.updateFrame(pipeline, raw, instances,
+                            session.hoverX(), session.hoverZ(), playing, cam.frame(time, blend));
                     frame++;
 
                     renderFrame(ctx, swap, pipeline, denoiser, raw, denoised, denoiseOn[0],
@@ -200,17 +205,19 @@ public final class RtLabLauncher {
 
     /** Fixed studio camera: in front of the jar, slightly above, focused on the
      *  fruit plane so the tan wall far behind lands in bokeh and the table edge
-     *  near the lens blurs as foreground. */
+     *  near the lens blurs as foreground. Framed like the reference photo — the
+     *  full jar (body, shoulder, open mouth) plus the chute's lower half in view,
+     *  the chute's top running out of the frame. */
     private static final class Camera {
-        final float posX = 0f, posY = 10.5f, posZ = 21f;
+        final float posX = 0f, posY = 12.5f, posZ = 26.5f;
         final float[] fwd, right, up;
-        final float tanHalfFov = (float) Math.tan(Math.toRadians(27)); // 54° vertical
-        final float aperture = 0.28f;
+        final float tanHalfFov = (float) Math.tan(Math.toRadians(28)); // 56° vertical
+        final float aperture = 0.34f;
         final float focusDist;
         final float aspect;
 
         Camera(int width, int height) {
-            float tx = 0f, ty = 6.8f, tz = 0f;
+            float tx = 0f, ty = 8.4f, tz = 0f;
             fwd = normalize(tx - posX, ty - posY, tz - posZ);
             // right = normalize(cross(fwd, worldUp)) — the sign matters now: mouse-x
             // maps straight to world x, so screen-right MUST be world +X when looking

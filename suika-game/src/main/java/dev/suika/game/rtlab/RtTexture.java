@@ -32,13 +32,31 @@ public final class RtTexture implements AutoCloseable {
 
     private final VkDevice device;
 
+    /** Loads a bundled JPG/PNG as a mipmapped RGBA8 texture (the PBR map path). */
     public RtTexture(VkPhysicalDevice pd, VkDevice device, long commandPool, VkQueue queue, String resourcePath) {
-        this.device = device;
+        this(pd, device, commandPool, queue, decodeLdr(resourcePath),
+                imageWidth(resourcePath), imageHeight(resourcePath),
+                VK_FORMAT_R8G8B8A8_UNORM, 4, true, resourcePath);
+    }
 
+    /** Loads a bundled Radiance .hdr equirectangular environment map as RGBA32F
+     *  (single mip — env lookups are low-frequency; a float mip chain via blit is
+     *  not worth the extra format-support requirements). */
+    public static RtTexture hdr(VkPhysicalDevice pd, VkDevice device, long commandPool, VkQueue queue, String resourcePath) {
+        HdrLoader hdri = HdrLoader.load(resourcePath);
+        return new RtTexture(pd, device, commandPool, queue, hdri.rgba, hdri.width, hdri.height,
+                VK_FORMAT_R32G32B32A32_SFLOAT, 16, false, resourcePath);
+    }
+
+    // ImageIO decode is cheap relative to GPU upload, and doing it twice keeps the
+    // public constructor a clean this(...) delegation (Java requires the delegating
+    // call first, so no field staging is possible before it).
+    private static int imageWidth(String path)  { return decode(path).getWidth(); }
+    private static int imageHeight(String path) { return decode(path).getHeight(); }
+
+    private static ByteBuffer decodeLdr(String resourcePath) {
         BufferedImage img = decode(resourcePath);
         int width = img.getWidth(), height = img.getHeight();
-        int mipLevels = 1 + (int) (Math.log(Math.max(width, height)) / Math.log(2));
-
         ByteBuffer rgba = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder());
         int[] row = new int[width];
         for (int y = 0; y < height; y++) {
@@ -52,12 +70,20 @@ public final class RtTexture implements AutoCloseable {
             }
         }
         rgba.flip();
+        return rgba;
+    }
+
+    private RtTexture(VkPhysicalDevice pd, VkDevice device, long commandPool, VkQueue queue,
+                      ByteBuffer pixels, int width, int height,
+                      int format, int bytesPerPixel, boolean generateMips, String debugName) {
+        this.device = device;
+        int mipLevels = generateMips ? 1 + (int) (Math.log(Math.max(width, height)) / Math.log(2)) : 1;
 
         try (MemoryStack stack = stackPush()) {
-            // UNORM for every map (not SRGB for albedo): the shader linearises albedo
-            // itself with pow(2.2) so all maps share one format/one code path, and the
-            // data maps (normal/roughness) must NOT be gamma-decoded by the sampler.
-            int format = VK_FORMAT_R8G8B8A8_UNORM;
+            // For LDR maps: UNORM for every map (not SRGB for albedo) — the shader
+            // linearises albedo itself with pow(2.2) so all maps share one format/one
+            // code path, and the data maps (normal/roughness) must NOT be
+            // gamma-decoded by the sampler. HDR env maps are already linear floats.
 
             VkImageCreateInfo imageInfo = VkImageCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
@@ -73,7 +99,7 @@ public final class RtTexture implements AutoCloseable {
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE)
                     .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED);
             LongBuffer pImage = stack.mallocLong(1);
-            ok(vkCreateImage(device, imageInfo, null, pImage), "vkCreateImage (texture " + resourcePath + ")");
+            ok(vkCreateImage(device, imageInfo, null, pImage), "vkCreateImage (texture " + debugName + ")");
             this.image = pImage.get(0);
 
             VkMemoryRequirements memReq = VkMemoryRequirements.malloc(stack);
@@ -87,10 +113,10 @@ public final class RtTexture implements AutoCloseable {
             this.memory = pMemory.get(0);
             ok(vkBindImageMemory(device, image, memory, 0), "vkBindImageMemory (texture)");
 
-            try (RtBuffer staging = new RtBuffer(pd, device, (long) width * height * 4,
+            try (RtBuffer staging = new RtBuffer(pd, device, (long) width * height * bytesPerPixel,
                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
-                staging.uploadHostVisible(rgba);
+                staging.uploadHostVisible(pixels);
                 OneShotCommands.submit(device, commandPool, queue, cmd ->
                         uploadAndGenerateMips(cmd, staging.buffer, width, height, mipLevels));
             }
@@ -112,7 +138,10 @@ public final class RtTexture implements AutoCloseable {
                     .minFilter(VK_FILTER_LINEAR)
                     .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
                     .addressModeU(VK_SAMPLER_ADDRESS_MODE_REPEAT)
-                    .addressModeV(VK_SAMPLER_ADDRESS_MODE_REPEAT)
+                    // Equirect env maps (the no-mip path) must clamp vertically:
+                    // wrapping V would blend the zenith row into the nadir row at the
+                    // poles. Tiling PBR maps keep full repeat.
+                    .addressModeV(generateMips ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                     .addressModeW(VK_SAMPLER_ADDRESS_MODE_REPEAT)
                     .minLod(0f)
                     .maxLod(mipLevels);

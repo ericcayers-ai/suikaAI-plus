@@ -22,11 +22,18 @@ import java.util.Random;
  */
 public final class Jar3DPhysics {
 
-    /** Interior radius fruits may occupy. Slightly under {@link RtScene#JAR_RADIUS}
-     *  so resting fruit never visually intersects the glass. */
+    /** Interior radius fruits may occupy in the jar's straight body section —
+     *  slightly under {@link JarShape#BODY_RADIUS} so resting fruit never visually
+     *  intersects the glass. Above the body the containment follows the jar's
+     *  shoulder/neck profile (see {@link JarShape#radiusAt}). */
     public static final double PLAY_RADIUS = 5.2;
+    /** Clearance kept between fruit surface and the curved glass profile. */
+    private static final double GLASS_MARGIN = 0.15;
     public static final double JAR_HEIGHT = PhysicsConfig.CONTAINER_HEIGHT;
-    public static final double DROP_Y = PhysicsConfig.DROP_Y;
+    /** 3D drops release from the chute above the jar's open mouth and fall in
+     *  through the neck — higher than the 2D engine's DROP_Y, which spawns inside
+     *  the (strictly cylindrical) 2D container. */
+    public static final double DROP_Y = 19.4;
 
     private static final double CONTACT_TOLERANCE = 1.08;  // same slack as GameCore
     private static final int    SOLVER_ITERATIONS = 4;
@@ -72,9 +79,11 @@ public final class Jar3DPhysics {
         return FruitTier.DEKOPON;
     }
 
-    /** Clamp a drop point so the fruit stays fully inside the jar radially. */
+    /** Clamp a drop point so the fruit passes cleanly through the jar's OPEN MOUTH
+     *  (the narrowest part of its path — see {@link JarShape#dropLimit}); nothing
+     *  can be aimed at the glass shoulder or outside the jar entirely. */
     public double[] clampDrop(double x, double z, double radius) {
-        double limit = PLAY_RADIUS - radius;
+        double limit = Math.min(PLAY_RADIUS - radius, JarShape.dropLimit(radius));
         double d = Math.sqrt(x * x + z * z);
         if (d > limit && d > 1e-9) {
             x *= limit / d;
@@ -162,9 +171,11 @@ public final class Jar3DPhysics {
                 b.vx *= damp;
                 b.vz *= damp;
             }
-            // cylindrical wall
+            // jar wall — follows the glass profile, so fruit piled above the body
+            // section gets funnelled by the shoulder instead of escaping through it
             double d = Math.sqrt(b.x * b.x + b.z * b.z);
-            double limit = PLAY_RADIUS - b.radius;
+            double surfaceBound = Math.min(PLAY_RADIUS, JarShape.radiusAt(b.y) - GLASS_MARGIN);
+            double limit = surfaceBound - b.radius;
             if (d > limit && d > 1e-9) {
                 double nx = b.x / d, nz = b.z / d;   // outward radial
                 b.x = nx * limit;

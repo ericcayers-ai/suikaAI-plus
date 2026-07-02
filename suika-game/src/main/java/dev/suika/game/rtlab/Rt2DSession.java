@@ -32,7 +32,12 @@ public final class Rt2DSession implements RtGameSession {
     public void setPointer(float nx, float ny) {
         float gx = nx * (float) PhysicsConfig.CONTAINER_WIDTH;
         double radius = core.currentFruitRadius();
-        hoverGameX = (float) GameCore.clampDropForRadius(gx, radius);
+        // Two clamps: the 2D engine's own wall clamp, then the jar-mouth clamp —
+        // the fruit physically enters through the jar's OPENING (narrower than the
+        // body), so the chute can't aim a drop outside the glass. World x = gx - 5.
+        double x = GameCore.clampDropForRadius(gx, radius);
+        double mouthLimit = JarShape.dropLimit(radius);
+        hoverGameX = (float) Math.clamp(x, 5.0 - mouthLimit, 5.0 + mouthLimit);
     }
 
     @Override

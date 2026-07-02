@@ -34,20 +34,26 @@ public final class RtScene implements AutoCloseable {
     public record FruitInstance(float x, float y, float z, float radius, FruitTier tier) {}
 
     // ---- world layout ----
-    public static final float JAR_RADIUS = 5.45f;   // slightly over the 2D half-width of 5
-    public static final float JAR_HEIGHT = 15.0f;   // == CONTAINER_HEIGHT
+    /** Jar dimensions live in {@link JarShape} (shared with physics); kept here as
+     *  a convenience alias for callers that only need the body radius. */
+    public static final float JAR_RADIUS = (float) JarShape.BODY_RADIUS;
     public static final float WALL_Z     = -10.0f;
     public static final float TABLE_SIZE_X = 80f, TABLE_SIZE_Z = 56f, TABLE_CENTER_Z = 6f;
     public static final float WALL_SIZE_X = 90f, WALL_SIZE_Y = 60f;
 
+    // The movable metal drop chute (the "drop cursor" of the reference scene):
+    // an open steel tube hovering above the jar mouth, following the pointer.
+    public static final float CHUTE_RADIUS = 1.45f;
+    public static final float CHUTE_BOTTOM_Y = 19.6f;   // just above JarShape.MOUTH_TOP
+    public static final float CHUTE_HEIGHT = 4.5f;      // top runs out of frame, like the photo
+
     /** Cull masks (must match raygen.rgen): shadow rays skip MASK_GLASS. */
     private static final int MASK_SOLID = 0x01, MASK_GLASS = 0x02;
 
-    private static final int MAT_FRUIT = 0, MAT_WOOD = 1, MAT_WALL = 2, MAT_GLASS = 3;
+    private static final int MAT_FRUIT = 0, MAT_WOOD = 1, MAT_WALL = 2, MAT_GLASS = 3, MAT_METAL = 4;
 
     private static final int INSTANCE_DATA_BYTES = 64;  // struct InstanceData in closesthit.rchit
     private static final int TLAS_INSTANCE_BYTES = 64;  // sizeof(VkAccelerationStructureInstanceKHR)
-    private static final int ENV_INSTANCES = 4;         // table, wall, jar side, jar base
 
     private final VkPhysicalDevice physicalDevice;
     private final VkDevice device;
@@ -87,9 +93,13 @@ public final class RtScene implements AutoCloseable {
                               float focusDist, float blend, float aspect) {}
 
     /** Rebuilds the per-frame instance buffers and the TLAS from the given fruit
-     *  snapshot plus the fixed environment, then updates the descriptor set. */
-    public void updateFrame(RtPipeline pipeline, RtOutputImage output, List<FruitInstance> fruits, CameraFrame cam) {
-        int n = ENV_INSTANCES + fruits.size();
+     *  snapshot plus the fixed environment, then updates the descriptor set.
+     *  The chute follows the player's aim ({@code chuteX}/{@code chuteZ}) and is
+     *  hidden after game over ({@code chuteVisible}). */
+    public void updateFrame(RtPipeline pipeline, RtOutputImage output, List<FruitInstance> fruits,
+                            float chuteX, float chuteZ, boolean chuteVisible, CameraFrame cam) {
+        int envCount = 4 + (chuteVisible ? 1 : 0);
+        int n = envCount + fruits.size();
         int hostVisible = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
         ByteBuffer data = ByteBuffer.allocateDirect(n * INSTANCE_DATA_BYTES).order(ByteOrder.nativeOrder());
@@ -113,15 +123,24 @@ public final class RtScene implements AutoCloseable {
         writeTlasInstance(tlasInstances, meshes.wallBlas.deviceAddress(), index++, MASK_SOLID,
                 WALL_SIZE_X, WALL_SIZE_Y, 1f, 0f, WALL_SIZE_Y / 2f, WALL_Z);
 
-        // 2: jar side — open glass cylinder (mask keeps it out of shadow rays).
-        writeInstanceData(data, 1f, 1f, 1f, -1, -1, -1, MAT_GLASS, meshes.cylinderSide, 1f, 1f, 0.04f, 1f);
-        writeTlasInstance(tlasInstances, meshes.cylinderBlas.deviceAddress(), index++, MASK_GLASS,
-                JAR_RADIUS, JAR_HEIGHT, JAR_RADIUS, 0f, 0f, 0f);
+        // 2: the mason jar — lathe mesh authored at world scale (body, shoulder,
+        //    threaded neck, open mouth; see RtMeshLibrary.appendJar / JarShape).
+        writeInstanceData(data, 1f, 1f, 1f, -1, -1, -1, MAT_GLASS, meshes.jar, 1f, 1f, 0.04f, 1f);
+        writeTlasInstance(tlasInstances, meshes.jarBlas.deviceAddress(), index++, MASK_GLASS,
+                1f, 1f, 1f, 0f, 0f, 0f);
 
         // 3: jar base — glass disc just above the table so it doesn't z-fight the wood.
         writeInstanceData(data, 1f, 1f, 1f, -1, -1, -1, MAT_GLASS, meshes.disc, 1f, 1f, 0.04f, 1f);
         writeTlasInstance(tlasInstances, meshes.discBlas.deviceAddress(), index++, MASK_GLASS,
-                JAR_RADIUS, 1f, JAR_RADIUS, 0f, 0.02f, 0f);
+                JAR_RADIUS - 0.1f, 1f, JAR_RADIUS - 0.1f, 0f, 0.02f, 0f);
+
+        // 4 (optional): the metal drop chute, tracking the aim point above the mouth.
+        if (chuteVisible) {
+            writeInstanceData(data, 0.62f, 0.63f, 0.66f, -1, -1, -1, MAT_METAL,
+                    meshes.cylinderSide, 1f, 1f, 0.25f, 1f);
+            writeTlasInstance(tlasInstances, meshes.cylinderBlas.deviceAddress(), index++, MASK_SOLID,
+                    CHUTE_RADIUS, CHUTE_HEIGHT, CHUTE_RADIUS, chuteX, CHUTE_BOTTOM_Y, chuteZ);
+        }
 
         // ---- fruits ----
         Color tmp = new Color();

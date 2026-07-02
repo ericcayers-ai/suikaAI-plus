@@ -51,8 +51,8 @@ public final class RtTraceTest {
                  RtMeshLibrary meshes = new RtMeshLibrary(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue);
                  RtScene scene = new RtScene(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, meshes, textures)) {
 
-                pipeline.writeTextures(textures.all());
-                System.out.println("pipeline + " + textures.all().size() + " textures + 5 BLAS meshes ready");
+                pipeline.writeTextures(textures.all(), textures.environment());
+                System.out.println("pipeline + " + textures.all().size() + " textures + HDRI env + 6 BLAS meshes ready");
 
                 // A representative mid-game pile: settled fruits of several tiers, one
                 // falling, plus the hover fruit and next-up chip the launcher adds.
@@ -67,6 +67,8 @@ public final class RtTraceTest {
                 float z1 = scatter3d ? 0.5f : 0f, z2 = 0f,
                       z3 = scatter3d ? -2.0f : 0f, z4 = scatter3d ? 1.8f : 0f,
                       z5 = scatter3d ? 0.9f : 0f, z6 = scatter3d ? -1.1f : 0f;
+                // Hover fruit peeks from the chute exit; the chute follows the same aim.
+                float chuteX = 1.2f, chuteZ = scatter3d ? -0.8f : 0f;
                 List<RtScene.FruitInstance> fruits = new ArrayList<>(List.of(
                         new RtScene.FruitInstance(-2.0f, 3.26f, z1, 3.2f, FruitTier.WATERMELON),
                         new RtScene.FruitInstance( 2.6f, 2.86f, z2, 2.8f, FruitTier.MELON),
@@ -75,13 +77,14 @@ public final class RtTraceTest {
                         new RtScene.FruitInstance( 3.9f, 6.30f, z4, 0.9f, FruitTier.GRAPE),
                         new RtScene.FruitInstance(-1.2f, 9.20f, z6, 0.7f, FruitTier.STRAWBERRY),
                         new RtScene.FruitInstance( 1.8f, 12.0f, z5, 0.5f, FruitTier.CHERRY),     // falling
-                        new RtScene.FruitInstance( 0.0f, 16.0f, z6, 0.5f, FruitTier.CHERRY),     // hover
-                        new RtScene.FruitInstance(-6.9f, 16.6f, 0f, 0.65f, FruitTier.STRAWBERRY) // next chip
+                        new RtScene.FruitInstance(chuteX, RtScene.CHUTE_BOTTOM_Y - 0.2f, chuteZ,
+                                0.5f, FruitTier.CHERRY),                                          // hover, at chute exit
+                        new RtScene.FruitInstance(-6.9f, 17.6f, 0f, 0.65f, FruitTier.STRAWBERRY) // next chip
                 ));
                 String suffix = scatter3d ? "_3d" : "";
 
                 // Same camera as RtLabLauncher (kept in sync by hand — it's 6 numbers).
-                float px = 0f, py = 10.5f, pz = 21f, tx = 0f, ty = 6.8f, tz = 0f;
+                float px = 0f, py = 12.5f, pz = 26.5f, tx = 0f, ty = 8.4f, tz = 0f;
                 float[] fwd = norm(tx - px, ty - py, tz - pz);
                 float[] right = norm(-fwd[2], 0f, fwd[0]);
                 float[] up = {right[1] * fwd[2] - right[2] * fwd[1],
@@ -95,9 +98,9 @@ public final class RtTraceTest {
                 for (int f = 0; f < frames; f++) {
                     RtScene.CameraFrame cam = new RtScene.CameraFrame(px, py, pz,
                             fwd[0], fwd[1], fwd[2], right[0], right[1], right[2], up[0], up[1], up[2],
-                            (float) Math.tan(Math.toRadians(27)), f * 0.016f, 0.28f, focus,
+                            (float) Math.tan(Math.toRadians(28)), f * 0.016f, 0.34f, focus,
                             f == 0 ? 1.0f : 0.30f, (float) width / height);
-                    scene.updateFrame(pipeline, raw, fruits, cam);
+                    scene.updateFrame(pipeline, raw, fruits, chuteX, chuteZ, true, cam);
                     traceOneFrame(ctx.device, ctx.graphicsQueue, commandPool, pipeline, width, height);
                 }
                 savePng(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, raw, width, height,

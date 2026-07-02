@@ -14,5 +14,12 @@ Downloaded 2026-07-02, 1K resolution, for the RT Lab environment.
                   albedo.jpg, normal.png (OpenGL/+Y convention),
                   roughness.jpg, ao.jpg.
 
+  studio.hdr   -> "Pav Studio 03" HDRI, https://polyhaven.com/a/pav_studio_03
+                  Source: Poly Haven (https://polyhaven.com), CC0 1.0 Universal
+                  ("All assets on this site are CC0... free for any purpose").
+                  1K equirectangular Radiance (.hdr). Drives the RT Lab's
+                  image-based environment lighting: sky/ambient fill, the glass
+                  jar's reflections, and the metal chute's mirror reflections.
+
 The tan wall behind the table is a procedural material (flat tan albedo with
-subtle noise), not a downloaded texture.
+subtle noise) tuned to sit tonally inside the HDRI, not a downloaded texture.

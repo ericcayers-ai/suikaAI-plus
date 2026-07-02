@@ -47,6 +47,7 @@ const int MAT_FRUIT = 0;
 const int MAT_WOOD  = 1;
 const int MAT_WALL  = 2;
 const int MAT_GLASS = 3;
+const int MAT_METAL = 4;   // the movable drop chute
 
 // Cull masks: glass is excluded from shadow rays (mask 0x01) so the jar doesn't
 // cast a hard dark shadow over its own contents — physically light refracts
@@ -64,17 +65,21 @@ vec2 hash2(vec2 p, float seed) {
     return vec2(a, b);
 }
 
-// ---- environment: a bright, warm, professionally-lit studio ----
-// What rays see when they escape the scene — also what the glass "reflects".
-// Deliberately high-key and even (soft daylight studio) so the whole scene reads
-// as brightly lit without any harsh gradient.
+// ---- environment: image-based lighting from a real studio HDRI ----
+// Equirectangular Poly Haven "Pav Studio 03" (warm photo studio, matching the
+// reference scene). What rays see when they escape the scene — and also what
+// the glass jar and metal chute reflect, and where the ambient fill for every
+// opaque surface comes from. Linear radiance straight from the file; EXPOSURE
+// scales it into the same range the key light works in.
+layout(binding = 7, set = 0) uniform sampler2D envMap;
+const float ENV_EXPOSURE = 1.55;
+
 vec3 envColor(vec3 d) {
-    float t = clamp(d.y * 0.5 + 0.5, 0.0, 1.0);
-    vec3 low  = vec3(0.62, 0.54, 0.44);   // warm floor bounce
-    vec3 mid  = vec3(1.02, 0.94, 0.80);   // tan wall tone, brightly lit
-    vec3 high = vec3(1.35, 1.30, 1.18);   // soft ceiling light
-    vec3 c = t < 0.5 ? mix(low, mid, t * 2.0) : mix(mid, high, (t - 0.5) * 2.0);
-    return c;
+    // Equirect mapping: u wraps around Y (atan), v = polar angle. The HDRI is
+    // stored top row first (-Y orientation), matching v=0 at the zenith.
+    vec2 uv = vec2(atan(d.z, d.x) * 0.15915494309 + 0.5,
+                   acos(clamp(d.y, -1.0, 1.0)) * 0.31830988618);
+    return textureLod(envMap, uv, 0.0).rgb * ENV_EXPOSURE;
 }
 
 // Key light: one big warm softbox up-right-front. Direction TOWARD the light.
@@ -178,6 +183,24 @@ void main() {
         int mat = int(hit.albedoMat.w + 0.5);
         vec3 P = hit.posT.xyz;
         vec3 N = hit.normalRough.xyz;
+
+        if (mat == MAT_METAL) {
+            // The drop chute: polished metal — a mirror-weighted mix of the HDRI
+            // reflection and the key light's specular ping, tinted by the albedo
+            // (metals tint their reflections; dielectrics don't). No continuation
+            // ray: one env lookup along the reflection reads convincingly as
+            // brushed steel at gameplay viewing distance.
+            vec3 R = reflect(rd, N);
+            float ndv = clamp(dot(N, -rd), 0.0, 1.0);
+            float fres = 0.55 + 0.45 * pow(1.0 - ndv, 3.0);
+            vec3 base = hit.albedoMat.rgb;
+            vec3 c = base * envColor(R) * fres;
+            vec3 H = normalize(LIGHT_DIR - rd);
+            c += base * LIGHT_COLOR * pow(max(dot(N, H), 0.0), 220.0) * 2.0;
+            c += base * envColor(N) * 0.10;   // faint diffuse so unlit facets aren't black
+            color += tint * c;
+            break;
+        }
 
         if (mat == MAT_GLASS) {
             // Thin glass: parallel surfaces cancel refraction bend, so the ray

@@ -32,6 +32,7 @@ public final class RtPipeline implements AutoCloseable {
     public static final int BINDING_VERTICES = 4;
     public static final int BINDING_INDICES = 5;
     public static final int BINDING_TEXTURES = 6;
+    public static final int BINDING_ENVIRONMENT = 7;
 
     /** Fixed size of the PBR texture array binding — must match closesthit.rchit's
      *  {@code sampler2D textures[24]}. Unused slots are filled with texture 0 so
@@ -89,7 +90,7 @@ public final class RtPipeline implements AutoCloseable {
     // ---- descriptor set layout / pipeline layout ----
 
     private long createDescriptorSetLayout(MemoryStack stack) {
-        VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(7, stack);
+        VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(8, stack);
         bindings.get(BINDING_TLAS).binding(BINDING_TLAS)
                 .descriptorType(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR).descriptorCount(1)
                 // Raygen only: all rays (primary, glass continuation, shadow) now
@@ -113,6 +114,11 @@ public final class RtPipeline implements AutoCloseable {
         bindings.get(BINDING_TEXTURES).binding(BINDING_TEXTURES)
                 .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(MAX_TEXTURES)
                 .stageFlags(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
+        bindings.get(BINDING_ENVIRONMENT).binding(BINDING_ENVIRONMENT)
+                .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(1)
+                // Raygen owns ALL shading (see raygen.rgen), so the HDRI environment —
+                // ambient fill, glass/metal reflections, ray-escape color — lives there.
+                .stageFlags(VK_SHADER_STAGE_RAYGEN_BIT_KHR);
 
         VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
@@ -214,7 +220,7 @@ public final class RtPipeline implements AutoCloseable {
         sizes.get(1).type(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE).descriptorCount(1);
         sizes.get(2).type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(1);
         sizes.get(3).type(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(3);
-        sizes.get(4).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(MAX_TEXTURES);
+        sizes.get(4).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(MAX_TEXTURES + 1); // +1: env map
 
         VkDescriptorPoolCreateInfo info = VkDescriptorPoolCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO)
@@ -235,10 +241,11 @@ public final class RtPipeline implements AutoCloseable {
         return pSet.get(0);
     }
 
-    /** Writes the PBR texture array once at startup (these never change per frame).
-     *  Fills every one of the {@link #MAX_TEXTURES} slots — unused tail slots repeat
-     *  texture 0 so no descriptor in the fixed-size array is left invalid. */
-    public void writeTextures(java.util.List<RtTexture> textures) {
+    /** Writes the PBR texture array and the HDRI environment map once at startup
+     *  (these never change per frame). Fills every one of the {@link #MAX_TEXTURES}
+     *  array slots — unused tail slots repeat texture 0 so no descriptor in the
+     *  fixed-size array is left invalid. */
+    public void writeTextures(java.util.List<RtTexture> textures, RtTexture environment) {
         if (textures.isEmpty()) throw new IllegalArgumentException("need at least one texture");
         try (MemoryStack stack = stackPush()) {
             VkDescriptorImageInfo.Buffer infos = VkDescriptorImageInfo.calloc(MAX_TEXTURES, stack);
@@ -247,10 +254,17 @@ public final class RtPipeline implements AutoCloseable {
                 infos.get(i).sampler(t.sampler).imageView(t.view)
                         .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             }
-            VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(1, stack);
+            VkDescriptorImageInfo.Buffer envInfo = VkDescriptorImageInfo.calloc(1, stack)
+                    .sampler(environment.sampler).imageView(environment.view)
+                    .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+            VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(2, stack);
             writes.get(0).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
                     .dstSet(descriptorSet).dstBinding(BINDING_TEXTURES).descriptorCount(MAX_TEXTURES)
                     .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).pImageInfo(infos);
+            writes.get(1).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                    .dstSet(descriptorSet).dstBinding(BINDING_ENVIRONMENT).descriptorCount(1)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).pImageInfo(envInfo);
             vkUpdateDescriptorSets(device, writes, null);
         }
     }

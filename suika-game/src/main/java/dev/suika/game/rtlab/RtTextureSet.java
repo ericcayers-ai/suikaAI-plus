@@ -25,8 +25,13 @@ public final class RtTextureSet implements AutoCloseable {
     private final List<RtTexture> textures = new ArrayList<>();
     private final Map<FruitTier, Integer> fruitBase = new EnumMap<>(FruitTier.class);
     private final int woodBase;
+    private final RtTexture environment;
 
     public RtTextureSet(VkPhysicalDevice pd, VkDevice device, long commandPool, VkQueue queue) {
+        // Equirectangular HDRI (Poly Haven "Pav Studio 03", CC0) — image-based
+        // lighting for the whole scene: ambient fill, glass reflections, chute metal.
+        // Lives on its own binding, NOT in the indexed PBR array (different format).
+        this.environment = RtTexture.hdr(pd, device, commandPool, queue, "/textures/environment/studio.hdr");
         this.woodBase = loadTriple(pd, device, commandPool, queue, "/textures/environment/table_wood");
         record FruitTex(FruitTier tier, String dir) {}
         FruitTex[] mapped = {
@@ -55,6 +60,9 @@ public final class RtTextureSet implements AutoCloseable {
 
     public List<RtTexture> all() { return textures; }
 
+    /** The HDRI environment map (equirectangular RGBA32F). */
+    public RtTexture environment() { return environment; }
+
     /** Base index of the wood table triple (albedo at base, +1 normal, +2 roughness). */
     public int woodBase() { return woodBase; }
 
@@ -63,6 +71,7 @@ public final class RtTextureSet implements AutoCloseable {
 
     @Override
     public void close() {
+        environment.close();
         for (RtTexture t : textures) t.close();
     }
 }

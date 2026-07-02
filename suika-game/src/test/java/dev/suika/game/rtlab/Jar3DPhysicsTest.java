@@ -83,13 +83,43 @@ class Jar3DPhysicsTest {
     }
 
     @Test
-    void clampDropKeepsTheFruitFullyInside() {
+    void clampDropKeepsTheFruitInsideTheJarMouth() {
         Jar3DPhysics p = new Jar3DPhysics(5);
+        // Drops enter through the jar's OPEN MOUTH — the narrowest point of the
+        // fruit's path — so the clamp radius is the mouth limit, not the body's.
         double[] c = p.clampDrop(99, 0, 1.0);
         double d = Math.sqrt(c[0] * c[0] + c[1] * c[1]);
-        assertEquals(Jar3DPhysics.PLAY_RADIUS - 1.0, d, 1e-6);
+        assertEquals(JarShape.dropLimit(1.0), d, 1e-6);
+        assertTrue(d + 1.0 < JarShape.MOUTH_INNER_RADIUS,
+                "clamped fruit surface must clear the mouth rim");
         double[] center = p.clampDrop(0, 0, 1.0);
         assertEquals(0, center[0], 1e-9);
         assertEquals(0, center[1], 1e-9);
+    }
+
+    @Test
+    void jarProfileFunnelsFruitAboveTheShoulder() {
+        // The glass profile: full body radius below the shoulder, neck radius above,
+        // strictly monotonic in between.
+        assertEquals(JarShape.BODY_RADIUS, JarShape.radiusAt(5.0), 1e-9);
+        assertEquals(JarShape.BODY_RADIUS, JarShape.radiusAt(JarShape.BODY_TOP), 1e-9);
+        assertEquals(JarShape.NECK_RADIUS, JarShape.radiusAt(JarShape.SHOULDER_TOP), 1e-9);
+        assertEquals(JarShape.NECK_RADIUS, JarShape.radiusAt(25.0), 1e-9);
+        double prev = JarShape.radiusAt(JarShape.BODY_TOP);
+        for (double y = JarShape.BODY_TOP; y <= JarShape.SHOULDER_TOP; y += 0.05) {
+            double r = JarShape.radiusAt(y);
+            assertTrue(r <= prev + 1e-9, "profile must taper monotonically at y=" + y);
+            prev = r;
+        }
+
+        // A ball resting in the shoulder band gets pushed inside the local profile.
+        Jar3DPhysics p = new Jar3DPhysics(6);
+        Jar3DPhysics.Ball b = new Jar3DPhysics.Ball(dev.suika.core.FruitTier.GRAPE, 4.8, 16.5, 0);
+        b.vy = 0.1; // held up: cancel most of gravity so it stays in the band this tick
+        p.balls().add(b);
+        p.tick();
+        double dist = Math.sqrt(b.x * b.x + b.z * b.z);
+        assertTrue(dist + b.radius <= JarShape.radiusAt(b.y) + 1e-6,
+                "ball at y=" + b.y + " must sit inside the glass profile");
     }
 }
