@@ -33,6 +33,18 @@ public final class MctsAgent implements AgentPlugin {
     /** Per-column visit counts from the most recent search — for "see it think" overlays. */
     private int[] lastVisits = new int[0];
 
+    /** A lightweight, UI-friendly view of one node in the search tree — the tree
+     *  itself is rebuilt and discarded every search, so a UI wanting to draw it needs
+     *  a snapshot taken WHILE it still exists (see {@link #lastTree()}). */
+    public record TreeNodeView(int action, int visits, double meanValue, java.util.List<TreeNodeView> children) {}
+
+    /** Snapshot of the most recent search's tree — the root plus its most-visited
+     *  children (columns), each with ITS most-visited children in turn (what usually
+     *  happens next after picking that column) — for a genuine node-and-edge tree
+     *  diagram, not just a per-column bar chart. {@code null} before the first search. */
+    private volatile TreeNodeView lastTree = null;
+    public TreeNodeView lastTree() { return lastTree; }
+
     /**
      * Optional wall-clock deadline (nanoTime). When set, the search loop exits early
      * rather than blocking indefinitely — prevents high-rollout configs stalling fast
@@ -135,11 +147,29 @@ public final class MctsAgent implements AgentPlugin {
             }
         }
         lastVisits = visits;
+        lastTree = snapshotNode(root, 2, 6);
         return root.bestAction();
     }
 
     /** Per-column visit counts from the most recent {@link #selectAction(GameCore, ActionSpec)}. */
     public int[] lastVisits() { return lastVisits; }
+
+    /** Captures the top-{@code maxChildren}-by-visits subtree {@code depthRemaining}
+     *  levels deep — cheap regardless of how large the real search tree got, since
+     *  only the handful of nodes actually kept get walked. */
+    private TreeNodeView snapshotNode(MctsNode node, int depthRemaining, int maxChildren) {
+        List<TreeNodeView> childViews = List.of();
+        if (depthRemaining > 0 && !node.children().isEmpty()) {
+            List<MctsNode> sorted = new ArrayList<>(node.children());
+            sorted.sort((a, b) -> Integer.compare(b.visits(), a.visits()));
+            childViews = new ArrayList<>();
+            for (MctsNode c : sorted) {
+                if (childViews.size() >= maxChildren || c.visits() == 0) break;
+                childViews.add(snapshotNode(c, depthRemaining - 1, 4));
+            }
+        }
+        return new TreeNodeView(node.action, node.visits(), node.meanValue(), childViews);
+    }
 
     /** Number of discrete drop columns this agent reasons over. */
     public int actionBins() { return actionBins; }

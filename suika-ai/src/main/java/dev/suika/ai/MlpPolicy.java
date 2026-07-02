@@ -30,13 +30,21 @@ public final class MlpPolicy {
 
     public int paramCount() { return weights.length; }
 
-    /** Replace all weights from the given array. */
-    public void setWeights(double[] w) {
+    /**
+     * Replace all weights from the given array. Synchronized against {@link #forward}
+     * and {@link #backpropCrossEntropyGradient} — {@code weights} is a single shared
+     * array (not swapped by reference), so a wholesale replacement racing a concurrent
+     * read/backprop pass (e.g. a live imitation-learning trainer thread updating this
+     * exact policy while a slot-load also swaps it in) could tear mid-copy: a forward
+     * pass reading half-old, half-new weights across the W1/b1/W2/b2 layout, producing
+     * a momentarily garbage output that read as the AI "suddenly jerking".
+     */
+    public synchronized void setWeights(double[] w) {
         if (w.length != weights.length) throw new IllegalArgumentException("weight size mismatch");
         System.arraycopy(w, 0, weights, 0, weights.length);
     }
 
-    public double[] getWeights() { return Arrays.copyOf(weights, weights.length); }
+    public synchronized double[] getWeights() { return Arrays.copyOf(weights, weights.length); }
 
     /** Randomly initialise weights with small Gaussian values (Xavier-ish). */
     public void initRandom(Random rng) {
@@ -50,7 +58,7 @@ public final class MlpPolicy {
      * @param input  float[] of length {@code inputSize} (observation vector)
      * @return       output logits of length {@code outputSize} (action probabilities / Q-values)
      */
-    public double[] forward(float[] input) {
+    public synchronized double[] forward(float[] input) {
         // Layer 1: hidden = tanh(W1 * input + b1)
         int w1Offset = 0;
         int b1Offset = inputSize * hiddenSize;
@@ -97,7 +105,7 @@ public final class MlpPolicy {
      * @param targets batch of target action indices, one per input
      * @return flat gradient array in the same layout as {@link #getWeights()}
      */
-    public double[] backpropCrossEntropyGradient(float[][] inputs, int[] targets) {
+    public synchronized double[] backpropCrossEntropyGradient(float[][] inputs, int[] targets) {
         int n = inputs.length;
         double[] grad = new double[weights.length];
         if (n == 0) return grad;

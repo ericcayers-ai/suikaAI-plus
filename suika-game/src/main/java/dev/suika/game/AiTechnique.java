@@ -88,7 +88,42 @@ public enum AiTechnique {
             "Seek same-tier merges, else keep the surface flat. Scripted, no learning."),
     RANDOM("random", "Random", "Baseline", "either", "—", Family.PLANNING,
             true, false, false, true,
-            "Uniformly random drops. The floor every learner must beat.");
+            "Uniformly random drops. The floor every learner must beat."),
+
+    // ---- Ensemble: composed agents combining two or more of the techniques above.
+    // Family.PLANNING so they run through PlanningRunner (live board, no separate
+    // trainer loop needed) — each genuinely calls through to the real agents it
+    // combines; see EnsembleAgents.java for the actual composition logic. ----
+    ENS_MCTS_NET("ens-mcts-net", "MCTS + Policy Net", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true,
+            "MCTS search narrows the choice; a policy net's logits nudge the final pick."),
+    ENS_GREEDY_GUARD("ens-greedy-guard", "Policy Net + Greedy Guard", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true,
+            "Plays a policy net normally, but Greedy One-Ply overrides it on an immediate merge."),
+    ENS_MCTS_TIEBREAK("ens-mcts-greedy-tiebreak", "MCTS + Greedy Tiebreak", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true,
+            "MCTS's genuinely-tied top columns get an exact one-ply evaluation to break the tie."),
+    ENS_VOTING("ens-voting-committee", "Voting Committee", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true,
+            "MCTS, Greedy, and Heuristic each propose a column; majority wins."),
+    ENS_EVOLVED_MCTS("ens-evolved-mcts", "MCTS + Evolved Value Net", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true,
+            "MCTS blended with a CMA-ES-evolved value net (heavily trusted when a slot is saved)."),
+    ENS_IMITATION_MCTS("ens-imitation-mcts", "MCTS + Imitation Blend", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true,
+            "Defers to a DAgger-trained policy's pick unless MCTS's search strongly disagrees."),
+    ENS_RTG_VERIFIED("ens-rtg-verified", "Return-Conditioned + MCTS Verify", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true,
+            "A return-conditioned proposal gets sanity-checked against a shallow MCTS search."),
+    ENS_GENERATIVE_GREEDY("ens-generative-greedy", "Generative + Greedy Filter", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true,
+            "Samples several diffusion-style proposals, keeps whichever scores best exactly."),
+    ENS_ADAPTIVE_VOTE("ens-adaptive-vote", "Adaptive Voting Committee", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true,
+            "Like Voting Committee, but each member's trust weight adapts to its recent results."),
+    ENS_BANDIT("ens-bandit-meta", "Bandit Meta-Controller", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true,
+            "A UCB1 bandit learns, move by move, which single agent to trust right now.");
 
     /** Which specialised control-center drives this technique. */
     public enum Family { PLANNING, EVOLUTION, IMITATION, PYTHON }
@@ -217,6 +252,56 @@ public enum AiTechnique {
                 "Drops in a completely random column every time. It exists",
                 "as the bottom of the leaderboard — the score every real",
                 "AI has to beat." };
+            case ENS_MCTS_NET -> new String[]{
+                "MCTS searches like usual, then a neural network's own",
+                "opinion nudges the final choice among the columns the",
+                "search actually visited — search narrows it down, the",
+                "net helps pick the winner." };
+            case ENS_GREEDY_GUARD -> new String[]{
+                "Normally plays whatever a policy network suggests, but",
+                "the instant an easy same-tier merge appears anywhere on",
+                "the board, Greedy One-Ply steps in and takes it — a",
+                "safety net against a distracted policy." };
+            case ENS_MCTS_TIEBREAK -> new String[]{
+                "When MCTS's search genuinely can't decide between a",
+                "few columns (they're all nearly equally visited), it",
+                "actually drops-and-settles each one for real to see",
+                "which truly scores best, instead of guessing." };
+            case ENS_VOTING -> new String[]{
+                "Three different agents — a searcher, a one-ply",
+                "evaluator, and a scripted rulebook — each vote for a",
+                "column. Whichever column two or more agree on wins;",
+                "true three-way ties default to the searcher." };
+            case ENS_EVOLVED_MCTS -> new String[]{
+                "Same idea as MCTS + Policy Net, but the net comes from",
+                "an evolved (CMA-ES) population instead of a blank",
+                "slate — once you've trained one, this ensemble leans",
+                "on it heavily rather than lightly." };
+            case ENS_IMITATION_MCTS -> new String[]{
+                "Trusts a DAgger-trained clone of expert play by",
+                "default, but only if MCTS's own search doesn't",
+                "strongly object — the search acts as a check on the",
+                "clone, not a replacement for it." };
+            case ENS_RTG_VERIFIED -> new String[]{
+                "A return-conditioned agent proposes an ambitious drop",
+                "aimed at a target score, then a quick MCTS search",
+                "double-checks it against its own best idea and keeps",
+                "whichever one actually scores higher." };
+            case ENS_GENERATIVE_GREEDY -> new String[]{
+                "Samples several different candidate drops the way a",
+                "diffusion model would, then drops-and-settles each",
+                "one for real and keeps the best — proposal by",
+                "generation, selection by exact evaluation." };
+            case ENS_ADAPTIVE_VOTE -> new String[]{
+                "Same three-agent vote as Voting Committee, but each",
+                "member's influence rises or falls based on the score",
+                "it's actually been earning recently — the committee",
+                "learns who to listen to as it plays." };
+            case ENS_BANDIT -> new String[]{
+                "Instead of blending opinions, it picks ONE agent to",
+                "make each individual move, tracking which one has",
+                "been paying off best lately (classic explore/exploit)",
+                "— a meta-agent that learns who should drive." };
         };
     }
 
@@ -224,11 +309,19 @@ public enum AiTechnique {
     public String liveHint() {
         return switch (family) {
             case PLANNING -> switch (this) {
-                case MCTS, ALPHAZERO -> "simulating many futures, then dropping the best";
-                case GREEDY          -> "trying every column, keeping the highest score";
-                case HEURISTIC       -> "following hand-written merge rules";
-                case RANDOM          -> "dropping in a random column";
-                default              -> "planning the next drop";
+                case MCTS, ALPHAZERO   -> "simulating many futures, then dropping the best";
+                case GREEDY            -> "trying every column, keeping the highest score";
+                case HEURISTIC         -> "following hand-written merge rules";
+                case RANDOM            -> "dropping in a random column";
+                case ENS_MCTS_NET, ENS_EVOLVED_MCTS -> "search + net blend, choosing the top pick";
+                case ENS_GREEDY_GUARD  -> "playing the policy net, watching for easy merges";
+                case ENS_MCTS_TIEBREAK -> "settling MCTS's closest calls for real";
+                case ENS_VOTING, ENS_ADAPTIVE_VOTE -> "three agents voting on the next drop";
+                case ENS_IMITATION_MCTS -> "leaning on imitation, checked by search";
+                case ENS_RTG_VERIFIED  -> "proposing boldly, verifying with a quick search";
+                case ENS_GENERATIVE_GREEDY -> "sampling proposals, keeping the best one";
+                case ENS_BANDIT        -> "picking which single agent drives this move";
+                default                -> "planning the next drop";
             };
             case EVOLUTION -> "breeding & mutating a population of AI brains";
             case IMITATION -> "learning to copy your drops in real time";

@@ -147,8 +147,8 @@ public final class ImitationRunner extends LiveBoardRunner {
         // clone drops on a steady cadence once its chute is clear
         cloneTimer -= dt;
         boolean chuteClear = true;
-        double thresh = PhysicsConfig.CONTAINER_HEIGHT - 0.5;
-        for (var f : aiClone.getState().fruits()) if (f.y() > thresh) { chuteClear = false; break; }
+        double thresh = PhysicsConfig.CONTAINER_HEIGHT - 1.0;
+        for (var f : aiClone.getState().fruits()) if (f.y() + f.radius() > thresh) { chuteClear = false; break; }
         if (cloneTimer <= 0f && chuteClear) {
             NeuralAgent a = bc.trainedAgent();
             Object act = a.selectAction(aiClone.getState(), spec);
@@ -346,6 +346,7 @@ public final class ImitationRunner extends LiveBoardRunner {
             s.add("DAgger       a 40-rollout MCTS expert also relabels states between");
             s.add("             your drops, so the clone learns beyond what you've shown it");
         }
+        s.add("your tendency " + tendencyLabel());
         return s.toArray(new String[0]);
     }
 

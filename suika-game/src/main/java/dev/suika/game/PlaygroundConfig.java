@@ -77,7 +77,7 @@ public final class PlaygroundConfig {
      * sims = less noisy fitness, but more compute. They run <em>simultaneously</em>,
      * not one after another — see {@link dev.suika.ai.GeneticTrainer}.
      */
-    public static final int[] SIMS_PER_GEN_OPTIONS = {1, 2, 3, 5, 8};
+    public static final int[] SIMS_PER_GEN_OPTIONS = {1, 2, 3, 5, 8, 16};
     public int simsPerGenIndex = 0;       // default 1
 
     /**
@@ -111,11 +111,13 @@ public final class PlaygroundConfig {
     public void selectDefaultsFor(AiTechnique t) {
         this.technique = t;
         switch (t) {
-            case MCTS, ALPHAZERO -> { rollouts = 80; maxThinkMs = 450; }
+            case MCTS, ALPHAZERO,
+                 ENS_MCTS_NET, ENS_MCTS_TIEBREAK, ENS_VOTING, ENS_EVOLVED_MCTS,
+                 ENS_IMITATION_MCTS, ENS_ADAPTIVE_VOTE, ENS_BANDIT -> { rollouts = 80; maxThinkMs = 450; }
             case NEUROEVO, PBT   -> { populationSize = 24; mutationSigma = 0.10; }
             case CMA_ES          -> populationSize = 16;
             case BC, DAGGER      -> learningRate = 1e-3;
-            case DECISION_TRANSFORMER, OFFLINE_RL -> targetReturn = 2000;
+            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> targetReturn = 2000;
             default -> { }
         }
     }

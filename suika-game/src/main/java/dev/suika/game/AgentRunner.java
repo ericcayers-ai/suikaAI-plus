@@ -28,6 +28,17 @@ public abstract class AgentRunner extends LiveBoardRunner {
     private volatile boolean thinking = false;
     private volatile long lastThinkMs = 0;
 
+    /**
+     * Bumped every {@link #onNewGame()}. A think-thread captures the generation it
+     * started under and only publishes its result if the game hasn't moved on —
+     * otherwise a slow search (e.g. a high-rollout MCTS move) that's still running when
+     * the board hits game-over and restarts could land its result AFTER the restart's
+     * own reset cleared {@code result}, injecting a stale decision — computed for a
+     * dead board — into the new game. Harmless in terms of bounds (the x is always
+     * clamped), but it read as an erratic, out-of-nowhere drop.
+     */
+    private volatile int gameGen = 0;
+
     private float markerX = Float.NaN;
     protected long bestScore = 0;
 
@@ -105,6 +116,7 @@ public abstract class AgentRunner extends LiveBoardRunner {
         thinking = true;
         final var snap = core.snapshot();
         final AgentPlugin a = agent;
+        final int myGen = gameGen;
         // Set a wall-clock deadline so MCTS never stalls at fast speeds.
         long deadlineNs = (a instanceof MctsAgent && cfg.maxThinkMs > 0)
                 ? System.nanoTime() + cfg.maxThinkMs * 1_000_000L : 0L;
@@ -121,6 +133,9 @@ public abstract class AgentRunner extends LiveBoardRunner {
             }
             double x = spec.toDropX(act, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
             lastThinkMs = (System.nanoTime() - t0) / 1_000_000;
+            // A slower think from an earlier game finishing after a restart must not
+            // publish into the new one — see gameGen's javadoc.
+            if (myGen != gameGen) { thinking = false; return; }
             thinking = false;
             result.set(x);
         }, "playground-think");
@@ -176,6 +191,7 @@ public abstract class AgentRunner extends LiveBoardRunner {
 
     @Override
     protected void onNewGame() {
+        gameGen++;
         phase = Phase.WAIT;
         moveTimer = baseDelay();
         markerX = Float.NaN;

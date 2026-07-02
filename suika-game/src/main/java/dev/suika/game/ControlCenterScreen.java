@@ -13,6 +13,8 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.viewport.FitViewport;
+import dev.suika.ai.AgentPlugin;
+import dev.suika.ai.MctsAgent;
 import dev.suika.core.GameState;
 import dev.suika.core.PhysicsConfig;
 
@@ -42,6 +44,13 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private final Vector3 touch = new Vector3();
     private float mx, my;
     private float hoverGameX = (float) ((PhysicsConfig.DROP_X_MIN + PhysicsConfig.DROP_X_MAX) / 2.0);
+
+    // Landscape diagnostics panel: stats()/extendedStats() text can run to 20+ wrapped
+    // display lines for verbose techniques (MCTS/AlphaZero explainers, CMA-ES/DAgger's
+    // "reads" breakdown) — more than the fixed-height panel can show at once. Mouse
+    // wheel over the panel scrolls it instead of the old behavior of silently cutting
+    // text off mid-sentence at the panel's bottom edge.
+    private float statsScroll = 0f;
 
     // Control-bar buttons
     private final Rectangle backBtn    = new Rectangle();
@@ -76,7 +85,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private static final float SWAP_MW = 480f, SWAP_MH = 500f;
 
     // Hotswap param tables (mirror AiPlaygroundScreen)
-    private static final int[]    ROLLOUTS = {40, 80, 150, 300};
+    private static final int[]    ROLLOUTS = {40, 80, 150, 300, 600, 1200, 2400};
     private static final int[]    POP      = {16, 24, 40, 64, 128, 256, 512, 1000};
     private static final int[]    RETURNS  = {1000, 2000, 4000};
     private static final double[] LRS      = {1e-3, 3e-3, 1e-2};
@@ -143,6 +152,13 @@ public final class ControlCenterScreen extends ScreenAdapter {
             }
             @Override public boolean mouseMoved(int sx, int sy) { updateMouse(sx, sy); return false; }
             @Override public boolean touchDragged(int sx, int sy, int p) { updateMouse(sx, sy); return false; }
+            @Override public boolean scrolled(float amountX, float amountY) {
+                if (hotswapOpen || slotsOpen) return false;
+                float[] p = panelBounds();
+                if (mx < p[0] || mx > p[0] + p[2] || my < p[1] || my > p[1] + p[3]) return false;
+                statsScroll = MathUtils.clamp(statsScroll + amountY * 40f, 0f, maxStatsScroll());
+                return true;
+            }
             @Override public boolean keyDown(int k) {
                 switch (k) {
                     case Input.Keys.ESCAPE -> {
@@ -261,10 +277,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
         }
     }
 
-    /** True when nothing in the primary board is still falling through the chute above the rim. */
+    /** True when nothing in the primary board is still falling through the chute above the
+     *  rim — checks each fruit's TOP surface (y + radius), not just its center, so a
+     *  large tier can't still be poking into the spawn zone while reading as "clear". */
     private boolean chuteClear() {
-        double thresh = PhysicsConfig.CONTAINER_HEIGHT - 0.5;
-        for (var f : runner.board().fruits()) if (f.y() > thresh) return false;
+        double thresh = PhysicsConfig.CONTAINER_HEIGHT - 1.0;
+        for (var f : runner.board().fruits()) if (f.y() + f.radius() > thresh) return false;
         return true;
     }
 
@@ -388,37 +406,45 @@ public final class ControlCenterScreen extends ScreenAdapter {
         return cfg.technique.family == AiTechnique.Family.EVOLUTION;
     }
 
+    // Ensembles built on MCTS search share its Rollouts knob; ENS_RTG_VERIFIED shares
+    // Decision Transformer's Return knob. ENS_GREEDY_GUARD/ENS_GENERATIVE_GREEDY have
+    // no adjustable launch parameter (they only take the fixed action-bin count).
+    private static final java.util.Set<AiTechnique> ROLLOUT_PARAM_TECHS = java.util.Set.of(
+            AiTechnique.MCTS, AiTechnique.ALPHAZERO, AiTechnique.ENS_MCTS_NET,
+            AiTechnique.ENS_MCTS_TIEBREAK, AiTechnique.ENS_VOTING, AiTechnique.ENS_EVOLVED_MCTS,
+            AiTechnique.ENS_IMITATION_MCTS, AiTechnique.ENS_ADAPTIVE_VOTE, AiTechnique.ENS_BANDIT);
+
     private boolean paramApplicable() {
+        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return true;
         return switch (cfg.technique) {
-            case MCTS, ALPHAZERO, NEUROEVO, PBT,
-                 DECISION_TRANSFORMER, OFFLINE_RL, BC, DAGGER -> true;
+            case NEUROEVO, PBT, DECISION_TRANSFORMER, OFFLINE_RL, BC, DAGGER, ENS_RTG_VERIFIED -> true;
             default -> false;
         };
     }
     private String paramLabel() {
+        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return "Rollouts";
         return switch (cfg.technique) {
-            case MCTS, ALPHAZERO                  -> "Rollouts";
-            case NEUROEVO, PBT                    -> "Population";
-            case DECISION_TRANSFORMER, OFFLINE_RL -> "Return";
-            case BC, DAGGER                       -> "LR";
-            default                               -> "—";
+            case NEUROEVO, PBT                                -> "Population";
+            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> "Return";
+            case BC, DAGGER                                   -> "LR";
+            default                                           -> "—";
         };
     }
     private String paramValue() {
+        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return Integer.toString(cfg.rollouts);
         return switch (cfg.technique) {
-            case MCTS, ALPHAZERO                  -> Integer.toString(cfg.rollouts);
-            case NEUROEVO, PBT                    -> Integer.toString(cfg.populationSize);
-            case DECISION_TRANSFORMER, OFFLINE_RL -> Integer.toString((int) cfg.targetReturn);
-            case BC, DAGGER                       -> String.format("%.0e", cfg.learningRate);
-            default                               -> "—";
+            case NEUROEVO, PBT                                -> Integer.toString(cfg.populationSize);
+            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> Integer.toString((int) cfg.targetReturn);
+            case BC, DAGGER                                   -> String.format("%.0e", cfg.learningRate);
+            default                                           -> "—";
         };
     }
     private void cycleParam(int d) {
+        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) { cfg.rollouts = cycleInt(ROLLOUTS, cfg.rollouts, d); return; }
         switch (cfg.technique) {
-            case MCTS, ALPHAZERO                  -> cfg.rollouts       = cycleInt(ROLLOUTS, cfg.rollouts, d);
-            case NEUROEVO, PBT                    -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
-            case DECISION_TRANSFORMER, OFFLINE_RL -> cfg.targetReturn   = cycleInt(RETURNS, (int) cfg.targetReturn, d);
-            case BC, DAGGER                       -> cfg.learningRate   = cycleDouble(LRS, cfg.learningRate, d);
+            case NEUROEVO, PBT                                -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
+            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
+            case BC, DAGGER                                   -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
             default -> { }
         }
     }
@@ -591,15 +617,26 @@ public final class ControlCenterScreen extends ScreenAdapter {
         GameState[] states = runner.multiStates();
         String[] labels = runner.multiLabels();
         float[][] place = placements(views);
-        for (int i = 0; i < views; i++) {
-            if (i >= states.length || states[i] == null) continue;
-            float ox = place[i][0], oy = place[i][1], sc = place[i][2];
-            board.useCustom(ox, oy, sc);
-            board.drawLabels(game.batch, game.fontSmall, states[i], game.settings);
-            String tag = i < labels.length ? labels[i] : "VIEW " + (i + 1);
-            float tagY = oy + (float) PhysicsConfig.CONTAINER_HEIGHT * sc + 16f;
-            Ui.text(game.batch, game.fontSmall, tag,
-                    ox - (float) PhysicsConfig.WALL_THICKNESS * sc, tagY, Theme.TEXT);
+        // Shrink caption + in-board tier-number text as the grid gets denser, so labels
+        // don't visually overwhelm the (now much smaller) boards at high elite-view
+        // counts — up to 16 views packs a 4x4 grid where full-size text would be wider
+        // than some boards. Always reset in finally: fontSmall is shared with the
+        // single-board and panel text drawn elsewhere this same frame.
+        float scale = views <= 4 ? 1f : views <= 9 ? 0.8f : 0.6f;
+        game.fontSmall.getData().setScale(scale);
+        try {
+            for (int i = 0; i < views; i++) {
+                if (i >= states.length || states[i] == null) continue;
+                float ox = place[i][0], oy = place[i][1], sc = place[i][2];
+                board.useCustom(ox, oy, sc);
+                board.drawLabels(game.batch, game.fontSmall, states[i], game.settings);
+                String tag = i < labels.length ? labels[i] : "VIEW " + (i + 1);
+                float tagY = oy + (float) PhysicsConfig.CONTAINER_HEIGHT * sc + 16f;
+                Ui.text(game.batch, game.fontSmall, tag,
+                        ox - (float) PhysicsConfig.WALL_THICKNESS * sc, tagY, Theme.TEXT);
+            }
+        } finally {
+            game.fontSmall.getData().setScale(1f);
         }
     }
 
@@ -644,9 +681,103 @@ public final class ControlCenterScreen extends ScreenAdapter {
         Ui.fillRoundRect(s, px - 4, py - 4, pw + 8, ph + 8, 18);
         Ui.panel(s, px, py, pw, ph, 16, Theme.PANEL, Theme.PANEL_EDGE);
 
+        MctsAgent tree = mctsTreeSource();
         for (float[] c : chartSlots()) {
-            chartFrame(s, c[0], c[1], c[2], c[3], chartFor((int) c[4]), chartColor((int) c[4]));
+            int idx = (int) c[4];
+            // Slot 3 is otherwise unused by any MCTS/ensemble technique (chart3() has
+            // no meaningful third series for them) — repurpose it for a genuine
+            // node-and-edge search-tree diagram instead of leaving it blank.
+            if (idx == 3 && tree != null && chartFor(3) == null) {
+                drawMctsTree(s, c[0], c[1], c[2], c[3], tree);
+            } else {
+                chartFrame(s, c[0], c[1], c[2], c[3], chartFor(idx), chartColor(idx));
+            }
         }
+    }
+
+    /** The live search source for the tree diagram: the current agent itself if it's a
+     *  plain {@link MctsAgent} (MCTS/AlphaZero), or the inner search of any ensemble
+     *  built on one (see {@link EnsembleAgents.HasMctsCore}) — {@code null} otherwise. */
+    private MctsAgent mctsTreeSource() {
+        if (!(runner instanceof AgentRunner ar)) return null;
+        AgentPlugin a = ar.agent();
+        if (a instanceof MctsAgent m) return m;
+        if (a instanceof EnsembleAgents.HasMctsCore h) return h.mctsCore();
+        return null;
+    }
+
+    /** Draws the root plus its top-visited children as nodes with connecting edges
+     *  (node radius + fill brightness scaled by visit share), and the SINGLE
+     *  best-visited child's own top children nested one level further in — the
+     *  "principal variation" a chess engine would show, kept to the one branch that
+     *  actually matters so it stays legible in a small panel slot. */
+    private void drawMctsTree(ShapeRenderer s, float x, float y, float w, float h, MctsAgent tree) {
+        s.setColor(Theme.PANEL_DEEP);
+        Ui.fillRoundRect(s, x, y, w, h, 8f);
+        MctsAgent.TreeNodeView root = tree.lastTree();
+        if (root == null || root.children().isEmpty()) return;
+
+        float pad = 10f;
+        float rootX = x + pad + 8f, midY = y + h / 2f;
+        float col1X = x + w * 0.42f, col2X = x + w - pad - 8f;
+        var kids = root.children();
+        int n = kids.size();
+        float rowH = (h - 2 * pad) / Math.max(1, n);
+        int maxVisits = 0;
+        for (var c : kids) maxVisits = Math.max(maxVisits, c.visits());
+
+        s.setColor(Theme.TEXT_DIM.r, Theme.TEXT_DIM.g, Theme.TEXT_DIM.b, 0.5f);
+        s.circle(rootX, midY, 5f, 12);
+
+        var best = kids.get(0); // already sorted by visits in MctsAgent.snapshotNode
+        for (int i = 0; i < n; i++) {
+            var c = kids.get(i);
+            float cy = y + pad + rowH * (i + 0.5f);
+            float share = maxVisits > 0 ? c.visits() / (float) maxVisits : 0f;
+            float r = 3f + 7f * share;
+            s.setColor(Theme.ACCENT_BLUE.r, Theme.ACCENT_BLUE.g, Theme.ACCENT_BLUE.b, 0.25f + 0.5f * share);
+            drawEdge(s, rootX, midY, col1X, cy);
+            boolean isBest = c == best;
+            Color nodeColor = isBest ? Theme.GOLD : Theme.ACCENT_BLUE;
+            s.setColor(nodeColor.r, nodeColor.g, nodeColor.b, 0.4f + 0.55f * share);
+            s.circle(col1X, cy, r, 14);
+        }
+
+        // One more level, only for the best branch's own children.
+        var grandkids = best.children();
+        if (!grandkids.isEmpty()) {
+            float bestY = y + pad + rowH * (kids.indexOf(best) + 0.5f);
+            int gn = grandkids.size();
+            float gRowH = Math.min(rowH, (h - 2 * pad) / Math.max(1, gn));
+            int gMax = 0; for (var g : grandkids) gMax = Math.max(gMax, g.visits());
+            float startY = bestY - gRowH * (gn - 1) / 2f;
+            for (int i = 0; i < gn; i++) {
+                var g = grandkids.get(i);
+                float gy = startY + gRowH * i;
+                gy = Math.max(y + pad, Math.min(y + h - pad, gy));
+                float share = gMax > 0 ? g.visits() / (float) gMax : 0f;
+                float r = 2f + 4f * share;
+                s.setColor(Theme.GOLD.r, Theme.GOLD.g, Theme.GOLD.b, 0.18f + 0.35f * share);
+                drawEdge(s, col1X, bestY, col2X, gy);
+                s.setColor(Theme.GOLD.r, Theme.GOLD.g, Theme.GOLD.b, 0.3f + 0.5f * share);
+                s.circle(col2X, gy, r, 10);
+            }
+        }
+    }
+
+    /** A thin quad standing in for a line segment — {@link ShapeRenderer#line} ignores
+     *  the current fill color set via {@code setColor} inconsistently across GL
+     *  backends when mixed with filled circles in the same batch, so edges use the
+     *  same filled-rect primitive as everything else in this UI for a reliably visible
+     *  1.5px stroke regardless of the fill/line render-type context around it. */
+    private void drawEdge(ShapeRenderer s, float x0, float y0, float x1, float y1) {
+        float dx = x1 - x0, dy = y1 - y0;
+        float len = (float) Math.sqrt(dx * dx + dy * dy);
+        if (len < 1e-3f) return;
+        float nx = -dy / len * 0.75f, ny = dx / len * 0.75f;
+        float[] verts = { x0 + nx, y0 + ny, x1 + nx, y1 + ny, x1 - nx, y1 - ny, x0 - nx, y0 - ny };
+        s.triangle(verts[0], verts[1], verts[2], verts[3], verts[4], verts[5]);
+        s.triangle(verts[0], verts[1], verts[4], verts[5], verts[6], verts[7]);
     }
 
     /** Chart frames as {x, y, w, h, index}. Landscape stacks up to 3; portrait shows 2. */
@@ -704,30 +835,56 @@ public final class ControlCenterScreen extends ScreenAdapter {
         // or they visually collide with a chart's box/label. Portrait's charts sit
         // below all text, so no width constraint is needed there.
         float maxTextW = landscape ? (chartSlots()[0][0] - 16f) - (px + 18f) : pw - 36f;
-        float minY = py + 8f; // never draw below the panel's own background
+        float minY = py + 8f;          // never draw below the panel's own background
+        float statsTop = py + ph - 86; // just below the title/subtitle
+        float maxScroll = maxStatsScroll();
+        statsScroll = MathUtils.clamp(statsScroll, 0f, maxScroll);
 
-        float ly = py + ph - 86;
-        ly = drawWrappedLines(runner.stats(), px + 18, ly, maxTextW, minY, Theme.TEXT_DIM);
+        float ly = statsTop - statsScroll;
+        ly = drawWrappedLines(runner.stats(), px + 18, ly, maxTextW, minY, statsTop, Theme.TEXT_DIM);
         if (landscape) {   // extended stats fill the extra vertical room
             ly -= 8;
-            drawWrappedLines(runner.extendedStats(), px + 18, ly, maxTextW, minY, Theme.TEXT_FAINT);
+            drawWrappedLines(runner.extendedStats(), px + 18, ly, maxTextW, minY, statsTop, Theme.TEXT_FAINT);
         }
+        if (maxScroll > 1f) {
+            // Plain ASCII only — an earlier arrow glyph (▸) silently rendered as a tofu
+            // box on the bundled DroidSans font; "·" and "-" are already proven safe
+            // elsewhere in this UI.
+            String hint = statsScroll < maxScroll - 1f ? "- scroll for more -" : "- scroll up for less -";
+            Ui.text(game.batch, game.fontSmall, hint, px + 18, minY + 2, Theme.GOLD);
+        }
+        MctsAgent treeForLabel = mctsTreeSource();
         for (float[] c : chartSlots()) {
-            String lbl = chartLabelFor((int) c[4]);
+            int idx = (int) c[4];
+            String lbl = idx == 3 && treeForLabel != null && chartFor(3) == null
+                    ? "search tree  ·  best-branch drill-down" : chartLabelFor(idx);
             if (lbl != null) Ui.text(game.batch, game.fontSmall, lbl, c[0] + 4, c[1] + c[3] + 16, Theme.TEXT_DIM);
         }
     }
 
+    /** How far {@link #statsScroll} can go before the LAST wrapped line has scrolled up
+     *  to {@code minY} — i.e. total wrapped content height minus the visible window. */
+    private float maxStatsScroll() {
+        float[] p = panelBounds();
+        float px = p[0], py = p[1], pw = p[2], ph = p[3];
+        float maxTextW = landscape ? (chartSlots()[0][0] - 16f) - (px + 18f) : pw - 36f;
+        int lines = 0;
+        for (String line : runner.stats()) lines += wrapForWidth(line, maxTextW).size();
+        if (landscape) for (String line : runner.extendedStats()) lines += wrapForWidth(line, maxTextW).size();
+        float visible = (py + ph - 86) - (py + 8f);
+        return Math.max(0f, lines * 24f - visible);
+    }
+
     /** Draws each line at fontSmall, wrapping any that would exceed {@code maxW} at word
-     *  boundaries (continuations indented to align under the label column), and stops
-     *  once the cursor drops below {@code minY} so overlong content is silently clipped
-     *  rather than bleeding into the board/control-bar area below the panel.
-     *  Returns the cursor Y after the last line drawn. */
-    private float drawWrappedLines(String[] lines, float x, float y, float maxW, float minY, Color color) {
+     *  boundaries (continuations indented to align under the label column). Lines that
+     *  scroll above {@code maxY} are skipped (not drawn, so nothing bleeds into the
+     *  title/subtitle above); the loop stops entirely once the cursor drops below
+     *  {@code minY}. Returns the cursor Y after the last line drawn. */
+    private float drawWrappedLines(String[] lines, float x, float y, float maxW, float minY, float maxY, Color color) {
         for (String line : lines) {
             for (String seg : wrapForWidth(line, maxW)) {
                 if (y < minY) return y;
-                Ui.text(game.batch, game.fontSmall, seg, x, y, color);
+                if (y <= maxY) Ui.text(game.batch, game.fontSmall, seg, x, y, color);
                 y -= 24;
             }
         }

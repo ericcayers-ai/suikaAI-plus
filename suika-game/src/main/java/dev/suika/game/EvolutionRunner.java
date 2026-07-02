@@ -38,6 +38,18 @@ public final class EvolutionRunner extends AgentRunner {
     private volatile long trainStartNs = 0;
 
     /**
+     * True right after {@link #loadFromSlot}: the trainer skips publishing its own
+     * champion so the just-loaded one keeps playing, WITHOUT stopping the board itself
+     * (previously this used {@code setPaused(true)}, which froze physics entirely —
+     * the loaded champion just sat there motionless, reading as "the app hung"). The
+     * board, ghosts, and even the trainer's background generations all keep running;
+     * only the one-line "adopt this generation's champion" call is skipped, and it
+     * clears automatically the moment the user hits PAUSE/RESUME, SETUP-close, or
+     * RESTART — whichever they reach for first to say "ok, resume normal play".
+     */
+    private volatile boolean holdChampion = false;
+
+    /**
      * Distinguishes worker "generations" across a RESTART. A shared boolean alone is
      * racy here: an old worker thread, interrupted mid-iteration by restart(), could
      * still be inside its catch block setting {@code running = false} right as the new
@@ -109,7 +121,17 @@ public final class EvolutionRunner extends AgentRunner {
         fitnessChart.clear();
         meanFitChart.clear();
         topAgents = new ArrayList<>();
+        holdChampion = false;
         start();
+    }
+
+    /** Pausing/resuming (the control bar's PAUSE button) is also how the user says
+     *  "done looking at the loaded champion, resume normal evolving" — clears the hold
+     *  on resume so the trainer's next generation naturally takes back over. */
+    @Override
+    public void setPaused(boolean p) {
+        super.setPaused(p);
+        if (!p) holdChampion = false;
     }
 
     private void initGhosts() {
@@ -127,7 +149,7 @@ public final class EvolutionRunner extends AgentRunner {
                     cma.update();
                     generation = cma.generation();
                     var champ = cma.bestAgent();
-                    setAgent(champ);
+                    if (!holdChampion) setAgent(champ);
                     bestFit = cma.bestFitness();
                     meanFit = cma.meanFitness();
                     // this generation's top offspring, skipping index 0 (redundant with
@@ -139,7 +161,7 @@ public final class EvolutionRunner extends AgentRunner {
                     generation = ga.generation();
                     bestFit = ga.bestFitness();
                     meanFit = ga.meanFitness();
-                    setAgent(ga.bestAgent());
+                    if (!holdChampion) setAgent(ga.bestAgent());
                     // expose top agents for ghost view (champion is already in agent())
                     var elites = ga.eliteAgents(ghostCount + 1);
                     topAgents = elites.size() > 1 ? elites.subList(1, elites.size()) : List.of();
@@ -158,6 +180,18 @@ public final class EvolutionRunner extends AgentRunner {
         }
     }
 
+    // Ghost boards are fully independent GameCore instances — each iteration below
+    // only ever touches its own index i across every array, so fanning them out across
+    // a small worker pool is safe with no synchronization. At up to 16 elite views this
+    // used to run all physics + agent-decision work for every ghost sequentially on the
+    // RENDER thread each frame (up to 240 ticks x 15 ghosts = 3600 dyn4j steps before a
+    // single frame could present) — real stutter at high elite-view counts, worse at
+    // high speed. A dedicated pool (not the JVM-wide common ForkJoinPool, so this never
+    // contends with unrelated parallel work elsewhere) spreads that across cores instead.
+    private static final int GHOST_POOL_THREADS = Math.max(2, Math.min(8, Runtime.getRuntime().availableProcessors()));
+    private final java.util.concurrent.ExecutorService ghostPool = java.util.concurrent.Executors.newFixedThreadPool(
+            GHOST_POOL_THREADS, r -> { Thread t = new Thread(r, "evolution-ghost"); t.setDaemon(true); return t; });
+
     /**
      * Advance ghost games one physics tick + ghost-agent drop cadence.
      * Ghost cores always run — they feed both the overlay view (ghostView=true)
@@ -166,39 +200,49 @@ public final class EvolutionRunner extends AgentRunner {
     @Override
     protected void onUpdate(float dt) {
         super.onUpdate(dt);
+        if (ghostCount == 0) return;
+        java.util.List<java.util.concurrent.Future<?>> futures = new ArrayList<>(ghostCount);
         for (int i = 0; i < ghostCount; i++) {
-            GameCore gc = ghostCores[i];
-            if (gc == null) continue;
-            // physics (capped per frame so 1024× speed doesn't freeze the UI)
-            ghostAccum[i] += Math.min(dt * speed, 4.0);
-            int gsteps = 0;
-            while (ghostAccum[i] >= PhysicsConfig.FIXED_DT && gsteps < 240) {
-                gc.tick();
-                ghostAccum[i] -= PhysicsConfig.FIXED_DT;
-                gsteps++;
-            }
-            // Cull a ghost whose current game has outlived the configured lineage window,
-            // so it restarts on the freshest elite instead of lingering for ever.
-            int cullGens = Math.max(1, cfg.ghostCullGens());
-            boolean tooOld = generation - ghostStartGen[i] >= cullGens;
-            // auto-restart ghost if game over OR culled by age
-            if (gc.isGameOver() || tooOld) {
-                ghostCores[i] = new GameCore(seed + i + 1 + generation);
-                ghostTimer[i] = 0.3f;
-                ghostStartGen[i] = generation;
-                continue;
-            }
-            // ghost agent drops
-            ghostTimer[i] -= dt;
-            if (ghostTimer[i] <= 0f && ghostAgents[i] != null) {
-                AgentPlugin ghostAgent = ghostAgents[i];
-                GameCore snap = gc.snapshot();
-                dev.suika.ai.ActionSpec spec = dev.suika.ai.ActionSpec.discrete(cfg.actionBins);
-                Object act = ghostAgent.selectAction(snap, spec);
-                double dropX = spec.toDropX(act, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
-                gc.spawnDrop(dropX);
-                ghostTimer[i] = baseDelay() * 1.2f;
-            }
+            final int idx = i;
+            futures.add(ghostPool.submit(() -> updateGhost(idx, dt)));
+        }
+        for (var f : futures) {
+            try { f.get(); } catch (Exception e) { /* a single ghost erroring shouldn't sink the frame */ }
+        }
+    }
+
+    private void updateGhost(int i, float dt) {
+        GameCore gc = ghostCores[i];
+        if (gc == null) return;
+        // physics (capped per frame so 1024× speed doesn't freeze the UI)
+        ghostAccum[i] += Math.min(dt * speed, 4.0);
+        int gsteps = 0;
+        while (ghostAccum[i] >= PhysicsConfig.FIXED_DT && gsteps < 240) {
+            gc.tick();
+            ghostAccum[i] -= PhysicsConfig.FIXED_DT;
+            gsteps++;
+        }
+        // Cull a ghost whose current game has outlived the configured lineage window,
+        // so it restarts on the freshest elite instead of lingering for ever.
+        int cullGens = Math.max(1, cfg.ghostCullGens());
+        boolean tooOld = generation - ghostStartGen[i] >= cullGens;
+        // auto-restart ghost if game over OR culled by age
+        if (gc.isGameOver() || tooOld) {
+            ghostCores[i] = new GameCore(seed + i + 1 + generation);
+            ghostTimer[i] = 0.3f;
+            ghostStartGen[i] = generation;
+            return;
+        }
+        // ghost agent drops
+        ghostTimer[i] -= dt;
+        if (ghostTimer[i] <= 0f && ghostAgents[i] != null) {
+            AgentPlugin ghostAgent = ghostAgents[i];
+            GameCore snap = gc.snapshot();
+            dev.suika.ai.ActionSpec spec = dev.suika.ai.ActionSpec.discrete(cfg.actionBins);
+            Object act = ghostAgent.selectAction(snap, spec);
+            double dropX = spec.toDropX(act, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
+            gc.spawnDrop(dropX);
+            ghostTimer[i] = baseDelay() * 1.2f;
         }
     }
 
@@ -284,12 +328,15 @@ public final class EvolutionRunner extends AgentRunner {
         s.add("genome       one MLP's weights, flattened to a single number list");
         s.add("fitness      mean score over " + Math.max(1, cfg.simsPerGen())
                 + " seeded game" + (cfg.simsPerGen() > 1 ? "s" : "") + " per genome");
+        s.add("eval budget  " + (evalPopulation() * Math.max(1, cfg.simsPerGen())) + " games/gen  ("
+                + evalPopulation() + " pop x " + Math.max(1, cfg.simsPerGen()) + " sims)");
         s.add(isCma
                 ? "search       adapts a Gaussian cloud toward top performers (no genome list)"
                 : "search       breeds elites + random mutation — gradient-free");
         s.add("reads        584 numbers, not pixels: 8 global (score/tiers/fill) +");
         s.add("             9 per fruit (position, speed, spin, tier, size, asleep)");
         s.add("picks        1 of 32 drop columns (highest-scoring output wins)");
+        s.add("tendency     " + tendencyLabel());
         return s.toArray(new String[0]);
     }
 
@@ -326,6 +373,7 @@ public final class EvolutionRunner extends AgentRunner {
         if (worker != null) worker.interrupt();
         if (ga  != null) ga.close();
         if (cma != null) cma.close();
+        ghostPool.shutdownNow();
     }
 
     // -------------------------------------------------------------------------
@@ -340,18 +388,21 @@ public final class EvolutionRunner extends AgentRunner {
     }
 
     /**
-     * Loads a slot and immediately adopts it as the live-playing agent. Also PAUSES
-     * training — the background trainer would otherwise overwrite this with its own
-     * next-generation champion within moments, since GA/CMA-ES don't have a concept of
-     * "resume evolving from an externally-loaded genome" (there's no population slot to
-     * put it in). Un-pause to keep evolving fresh from where the trainer already was,
-     * or hit RESTART to start a brand new run.
+     * Loads a slot and immediately adopts it as the live-playing agent — the board
+     * keeps running (physics, ghosts, and the background trainer all stay live), only
+     * the trainer's own "adopt this generation's champion" step is held off (see
+     * {@link #holdChampion}) so it doesn't immediately overwrite what was just loaded.
+     * Hit PAUSE/RESUME (or RESTART) to hand control back to the trainer, or just keep
+     * watching — GA/CMA-ES don't have a concept of "resume evolving from an externally
+     * loaded genome" (there's no population slot to put it in), so the trainer
+     * continues evolving its own population in the background the whole time; only the
+     * live board's displayed agent is held.
      */
     public boolean loadFromSlot(int slot) {
         MlpPolicy p = ModelSlots.newCompatiblePolicy();
         if (!ModelSlots.load(cfg.technique.id, slot, p)) return false;
         setAgent(new NeuralAgent(p));
-        setPaused(true);
+        holdChampion = true;
         return true;
     }
 

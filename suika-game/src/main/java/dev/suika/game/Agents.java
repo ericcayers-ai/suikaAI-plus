@@ -34,6 +34,19 @@ public final class Agents {
             case FLOW       -> new GenerativeAgent(GenerativeModelBridge.ModelType.FLOW_MATCHING);
             case DECISION_TRANSFORMER, OFFLINE_RL -> new ReturnConditionedAgent(cfg.targetReturn);
             case PPO, DQN, SAC, GAIL -> new HeuristicAgent(); // JVM surrogate until ONNX is loaded
+
+            // ---- Ensemble: composed agents (see EnsembleAgents.java) ----
+            case ENS_MCTS_NET       -> new EnsembleAgents.NetGuidedMcts(cfg.rollouts, bins);
+            case ENS_GREEDY_GUARD   -> new EnsembleAgents.GreedyGuardedPolicy(bins);
+            case ENS_MCTS_TIEBREAK  -> new EnsembleAgents.McTsGreedyTiebreak(cfg.rollouts, bins);
+            case ENS_VOTING         -> new EnsembleAgents.VotingCommittee(cfg.rollouts, bins);
+            case ENS_EVOLVED_MCTS   -> new EnsembleAgents.EvolvedNetMcts(cfg.rollouts, bins);
+            case ENS_IMITATION_MCTS -> new EnsembleAgents.ImitationBlendedMcts(cfg.rollouts, bins);
+            case ENS_RTG_VERIFIED   -> new EnsembleAgents.ReturnConditionedVerified(cfg.targetReturn, bins);
+            case ENS_GENERATIVE_GREEDY -> new EnsembleAgents.GenerativeGreedyFilter(bins);
+            case ENS_ADAPTIVE_VOTE  -> new EnsembleAgents.AdaptiveVotingCommittee(cfg.rollouts, bins);
+            case ENS_BANDIT         -> new EnsembleAgents.BanditMetaController(cfg.rollouts, bins);
+
             default -> new HeuristicAgent();
         };
     }

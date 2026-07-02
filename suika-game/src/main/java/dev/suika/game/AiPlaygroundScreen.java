@@ -61,7 +61,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     /** Test/QA hook: open the info modal for a technique (used by the capture harness). */
     void openInfocardForCapture(AiTechnique t) { this.infocardTech = t; }
 
-    private static final int[]    ROLLOUTS = {40, 80, 150, 300};
+    private static final int[]    ROLLOUTS = {40, 80, 150, 300, 600, 1200, 2400};
     private static final int[]    POP      = {16, 24, 40, 64, 128, 256, 512, 1000};
     private static final int[]    RETURNS  = {1000, 2000, 4000};
     private static final double[] LRS      = {1e-3, 3e-3, 1e-2};
@@ -169,37 +169,45 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         return cfg.technique.family == AiTechnique.Family.EVOLUTION;
     }
 
+    // Ensembles built on MCTS search share its Rollouts knob; ENS_RTG_VERIFIED shares
+    // Decision Transformer's Return knob. ENS_GREEDY_GUARD/ENS_GENERATIVE_GREEDY have
+    // no adjustable launch parameter (they only take the fixed action-bin count).
+    private static final java.util.Set<AiTechnique> ROLLOUT_PARAM_TECHS = java.util.Set.of(
+            AiTechnique.MCTS, AiTechnique.ALPHAZERO, AiTechnique.ENS_MCTS_NET,
+            AiTechnique.ENS_MCTS_TIEBREAK, AiTechnique.ENS_VOTING, AiTechnique.ENS_EVOLVED_MCTS,
+            AiTechnique.ENS_IMITATION_MCTS, AiTechnique.ENS_ADAPTIVE_VOTE, AiTechnique.ENS_BANDIT);
+
     private boolean paramApplicable() {
+        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return true;
         return switch (cfg.technique) {
-            case MCTS, ALPHAZERO, NEUROEVO, PBT,
-                 DECISION_TRANSFORMER, OFFLINE_RL, BC, DAGGER -> true;
+            case NEUROEVO, PBT, DECISION_TRANSFORMER, OFFLINE_RL, BC, DAGGER, ENS_RTG_VERIFIED -> true;
             default -> false;
         };
     }
     private String paramLabel() {
+        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return "Rollouts";
         return switch (cfg.technique) {
-            case MCTS, ALPHAZERO               -> "Rollouts";
-            case NEUROEVO, PBT                 -> "Population";
-            case DECISION_TRANSFORMER, OFFLINE_RL -> "Target return";
-            case BC, DAGGER                    -> "Learning rate";
-            default                            -> "—";
+            case NEUROEVO, PBT                                      -> "Population";
+            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> "Target return";
+            case BC, DAGGER                                         -> "Learning rate";
+            default                                                 -> "—";
         };
     }
     private String paramValue() {
+        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return Integer.toString(cfg.rollouts);
         return switch (cfg.technique) {
-            case MCTS, ALPHAZERO               -> Integer.toString(cfg.rollouts);
-            case NEUROEVO, PBT                 -> Integer.toString(cfg.populationSize);
-            case DECISION_TRANSFORMER, OFFLINE_RL -> Integer.toString((int) cfg.targetReturn);
-            case BC, DAGGER                    -> String.format("%.0e", cfg.learningRate);
-            default                            -> "—";
+            case NEUROEVO, PBT                                      -> Integer.toString(cfg.populationSize);
+            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> Integer.toString((int) cfg.targetReturn);
+            case BC, DAGGER                                         -> String.format("%.0e", cfg.learningRate);
+            default                                                 -> "—";
         };
     }
     private void cycleParam(int d) {
+        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) { cfg.rollouts = cycleInt(ROLLOUTS, cfg.rollouts, d); return; }
         switch (cfg.technique) {
-            case MCTS, ALPHAZERO               -> cfg.rollouts       = cycleInt(ROLLOUTS, cfg.rollouts, d);
-            case NEUROEVO, PBT                 -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
-            case DECISION_TRANSFORMER, OFFLINE_RL -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
-            case BC, DAGGER                    -> cfg.learningRate   = cycleDouble(LRS, cfg.learningRate, d);
+            case NEUROEVO, PBT                                      -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
+            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
+            case BC, DAGGER                                         -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
             default -> { }
         }
     }

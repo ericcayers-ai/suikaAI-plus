@@ -250,11 +250,12 @@ public final class Jar3DPhysics {
         }
     }
 
-    /** True when nothing is still falling through the drop zone above the rim. */
+    /** True when nothing is still falling through the drop zone above the rim — checks
+     *  each ball's TOP surface (y + radius), not just its center. */
     public boolean chuteClear() {
-        double thresh = JAR_HEIGHT - 0.5;
+        double thresh = JAR_HEIGHT - 1.0;
         for (Ball b : balls) {
-            if (b.y > thresh) return false;
+            if (b.y + b.radius > thresh) return false;
         }
         return true;
     }

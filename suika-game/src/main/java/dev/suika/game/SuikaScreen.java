@@ -274,11 +274,12 @@ public final class SuikaScreen extends ScreenAdapter {
         }
     }
 
-    /** True when nothing is still falling through the drop chute above the rim. */
+    /** True when nothing is still falling through the drop chute above the rim — checks
+     *  each fruit's TOP surface (y + radius), not just its center. */
     private boolean chuteClear() {
-        double thresh = PhysicsConfig.CONTAINER_HEIGHT - 0.5;
+        double thresh = PhysicsConfig.CONTAINER_HEIGHT - 1.0;
         for (var f : core.getState().fruits()) {
-            if (f.y() > thresh) return false;
+            if (f.y() + f.radius() > thresh) return false;
         }
         return true;
     }

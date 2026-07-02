@@ -221,6 +221,7 @@ public final class PythonRunner extends AgentRunner {
                 ? "env ready   GPU stack linked"
                 : "env setup   Settings -> AI ENVIRONMENT");
         s.add("doing now   " + cfg.technique.liveHint());
+        s.add("tendency    " + tendencyLabel());
 
         if (agent() instanceof Agents.GenerativeAgent g) {
             boolean flow = cfg.technique == AiTechnique.FLOW;

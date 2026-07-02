@@ -80,6 +80,7 @@ public final class PlanningRunner extends AgentRunner {
             s.add("policy       " + cfg.technique.kind);
         }
         s.add("doing now    " + cfg.technique.liveHint());
+        s.add("tendency     " + tendencyLabel());
         return s.toArray(new String[0]);
     }
 

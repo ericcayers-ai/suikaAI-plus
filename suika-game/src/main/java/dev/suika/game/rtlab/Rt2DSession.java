@@ -48,9 +48,9 @@ public final class Rt2DSession implements RtGameSession {
     }
 
     private boolean chuteClear() {
-        double thresh = PhysicsConfig.CONTAINER_HEIGHT - 0.5;
+        double thresh = PhysicsConfig.CONTAINER_HEIGHT - 1.0;
         for (var f : core.getState().fruits()) {
-            if (f.y() > thresh) return false;
+            if (f.y() + f.radius() > thresh) return false;
         }
         return true;
     }
