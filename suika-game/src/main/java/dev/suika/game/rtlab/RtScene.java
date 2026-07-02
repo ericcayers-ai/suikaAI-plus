@@ -37,9 +37,16 @@ public final class RtScene implements AutoCloseable {
     /** Jar dimensions live in {@link JarShape} (shared with physics); kept here as
      *  a convenience alias for callers that only need the body radius. */
     public static final float JAR_RADIUS = (float) JarShape.BODY_RADIUS;
-    public static final float WALL_Z     = -10.0f;
-    public static final float TABLE_SIZE_X = 80f, TABLE_SIZE_Z = 56f, TABLE_CENTER_Z = 6f;
-    public static final float WALL_SIZE_X = 90f, WALL_SIZE_Y = 60f;
+    /** Far enough behind the jar that the orbit camera can never reach it: max zoom
+     *  radius is {@code RtLabLauncher.ZOOM_MAX} (40), so a full 180° orbit puts the
+     *  camera at z=-40 — still 18 units in front of the wall. (Was -10, which the
+     *  orbiting camera flew straight through.) */
+    public static final float WALL_Z     = -58.0f;
+    // Table centred under the jar and large enough that every orbit angle still sees
+    // wood under the camera; wall sized up to keep filling the frame from its new,
+    // much farther position.
+    public static final float TABLE_SIZE_X = 120f, TABLE_SIZE_Z = 120f, TABLE_CENTER_Z = 0f;
+    public static final float WALL_SIZE_X = 160f, WALL_SIZE_Y = 90f;
 
     // The movable metal drop chute (the "drop cursor" of the reference scene):
     // an open steel tube hovering above the jar mouth, following the pointer.
@@ -135,12 +142,12 @@ public final class RtScene implements AutoCloseable {
                 JAR_RADIUS - 0.1f, 1f, JAR_RADIUS - 0.1f, 0f, 0.02f, 0f);
 
         // 4 (optional): the metal drop chute, tracking the aim point above the mouth.
-        // Roughness raised from the original 0.25 (near-mirror) to 0.55 — brushed steel,
-        // not a chrome mirror; raygen's MAT_METAL branch reads this to broaden/soften
-        // the specular streak and dial back overall reflectivity.
+        // Base roughness 0.62 — clearly brushed steel; closesthit.rchit additionally
+        // modulates it with fine circumferential streak noise (the brushed-line grain)
+        // and raygen's MAT_METAL branch broadens/softens the highlight accordingly.
         if (chuteVisible) {
             writeInstanceData(data, 0.62f, 0.63f, 0.66f, -1, -1, -1, MAT_METAL,
-                    meshes.cylinderSide, 1f, 1f, 0.55f, 1f);
+                    meshes.cylinderSide, 1f, 1f, 0.62f, 1f);
             writeTlasInstance(tlasInstances, meshes.cylinderBlas.deviceAddress(), index++, MASK_SOLID,
                     CHUTE_RADIUS, CHUTE_HEIGHT, CHUTE_RADIUS, chuteX, CHUTE_BOTTOM_Y, chuteZ);
         }

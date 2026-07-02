@@ -124,8 +124,14 @@ public final class RtLabLauncher {
             long commandPool = createCommandPool(ctx.device, ctx.graphicsQueueFamily);
             try (RtOutputImage raw = new RtOutputImage(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
                  RtOutputImage denoised = new RtOutputImage(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
+                 // The frame actually presented: raw/denoised copied here first, then the
+                 // HUD composites onto it — never onto raw, which doubles as the temporal
+                 // accumulation history (UI pixels would bleed into next frame's EMA).
+                 RtOutputImage present = new RtOutputImage(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
                  RtPipeline pipeline = new RtPipeline(ctx.physicalDevice, ctx.device);
                  RtDenoiser denoiser = new RtDenoiser(ctx.device, raw, denoised);
+                 RtHud hud = new RtHud(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
+                 RtHudCompositor hudCompositor = new RtHudCompositor(ctx.device, present, hud);
                  RtTextureSet textures = new RtTextureSet(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue);
                  RtMeshLibrary meshes = new RtMeshLibrary(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue);
                  RtScene scene = new RtScene(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, meshes, textures)) {
@@ -169,26 +175,37 @@ public final class RtLabLauncher {
                     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS && aiDriver == null) session.drop();
                     else if (button == GLFW_MOUSE_BUTTON_RIGHT) orbiting[0] = use3dPhysics && action == GLFW_PRESS;
                 });
+                glfwSetScrollCallback(window.handle, (win, sx, sy) -> cam.zoom((float) sy));
 
                 VkCommandBuffer cmd = allocateCommandBuffer(ctx.device, commandPool);
                 long imageAvailable = createSemaphore(ctx.device);
                 long renderFinished = createSemaphore(ctx.device);
                 long inFlight = createFence(ctx.device);
 
+                glfwSetWindowTitle(window.handle, "Suika RT Lab — " + session.modeName()
+                        + (aiDriver != null ? " — AI: " + aiDriver.displayName() : ""));
+
                 long startNs = System.nanoTime();
                 long lastNs = startNs;
                 long frame = 0;
-                long lastTitleScore = -1;
-                FruitTier lastTitleNext = null;
-                boolean lastTitleOver = false;
-                // AI autoplay paces itself like the classic AI-watch view (GameSettings.
-                // aiMoveDelay) rather than dropping every frame — otherwise it would stack
-                // fruit faster than the chute-clear guard even allows.
+                long lastHudScore = -1;
+                FruitTier lastHudNext = null;
+                boolean lastHudOver = false;
+                // AI autoplay paces itself like the classic AI-watch view rather than
+                // dropping every frame. The actual selectAction runs on its own thread
+                // (aiExec) — planning agents like MCTS think for hundreds of ms, and
+                // running that on the render thread froze the whole window every move.
                 final float AI_MOVE_INTERVAL = 0.55f;
-                float[] aiTimer = {0.35f};
-                String controlsHint = aiDriver != null
-                        ? "AI: " + aiDriver.displayName() + " · R restart · D denoise"
-                        : "click drop · R restart · D denoise";
+                final float AI_RESTART_DELAY = 2.0f;
+                float aiTimer = 0.35f;
+                float overTimer = 0f;
+                java.util.concurrent.ExecutorService aiExec = aiDriver == null ? null
+                        : java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                            Thread t = new Thread(r, "rtlab-ai");
+                            t.setDaemon(true);
+                            return t;
+                        });
+                java.util.concurrent.Future<Double> aiFuture = null;
 
                 while (!window.shouldClose()) {
                     window.pollEvents();
@@ -199,24 +216,35 @@ public final class RtLabLauncher {
 
                     session.step(dt);
 
-                    if (aiDriver != null && !session.gameOver()) {
-                        aiTimer[0] -= dt;
-                        if (aiTimer[0] <= 0f) {
-                            driveAi(session, aiDriver, use3dPhysics);
-                            aiTimer[0] = AI_MOVE_INTERVAL;
+                    if (aiDriver != null) {
+                        if (session.gameOver()) {
+                            // Keep rounds flowing: a short beat to read the final score,
+                            // then a fresh game — no waiting on a keypress between rounds.
+                            if (aiFuture != null) { aiFuture.cancel(false); aiFuture = null; }
+                            overTimer += dt;
+                            if (overTimer >= AI_RESTART_DELAY) {
+                                session.reset();
+                                overTimer = 0f;
+                                aiTimer = 0.35f;
+                            }
+                        } else {
+                            overTimer = 0f;
+                            aiTimer -= dt;
+                            if (aiFuture == null && aiTimer <= 0f) {
+                                // Snapshot on the render thread (cheap), think on the AI
+                                // thread, apply next loop iteration once the future lands.
+                                GameState snapshot = syntheticState(session);
+                                aiFuture = aiExec.submit(() -> chooseDropX(aiDriver, snapshot));
+                            } else if (aiFuture != null && aiFuture.isDone()) {
+                                try {
+                                    applyAiDrop(session, aiFuture.get(), use3dPhysics);
+                                } catch (Exception e) {
+                                    System.err.println("[RT Lab] AI move failed: " + e);
+                                }
+                                aiFuture = null;
+                                aiTimer = AI_MOVE_INTERVAL;
+                            }
                         }
-                    }
-
-                    // HUD lives in the title bar; update only when something changed.
-                    if (session.score() != lastTitleScore || session.nextTier() != lastTitleNext
-                            || session.gameOver() != lastTitleOver) {
-                        lastTitleScore = session.score();
-                        lastTitleNext = session.nextTier();
-                        lastTitleOver = session.gameOver();
-                        String status = lastTitleOver ? "GAME OVER — press R" : "next: " + lastTitleNext;
-                        glfwSetWindowTitle(window.handle, "Suika RT Lab — " + session.modeName()
-                                + " — score " + lastTitleScore + " — " + status
-                                + "  ·  " + controlsHint);
                     }
 
                     List<RtScene.FruitInstance> instances = new ArrayList<>();
@@ -225,18 +253,14 @@ public final class RtLabLauncher {
                     }
                     boolean playing = !session.gameOver();
                     if (playing) {
-                        // The not-yet-dropped fruit peeks out of the chute's lower
-                        // opening, over the aim point — like the reference scene's
-                        // strawberries emerging from the metal tube.
+                        // The pending fruit hangs from the chute's mouth with just its
+                        // top quarter inside the tube — held in the grip of the opening,
+                        // about to release, rather than floating loose inside the barrel.
+                        // (The next-up preview now lives in the HUD, not the scene.)
                         FruitTier cur = session.currentTier();
                         instances.add(new RtScene.FruitInstance(session.hoverX(),
-                                RtScene.CHUTE_BOTTOM_Y - cur.radius * 0.4f,
+                                RtScene.CHUTE_BOTTOM_Y - cur.radius * 0.75f,
                                 session.hoverZ(), cur.radius, cur));
-                        // Next-up preview floats beside the jar's neck, always tier-sized
-                        // relative to a fixed chip scale so it reads as UI, not gameplay.
-                        FruitTier next = session.nextTier();
-                        instances.add(new RtScene.FruitInstance(-6.9f, 17.6f, 0f,
-                                0.45f + 0.22f * next.radius, next));
                     }
 
                     // First frame has no history to blend against — write through fully.
@@ -245,9 +269,23 @@ public final class RtLabLauncher {
                             session.hoverX(), session.hoverZ(), playing, cam.frame(time, blend));
                     frame++;
 
-                    renderFrame(ctx, swap, pipeline, denoiser, raw, denoised, denoiseOn[0],
-                            cmd, imageAvailable, renderFinished, inFlight, width, height);
+                    // Redraw the HUD overlay only when its content changed. Safe here:
+                    // updateFrame's one-shot TLAS build just waited the queue idle, so no
+                    // in-flight copy can still be reading the HUD staging buffer.
+                    if (session.score() != lastHudScore || session.nextTier() != lastHudNext
+                            || session.gameOver() != lastHudOver) {
+                        lastHudScore = session.score();
+                        lastHudNext = session.nextTier();
+                        lastHudOver = session.gameOver();
+                        hud.draw(lastHudScore, lastHudNext, session.modeName(),
+                                aiDriver != null ? aiDriver.displayName() : null,
+                                lastHudOver, use3dPhysics);
+                    }
+
+                    renderFrame(ctx, swap, pipeline, denoiser, raw, denoised, present, hud, hudCompositor,
+                            denoiseOn[0], cmd, imageAvailable, renderFinished, inFlight, width, height);
                 }
+                if (aiExec != null) aiExec.shutdownNow();
                 vkDeviceWaitIdle(ctx.device);
 
                 vkDestroySemaphore(ctx.device, imageAvailable, null);
@@ -261,30 +299,37 @@ public final class RtLabLauncher {
     }
 
     /**
-     * Builds a synthetic {@link GameState} from the session's current fruits and asks
-     * {@code driver} for a drop column, exactly like the classic AI-watch view does
-     * against a real {@link dev.suika.core.GameCore} — just re-derived from RT world
-     * coordinates instead of read straight off a live core, since {@link Rt3DSession}
-     * has no 2D {@code GameCore} to snapshot. Both sessions expose fruit X already
-     * shifted into RT world space (jar axis at x=0); {@code + 5} recovers the game-space
-     * x∈[0,10] the encoder/agents expect. 3D mode's Z is intentionally ignored — no
-     * bundled technique was trained on a 3D cross-section, so the agent always aims
-     * along the center slice (z=0), same as {@link Rt2DSession} does structurally.
+     * Builds a synthetic {@link GameState} from the session's current fruits, exactly
+     * like the classic AI-watch view reads a real {@link dev.suika.core.GameCore} —
+     * just re-derived from RT world coordinates, since {@link Rt3DSession} has no 2D
+     * {@code GameCore} to snapshot. Both sessions expose fruit X already shifted into
+     * RT world space (jar axis at x=0); {@code + 5} recovers the game-space x∈[0,10]
+     * the encoder/agents expect. Runs on the render thread (cheap: a list copy), so
+     * the AI thread never touches the live session.
      */
-    private static void driveAi(RtGameSession session, AgentPlugin driver, boolean use3dPhysics) {
-        // session.drop() below is already a safe no-op while the chute is blocked or
-        // on cooldown (see Rt2DSession/Rt3DSession) — no extra gating needed here.
+    private static GameState syntheticState(RtGameSession session) {
         List<Fruit> fruits = new ArrayList<>();
         int id = 0;
         for (RtGameSession.Ball b : session.fruits()) {
             fruits.add(new Fruit(id++, b.tier(), b.x() + 5.0, b.y(), 0, 0, 0, 0, true));
         }
-        GameState synthetic = new GameState(fruits, session.currentTier(), session.nextTier(),
+        return new GameState(fruits, session.currentTier(), session.nextTier(),
                 session.score(), session.score(), session.gameOver(), 0.0, 0, 0);
-        ActionSpec spec = ActionSpec.discrete(32);
-        Object action = driver.selectAction(synthetic, spec);
-        double gx = spec.toDropX(action, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
+    }
 
+    /** The potentially-slow part (MCTS thinks for hundreds of ms) — runs on the
+     *  dedicated "rtlab-ai" thread against the immutable snapshot, never the session. */
+    private static double chooseDropX(AgentPlugin driver, GameState snapshot) {
+        ActionSpec spec = ActionSpec.discrete(32);
+        Object action = driver.selectAction(snapshot, spec);
+        return spec.toDropX(action, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
+    }
+
+    /** Applies a chosen drop back on the render thread. 3D mode's Z is intentionally
+     *  center-slice (z=0) — no bundled technique was trained on a 3D cross-section.
+     *  session.drop() is already a safe no-op while the chute is blocked or on
+     *  cooldown (see Rt2DSession/Rt3DSession), so no extra gating is needed here. */
+    private static void applyAiDrop(RtGameSession session, double gx, boolean use3dPhysics) {
         float nx;
         if (use3dPhysics) {
             float worldX = (float) (gx - 5.0);
@@ -313,11 +358,15 @@ public final class RtLabLauncher {
         // Keeps the orbit from flipping over the top or diving under the table.
         private static final float MIN_PITCH = (float) Math.toRadians(-10);
         private static final float MAX_PITCH = (float) Math.toRadians(75);
+        /** Scroll-wheel zoom bounds. ZOOM_MAX must stay well inside |RtScene.WALL_Z|
+         *  so a fully zoomed-out, fully orbited camera can never reach the backdrop. */
+        private static final float ZOOM_MIN = 15f, ZOOM_MAX = 40f;
 
         final float tanHalfFov = (float) Math.tan(Math.toRadians(28)); // 56° vertical
         final float aperture = 0.34f;
         final float aspect;
-        private final float radius, baseYaw, basePitch;
+        private final float baseYaw, basePitch;
+        private float radius;
 
         /** Accumulated right-drag orbit offsets (radians) — mutated from the GLFW
          *  cursor callback thread, read from the render loop; both run on the same
@@ -330,6 +379,13 @@ public final class RtLabLauncher {
             radius = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
             baseYaw = (float) Math.atan2(dx, dz);
             basePitch = (float) Math.asin(dy / radius);
+        }
+
+        /** Scroll-wheel zoom: dolly toward/away from the jar along the view ray.
+         *  Focus distance tracks the radius (see {@link #frame}), so the jar stays
+         *  on the focal plane at every zoom level. */
+        void zoom(float scrollY) {
+            radius = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, radius - scrollY * 1.6f));
         }
 
         RtScene.CameraFrame frame(float time, float blend) {
@@ -368,7 +424,8 @@ public final class RtLabLauncher {
     }
 
     private static void renderFrame(RtContext ctx, RtSwapchain swap, RtPipeline pipeline, RtDenoiser denoiser,
-                                     RtOutputImage raw, RtOutputImage denoised, boolean denoiseOn,
+                                     RtOutputImage raw, RtOutputImage denoised, RtOutputImage present,
+                                     RtHud hud, RtHudCompositor hudCompositor, boolean denoiseOn,
                                      VkCommandBuffer cmd, long imageAvailable, long renderFinished, long inFlight,
                                      int width, int height) {
         try (MemoryStack stack = stackPush()) {
@@ -409,14 +466,41 @@ public final class RtLabLauncher {
             long swapImage = swap.images[imageIndex];
             transition(stack, cmd, swapImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
             // The RT/denoiser output is GENERAL and already shader-writable; a barrier
-            // (not a layout change) is enough before reading it as a blit source.
+            // (not a layout change) is enough before reading it as a transfer source.
+            VkMemoryBarrier.Buffer preCopy = VkMemoryBarrier.calloc(1, stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+                    .srcAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
+                    .dstAccessMask(VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
+            vkCmdPipelineBarrier(cmd,
+                    denoiseOn ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : org.lwjgl.vulkan.KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, 0, preCopy, null, null);
+
+            // Copy the frame onto the dedicated present image and composite the HUD
+            // there — never onto raw (it doubles as the temporal-accumulation history;
+            // UI pixels written into it would bleed into next frame's EMA blend).
+            VkImageCopy.Buffer copy = VkImageCopy.calloc(1, stack);
+            copy.get(0).srcSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
+            copy.get(0).dstSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
+            copy.get(0).extent(e -> e.width(width).height(height).depth(1));
+            vkCmdCopyImage(cmd, sourceImage, VK_IMAGE_LAYOUT_GENERAL, present.image, VK_IMAGE_LAYOUT_GENERAL, copy);
+
+            hud.recordUpload(cmd);
+
+            VkMemoryBarrier.Buffer preComposite = VkMemoryBarrier.calloc(1, stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+                    .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                    .dstAccessMask(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    0, preComposite, null, null);
+
+            hudCompositor.dispatch(cmd, width, height);
+
             VkMemoryBarrier.Buffer preBlit = VkMemoryBarrier.calloc(1, stack)
                     .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
                     .srcAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
                     .dstAccessMask(VK_ACCESS_TRANSFER_READ_BIT);
-            vkCmdPipelineBarrier(cmd,
-                    denoiseOn ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : org.lwjgl.vulkan.KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                    VK_PIPELINE_STAGE_TRANSFER_BIT, 0, preBlit, null, null);
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    0, preBlit, null, null);
 
             VkImageBlit.Buffer blit = VkImageBlit.calloc(1, stack);
             blit.get(0).srcSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
@@ -425,7 +509,7 @@ public final class RtLabLauncher {
             blit.get(0).dstSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
             blit.get(0).dstOffsets(0, o -> o.set(0, 0, 0));
             blit.get(0).dstOffsets(1, o -> o.set(swap.width, swap.height, 1));
-            vkCmdBlitImage(cmd, sourceImage, VK_IMAGE_LAYOUT_GENERAL, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            vkCmdBlitImage(cmd, present.image, VK_IMAGE_LAYOUT_GENERAL, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     blit, VK_FILTER_LINEAR);
 
             transition(stack, cmd, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);

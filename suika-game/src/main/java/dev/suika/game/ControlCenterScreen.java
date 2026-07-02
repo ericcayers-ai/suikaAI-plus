@@ -806,7 +806,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
                 speedX, slowBtn.y + 27, Theme.GOLD);
         Ui.textCenter(game.batch, game.fontSmall, "SETUP",
                 swapBtn.x + swapBtn.width / 2f, swapBtn.y + 28, Theme.BG_BOTTOM);
-        if (slotsSupported()) Ui.textCenter(game.batch, game.fontSmall, "SLOTS",
+        if (slotsSupported()) Ui.textCenter(game.batch, game.fontSmall, "SAVES",
                 slotsBtn.x + slotsBtn.width / 2f, slotsBtn.y + 28, Theme.BG_BOTTOM);
         Ui.textCenter(game.batch, game.fontSmall, "RESTART",
                 restartBtn.x + restartBtn.width / 2f, restartBtn.y + 28, Theme.TEXT);
@@ -956,7 +956,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
         s.end();
 
         game.batch.begin();
-        Ui.textCenter(game.batch, game.fontMed, "SAVE / LOAD PROGRESS",
+        Ui.textCenter(game.batch, game.fontMed, "SAVES — SAVE / LOAD PROGRESS",
                 m0x + SLOTS_MW / 2f, m0y + SLOTS_MH - 32, Theme.TEXT);
         for (int i = 0; i < ModelSlots.SLOT_COUNT; i++) {
             ModelSlots.SlotInfo info = slotInfo(i + 1);

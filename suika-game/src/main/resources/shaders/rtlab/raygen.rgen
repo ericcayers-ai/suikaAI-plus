@@ -87,7 +87,11 @@ const vec3  LIGHT_DIR   = normalize(vec3(0.35, 0.90, 0.55));
 const vec3  LIGHT_COLOR = vec3(1.00, 0.97, 0.90);
 const float LIGHT_INTENSITY = 2.35;
 const float LIGHT_RADIUS = 0.16;      // disk jitter -> penumbra width
-const float FILL = 0.34;              // ambient/fill fraction (professional = well-filled)
+const float FILL = 0.30;              // ambient/fill fraction (a touch of contrast for the cinematic grade)
+
+// Where resting fruit ends the game (PhysicsConfig.DEADLINE_Y = CONTAINER_HEIGHT - 1.5).
+// Drawn as a faint warm line traced onto the glass so the player can see the limit.
+const float DEADLINE_Y = 13.5;
 
 float fresnelSchlick(float cosTheta) {
     float f0 = 0.04;
@@ -214,21 +218,32 @@ void main() {
             // Fresnel split is approximated with an environment lookup plus the
             // key light's specular ping — cheap, but reads unmistakably as glass.
             //
-            // "Bold, with an edge to it": a sharp grazing-angle rim term on top of
-            // the base Fresnel reflection gives the jar's silhouette real presence
-            // (a cool-tinted glow that traces the profile) instead of the glass
-            // nearly vanishing head-on, and the through-tint darkens a touch more
-            // at those same grazing angles so the rim reads as glass THICKNESS,
-            // not just a highlight.
+            // Real jar, not showroom gloss: grazing angles ABSORB instead of glow.
+            // A photographed jar's silhouette goes dark — light path length through
+            // the glass diverges at the profile edge — so the rim term multiplies
+            // the through-tint down hard, with only a whisper of cool sheen added
+            // back on top. Reflection strength is kept moderate for the same reason.
             float cosI = clamp(dot(-rd, N), 0.0, 1.0);
             float fres = fresnelSchlick(cosI);
-            float rim = pow(1.0 - cosI, 6.0);
+            float rim = pow(1.0 - cosI, 5.0);
             vec3 R = reflect(rd, N);
-            color += tint * fres * envColor(R) * 1.05;
-            color += tint * rim * vec3(0.75, 0.85, 0.97) * 0.6;
+            color += tint * fres * envColor(R) * 0.70;
+            color += tint * rim * rim * vec3(0.35, 0.42, 0.50) * 0.18;
             vec3 H = normalize(LIGHT_DIR - rd);
-            color += tint * LIGHT_COLOR * pow(max(dot(N, H), 0.0), 260.0) * 1.6;
-            tint *= vec3(0.93, 0.965, 0.955) * (1.0 - fres * 0.6 - rim * 0.28);
+            color += tint * LIGHT_COLOR * pow(max(dot(N, H), 0.0), 260.0) * 1.2;
+
+            // Faint deadline line on the jar wall: resting fruit above this height
+            // ends the game. Band on the side glass only (not the base disc).
+            // Etched into the glass, not painted on top: the band both EMITS a warm
+            // tone and DARKENS transmission, so it stays legible against the bright
+            // studio wall behind the jar instead of washing out.
+            float band = 1.0 - smoothstep(0.0, 0.14, abs(P.y - DEADLINE_Y));
+            if (band > 0.0 && length(P.xz) > 3.0) {
+                color += tint * vec3(1.0, 0.35, 0.22) * band * 0.5;
+                tint *= 1.0 - band * 0.30;
+            }
+
+            tint *= vec3(0.90, 0.945, 0.93) * (1.0 - fres * 0.55 - rim * 0.55);
             ro = P + rd * 0.004;             // continue through the pane
             continue;
         }
@@ -237,11 +252,14 @@ void main() {
         break;
     }
 
-    // Filmic-ish finish: soft Reinhard highlight rolloff, then gamma. The bright
-    // studio look intentionally pushes values past 1.0; this brings them back
-    // smoothly instead of clipping.
-    color = color / (1.0 + color * 0.35);
-    color = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
+    // Cinematic finish: ACES filmic tonemap (real highlight shoulder + gentle toe,
+    // richer mids than the old soft-Reinhard) plus a subtle lens vignette so the
+    // frame's corners fall off like glass optics, keeping the eye on the jar.
+    color = max(color * 0.92, vec3(0.0));
+    color = clamp((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0.0, 1.0);
+    float vig = 1.0 - 0.26 * pow(clamp(length(d * vec2(cam.aspect, 1.0)) / 1.55, 0.0, 1.0), 2.3);
+    color *= vig;
+    color = pow(color, vec3(1.0 / 2.2));
 
     // Temporal EMA against last frame's value already in the output image.
     ivec2 pix = ivec2(gl_LaunchIDEXT.xy);

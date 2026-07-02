@@ -112,7 +112,36 @@ public final class RtTraceTest {
                 OneShotCommands.submit(ctx.device, commandPool, ctx.graphicsQueue, cmd -> denoiser.dispatch(cmd, width, height));
                 savePng(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, denoised, width, height,
                         new File(outDir, "rtlab_denoised" + suffix + ".png").getPath());
-                System.out.println("SUCCESS: wrote rtlab_denoised" + suffix + ".png (temporal + bilateral, what the player sees)");
+                System.out.println("wrote rtlab_denoised" + suffix + ".png (temporal + bilateral)");
+
+                // Same present-image + HUD composite path the live window runs, with a
+                // representative HUD state — verifies the full GUI overlay headlessly.
+                try (RtOutputImage present = new RtOutputImage(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
+                     RtHud hudOverlay = new RtHud(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
+                     RtHudCompositor compositor = new RtHudCompositor(ctx.device, present, hudOverlay)) {
+                    hudOverlay.draw(1234, FruitTier.PERSIMMON, scatter3d ? "3D physics" : "2D physics",
+                            "MCTS", false, scatter3d);
+                    OneShotCommands.submit(ctx.device, commandPool, ctx.graphicsQueue, cmd -> {
+                        try (MemoryStack stack = stackPush()) {
+                            VkImageCopy.Buffer copy = VkImageCopy.calloc(1, stack);
+                            copy.get(0).srcSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
+                            copy.get(0).dstSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
+                            copy.get(0).extent(e -> e.width(width).height(height).depth(1));
+                            vkCmdCopyImage(cmd, denoised.image, VK_IMAGE_LAYOUT_GENERAL, present.image, VK_IMAGE_LAYOUT_GENERAL, copy);
+                            hudOverlay.recordUpload(cmd);
+                            VkMemoryBarrier.Buffer bar = VkMemoryBarrier.calloc(1, stack)
+                                    .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+                                    .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                                    .dstAccessMask(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+                            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                    0, bar, null, null);
+                            compositor.dispatch(cmd, width, height);
+                        }
+                    });
+                    savePng(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, present, width, height,
+                            new File(outDir, "rtlab_hud" + suffix + ".png").getPath());
+                }
+                System.out.println("SUCCESS: wrote rtlab_hud" + suffix + ".png (denoised + GUI overlay, what the player sees)");
             }
             vkDestroyCommandPool(ctx.device, commandPool, null);
         }

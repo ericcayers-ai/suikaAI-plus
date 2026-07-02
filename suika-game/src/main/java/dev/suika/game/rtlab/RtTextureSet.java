@@ -34,9 +34,12 @@ public final class RtTextureSet implements AutoCloseable {
         this.environment = RtTexture.hdr(pd, device, commandPool, queue, "/textures/environment/studio.hdr");
         this.woodBase = loadTriple(pd, device, commandPool, queue, "/textures/environment/table_wood");
         record FruitTex(FruitTier tier, String dir) {}
+        // GRAPE is deliberately NOT photo-textured: its bundled albedo map is a pile
+        // of near-black grapes (correct for a bunch, unreadable wrapped on a single
+        // sphere — it rendered as a plain black ball in the jar). The procedural
+        // fallback material with FruitColors' purple reads correctly instead.
         FruitTex[] mapped = {
                 new FruitTex(FruitTier.STRAWBERRY, "strawberry"),
-                new FruitTex(FruitTier.GRAPE,      "grape"),
                 new FruitTex(FruitTier.DEKOPON,    "dekopon"),
                 new FruitTex(FruitTier.APPLE,      "apple"),
                 new FruitTex(FruitTier.WATERMELON, "watermelon"),

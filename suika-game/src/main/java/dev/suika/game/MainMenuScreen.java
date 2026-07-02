@@ -298,7 +298,7 @@ public final class MainMenuScreen extends ScreenAdapter {
 
         if (aiSaves.isEmpty()) {
             Ui.textCenter(game.batch, game.fontSmall,
-                    "No AI saves yet — save one from Watch AI's SLOTS panel.",
+                    "No AI saves yet — save one from Watch AI's SAVES panel.",
                     m0x + AI_MW / 2f, m0y + AI_MH / 2f, Theme.TEXT_DIM);
         } else {
             for (int i = 0; i < AI_ROWS_VISIBLE; i++) {

@@ -1,0 +1,22 @@
+#version 460
+
+// Alpha-blends the CPU-rasterised HUD overlay (score, next-fruit chip, hints,
+// game-over banner — drawn by RtHud via Java2D) over the tonemapped present
+// image, right before the blit to the swapchain. Runs on a dedicated PRESENT
+// image, never the raw RT output: that image doubles as the temporal-accumulation
+// history, and compositing UI into it would bleed HUD pixels into next frame's EMA.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0, rgba32f) uniform image2D target;
+layout(binding = 1, rgba8) uniform readonly image2D hud;
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(target);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec4 h = imageLoad(hud, p);
+    if (h.a <= 0.001) return;
+    vec4 dst = imageLoad(target, p);
+    imageStore(target, p, vec4(mix(dst.rgb, h.rgb, h.a), 1.0));
+}

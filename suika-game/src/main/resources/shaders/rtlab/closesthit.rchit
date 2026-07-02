@@ -26,6 +26,7 @@ const int MAT_FRUIT = 0;
 const int MAT_WOOD  = 1;
 const int MAT_WALL  = 2;
 const int MAT_GLASS = 3;
+const int MAT_METAL = 4;
 
 // One record per TLAS instance, indexed by gl_InstanceCustomIndexEXT.
 struct InstanceData {
@@ -174,6 +175,17 @@ void main() {
         // path produced it above — a straight roughness map reads as cheap wet
         // plastic under the studio softbox; real fruit skin has a more matte sheen.
         rough = clamp(rough + 0.18, 0.05, 1.0);
+    }
+    if (matType == MAT_METAL) {
+        // Brushed-steel grain on the chute: fine streaks running along the tube's
+        // circumference (high frequency around the axis, low along Y — the pattern
+        // a lathe or wire brush leaves). Roughness carries the anisotropy into
+        // raygen's highlight; a matching faint albedo modulation makes the lines
+        // visible even outside the specular streak.
+        float ang = atan(objNormal.z, objNormal.x);
+        float streak = fbm3(vec3(ang * 30.0, P.y * 0.35, 2.7));
+        rough = clamp(rough + 0.20 * (streak - 0.5), 0.08, 0.95);
+        albedo *= 0.90 + 0.20 * streak;
     }
 
     hit.posT = vec4(P, gl_HitTEXT);
