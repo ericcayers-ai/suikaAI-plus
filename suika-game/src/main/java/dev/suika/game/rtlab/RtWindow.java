@@ -22,10 +22,19 @@ public final class RtWindow implements AutoCloseable {
         if (!GLFWVulkan.glfwVulkanSupported()) {
             throw new IllegalStateException("GLFW reports no Vulkan loader/ICD found on this system.");
         }
+        // GLFW window hints are global and persist across glfwCreateWindow calls.
+        // LibGDX's own window creation leaves GLFW_VISIBLE=false set (it shows its
+        // window explicitly afterward) — without resetting hints here, this window
+        // would silently inherit that and be created invisible.
+        glfwDefaultWindowHints();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE); // MVP: fixed size, no swapchain-recreate-on-resize yet
+        glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
+        glfwWindowHint(GLFW_FOCUSED, GLFW_TRUE);
         this.handle = glfwCreateWindow(width, height, title, 0L, 0L);
         if (handle == 0L) throw new IllegalStateException("glfwCreateWindow failed");
+        glfwShowWindow(handle);
+        glfwFocusWindow(handle);
         this.surface = createSurface();
     }
 
