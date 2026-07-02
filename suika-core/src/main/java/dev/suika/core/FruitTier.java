@@ -6,17 +6,19 @@ package dev.suika.core;
  */
 public enum FruitTier {
 
-    CHERRY     (1,  0.50f,   0),
-    STRAWBERRY (2,  0.70f,   1),
-    GRAPE      (3,  0.90f,   3),
-    DEKOPON    (4,  1.15f,   6),
-    PERSIMMON  (5,  1.40f,  10),
-    APPLE      (6,  1.65f,  15),
-    PEAR       (7,  1.90f,  21),
-    PEACH      (8,  2.15f,  28),
-    PINEAPPLE  (9,  2.45f,  36),
-    MELON      (10, 2.80f,  45),
-    WATERMELON (11, 3.20f,  55);
+    // Radii are the community-measured baseline scaled up 10% ("a little bit bigger")
+    // — still well within the jar's mouth/body clearance (see JarShape/Jar3DPhysics).
+    CHERRY     (1,  0.55f,   0),
+    STRAWBERRY (2,  0.77f,   1),
+    GRAPE      (3,  0.99f,   3),
+    DEKOPON    (4,  1.27f,   6),
+    PERSIMMON  (5,  1.54f,  10),
+    APPLE      (6,  1.82f,  15),
+    PEAR       (7,  2.09f,  21),
+    PEACH      (8,  2.37f,  28),
+    PINEAPPLE  (9,  2.70f,  36),
+    MELON      (10, 3.08f,  45),
+    WATERMELON (11, 3.52f,  55);
 
     /** 1-based tier index. */
     public final int tier;

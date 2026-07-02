@@ -29,18 +29,19 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 FRUIT_TIERS = [
-    # (tier, radius, merge_score)
-    (1,  0.50, 0),
-    (2,  0.70, 1),
-    (3,  0.90, 3),
-    (4,  1.15, 6),
-    (5,  1.40, 10),
-    (6,  1.65, 15),
-    (7,  1.90, 21),
-    (8,  2.15, 28),
-    (9,  2.45, 36),
-    (10, 2.80, 45),
-    (11, 3.20, 55),
+    # (tier, radius, merge_score) — kept in sync with FruitTier.java (10% bigger
+    # than the original community-measured baseline).
+    (1,  0.55, 0),
+    (2,  0.77, 1),
+    (3,  0.99, 3),
+    (4,  1.27, 6),
+    (5,  1.54, 10),
+    (6,  1.82, 15),
+    (7,  2.09, 21),
+    (8,  2.37, 28),
+    (9,  2.70, 36),
+    (10, 3.08, 45),
+    (11, 3.52, 55),
 ]
 
 CONTAINER_WIDTH  = 10.0
@@ -146,7 +147,7 @@ class StandaloneSimulator:
             obs[base + 4] = 0.0  # angle (not tracked in simple sim)
             obs[base + 5] = 0.0  # angular velocity
             obs[base + 6] = (f.tier - 1) / 11.0
-            obs[base + 7] = f.radius / 3.5
+            obs[base + 7] = f.radius / 4.0  # headroom above WATERMELON's 3.52 radius
             obs[base + 8] = 0.0  # asleep flag
         return obs
 

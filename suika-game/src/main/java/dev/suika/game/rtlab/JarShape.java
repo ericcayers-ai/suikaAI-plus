@@ -50,7 +50,7 @@ public final class JarShape {
 
     /** Max distance a fruit CENTER of the given radius may sit from the jar axis
      *  when dropped through the mouth. Collapses to the axis if the fruit is too
-     *  big for the opening (can't happen with droppable tiers: dekopon r=1.15
+     *  big for the opening (can't happen with droppable tiers: dekopon r=1.27
      *  vs. mouth 4.15). */
     public static double dropLimit(double fruitRadius) {
         return Math.max(0.0, MOUTH_INNER_RADIUS - MOUTH_MARGIN - fruitRadius);

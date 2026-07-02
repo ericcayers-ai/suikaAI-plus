@@ -1,6 +1,11 @@
 package dev.suika.game.rtlab;
 
+import dev.suika.ai.ActionSpec;
+import dev.suika.ai.AgentPlugin;
+import dev.suika.core.Fruit;
 import dev.suika.core.FruitTier;
+import dev.suika.core.GameState;
+import dev.suika.core.PhysicsConfig;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.glfw.GLFWVulkan;
 import org.lwjgl.system.Configuration;
@@ -34,9 +39,13 @@ import static org.lwjgl.vulkan.VK12.*;
  *
  * <p>Physics is selectable at launch: the classic 2D engine presented as a slice
  * through the jar, or true 3D physics ({@link Jar3DPhysics}) where the mouse aims
- * across the whole jar cross-section. If this GPU/driver doesn't support ray
- * tracing, this fails loudly to the console and returns — it never touches or
- * destabilises the main 2D game.
+ * across the whole jar cross-section — and, only in that 3D mode, right-click-and-
+ * hold orbits the camera around the jar (left-click still drops; the two never
+ * conflict). If this GPU/driver doesn't support ray tracing, this fails loudly to
+ * the console and returns — it never touches or destabilises the main 2D game.
+ *
+ * <p>Optionally driven by a saved {@link dev.suika.ai.AgentPlugin} instead of a
+ * human: see {@link #launch(boolean, dev.suika.ai.AgentPlugin)}.
  */
 public final class RtLabLauncher {
 
@@ -48,21 +57,34 @@ public final class RtLabLauncher {
      *  shed GPU-hungry work (e.g. the control center clamps its multi-board view). */
     public static boolean isRunning() { return running; }
 
-    /** Launches the RT Lab window on a background thread, or does nothing (log only)
-     *  if one is already open. Safe to call from the LibGDX render/UI thread.
+    /** Launches the RT Lab window on a background thread for a HUMAN player, or does
+     *  nothing (log only) if one is already open. Safe to call from the LibGDX
+     *  render/UI thread.
      *
      *  @param use3dPhysics true = true 3D physics in the jar; false = classic 2D engine */
     public static void launch(boolean use3dPhysics) {
+        launch(use3dPhysics, null);
+    }
+
+    /** Launches the RT Lab window on a background thread, or does nothing (log only)
+     *  if one is already open. Safe to call from the LibGDX render/UI thread.
+     *
+     *  @param use3dPhysics true = true 3D physics in the jar; false = classic 2D engine
+     *  @param aiDriver     when non-null, this agent plays automatically (loaded from
+     *                      an {@link dev.suika.game.AiTechnique} save slot — see
+     *                      {@code AiSlotPlayer}) instead of the mouse; the mouse still
+     *                      orbits the camera in 3D mode and R/D/ESC still work */
+    public static void launch(boolean use3dPhysics, AgentPlugin aiDriver) {
         if (running) return;
         running = true;
-        Thread t = new Thread(() -> run(use3dPhysics), "rtlab");
+        Thread t = new Thread(() -> run(use3dPhysics, aiDriver), "rtlab");
         t.setDaemon(true);
         t.start();
     }
 
-    private static void run(boolean use3dPhysics) {
+    private static void run(boolean use3dPhysics, AgentPlugin aiDriver) {
         try {
-            runUnsafe(use3dPhysics);
+            runUnsafe(use3dPhysics, aiDriver);
         } catch (Throwable t) {
             System.err.println("[RT Lab] Not available on this system: " + t);
         } finally {
@@ -70,7 +92,7 @@ public final class RtLabLauncher {
         }
     }
 
-    private static void runUnsafe(boolean use3dPhysics) {
+    private static void runUnsafe(boolean use3dPhysics, AgentPlugin aiDriver) {
         Configuration.STACK_SIZE.set(RtContext.STACK_SIZE_KB);
         // glfwInit() is idempotent — safe even though LibGDX's Lwjgl3Application has
         // already initialised GLFW for the main game window. We must NEVER call
@@ -95,7 +117,8 @@ public final class RtLabLauncher {
             // as mojibake. glfwSetWindowTitle instead goes through Win32's Unicode
             // SetWindowTextW, so the window title itself is unaffected and keeps the
             // nicer punctuation.
-            System.out.println("[RT Lab] " + ctx.deviceName + " - " + session.modeName());
+            System.out.println("[RT Lab] " + ctx.deviceName + " - " + session.modeName()
+                    + (aiDriver != null ? " - AI: " + aiDriver.displayName() : ""));
             RtSwapchain swap = new RtSwapchain(ctx.physicalDevice, ctx.device, window.surface, width, height);
 
             long commandPool = createCommandPool(ctx.device, ctx.graphicsQueueFamily);
@@ -109,6 +132,17 @@ public final class RtLabLauncher {
 
                 pipeline.writeTextures(textures.all(), textures.environment());
 
+                Camera cam = new Camera(width, height);
+                // Right-click-and-hold orbit — 3D physics mode only (the 2D mode's jar
+                // is always viewed from the same fixed slice angle, so orbiting it would
+                // just rotate the camera around an otherwise flat scene). While the right
+                // button is held, cursor movement drives the orbit instead of the aim
+                // point; releasing it goes straight back to aiming from the current
+                // cursor position (no snap — the next move event re-syncs lastCursor).
+                boolean[] orbiting = {false};
+                float[] lastCursor = {(float) width / 2f, (float) height / 2f};
+                float ORBIT_SENSITIVITY = 0.006f;
+
                 boolean[] denoiseOn = {true};
                 glfwSetKeyCallback(window.handle, (win, key, scancode, action, mods) -> {
                     if (action != GLFW_PRESS) return;
@@ -121,10 +155,19 @@ public final class RtLabLauncher {
                         glfwSetWindowShouldClose(win, true);
                     }
                 });
-                glfwSetCursorPosCallback(window.handle, (win, cx, cy) ->
-                        session.setPointer((float) (cx / width), (float) (cy / height)));
+                glfwSetCursorPosCallback(window.handle, (win, cx, cy) -> {
+                    float fx = (float) cx, fy = (float) cy;
+                    if (orbiting[0]) {
+                        cam.orbitYaw   += (fx - lastCursor[0]) * ORBIT_SENSITIVITY;
+                        cam.orbitPitch -= (fy - lastCursor[1]) * ORBIT_SENSITIVITY;
+                    } else if (aiDriver == null) {
+                        session.setPointer(fx / width, fy / height);
+                    }
+                    lastCursor[0] = fx; lastCursor[1] = fy;
+                });
                 glfwSetMouseButtonCallback(window.handle, (win, button, action, mods) -> {
-                    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) session.drop();
+                    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS && aiDriver == null) session.drop();
+                    else if (button == GLFW_MOUSE_BUTTON_RIGHT) orbiting[0] = use3dPhysics && action == GLFW_PRESS;
                 });
 
                 VkCommandBuffer cmd = allocateCommandBuffer(ctx.device, commandPool);
@@ -132,14 +175,20 @@ public final class RtLabLauncher {
                 long renderFinished = createSemaphore(ctx.device);
                 long inFlight = createFence(ctx.device);
 
-                Camera cam = new Camera(width, height);
-
                 long startNs = System.nanoTime();
                 long lastNs = startNs;
                 long frame = 0;
                 long lastTitleScore = -1;
                 FruitTier lastTitleNext = null;
                 boolean lastTitleOver = false;
+                // AI autoplay paces itself like the classic AI-watch view (GameSettings.
+                // aiMoveDelay) rather than dropping every frame — otherwise it would stack
+                // fruit faster than the chute-clear guard even allows.
+                final float AI_MOVE_INTERVAL = 0.55f;
+                float[] aiTimer = {0.35f};
+                String controlsHint = aiDriver != null
+                        ? "AI: " + aiDriver.displayName() + " · R restart · D denoise"
+                        : "click drop · R restart · D denoise";
 
                 while (!window.shouldClose()) {
                     window.pollEvents();
@@ -150,6 +199,14 @@ public final class RtLabLauncher {
 
                     session.step(dt);
 
+                    if (aiDriver != null && !session.gameOver()) {
+                        aiTimer[0] -= dt;
+                        if (aiTimer[0] <= 0f) {
+                            driveAi(session, aiDriver, use3dPhysics);
+                            aiTimer[0] = AI_MOVE_INTERVAL;
+                        }
+                    }
+
                     // HUD lives in the title bar; update only when something changed.
                     if (session.score() != lastTitleScore || session.nextTier() != lastTitleNext
                             || session.gameOver() != lastTitleOver) {
@@ -159,7 +216,7 @@ public final class RtLabLauncher {
                         String status = lastTitleOver ? "GAME OVER — press R" : "next: " + lastTitleNext;
                         glfwSetWindowTitle(window.handle, "Suika RT Lab — " + session.modeName()
                                 + " — score " + lastTitleScore + " — " + status
-                                + "  ·  click drop · R restart · D denoise");
+                                + "  ·  " + controlsHint);
                     }
 
                     List<RtScene.FruitInstance> instances = new ArrayList<>();
@@ -203,36 +260,97 @@ public final class RtLabLauncher {
         System.out.println("[RT Lab] closed - final score " + session.score());
     }
 
-    /** Fixed studio camera: in front of the jar, slightly above, focused on the
-     *  fruit plane so the tan wall far behind lands in bokeh and the table edge
-     *  near the lens blurs as foreground. Framed like the reference photo — the
-     *  full jar (body, shoulder, open mouth) plus the chute's lower half in view,
-     *  the chute's top running out of the frame. */
+    /**
+     * Builds a synthetic {@link GameState} from the session's current fruits and asks
+     * {@code driver} for a drop column, exactly like the classic AI-watch view does
+     * against a real {@link dev.suika.core.GameCore} — just re-derived from RT world
+     * coordinates instead of read straight off a live core, since {@link Rt3DSession}
+     * has no 2D {@code GameCore} to snapshot. Both sessions expose fruit X already
+     * shifted into RT world space (jar axis at x=0); {@code + 5} recovers the game-space
+     * x∈[0,10] the encoder/agents expect. 3D mode's Z is intentionally ignored — no
+     * bundled technique was trained on a 3D cross-section, so the agent always aims
+     * along the center slice (z=0), same as {@link Rt2DSession} does structurally.
+     */
+    private static void driveAi(RtGameSession session, AgentPlugin driver, boolean use3dPhysics) {
+        // session.drop() below is already a safe no-op while the chute is blocked or
+        // on cooldown (see Rt2DSession/Rt3DSession) — no extra gating needed here.
+        List<Fruit> fruits = new ArrayList<>();
+        int id = 0;
+        for (RtGameSession.Ball b : session.fruits()) {
+            fruits.add(new Fruit(id++, b.tier(), b.x() + 5.0, b.y(), 0, 0, 0, 0, true));
+        }
+        GameState synthetic = new GameState(fruits, session.currentTier(), session.nextTier(),
+                session.score(), session.score(), session.gameOver(), 0.0, 0, 0);
+        ActionSpec spec = ActionSpec.discrete(32);
+        Object action = driver.selectAction(synthetic, spec);
+        double gx = spec.toDropX(action, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
+
+        float nx;
+        if (use3dPhysics) {
+            float worldX = (float) (gx - 5.0);
+            nx = worldX / (2f * (float) Jar3DPhysics.PLAY_RADIUS) + 0.5f;
+        } else {
+            nx = (float) (gx / PhysicsConfig.CONTAINER_WIDTH);
+        }
+        session.setPointer(nx, 0.5f);
+        session.drop();
+    }
+
+    /** Studio camera: in front of the jar, slightly above, focused on the fruit
+     *  plane so the tan wall far behind lands in bokeh and the table edge near the
+     *  lens blurs as foreground. Framed like the reference photo — the full jar
+     *  (body, shoulder, open mouth) plus the chute's lower half in view, the
+     *  chute's top running out of the frame.
+     *
+     *  <p>In 3D physics mode the player can right-click-drag to orbit: {@link #orbitYaw}
+     *  and {@link #orbitPitch} accumulate mouse delta from RtLabLauncher's cursor
+     *  callback and are added to the base framing each frame in {@link #frame}, so
+     *  the camera swings around the fixed {@link #TARGET_*} point at a constant
+     *  {@link #radius} rather than translating through the scene. */
     private static final class Camera {
-        final float posX = 0f, posY = 12.5f, posZ = 26.5f;
-        final float[] fwd, right, up;
+        private static final float TARGET_X = 0f, TARGET_Y = 8.4f, TARGET_Z = 0f;
+        private static final float BASE_X = 0f, BASE_Y = 12.5f, BASE_Z = 26.5f;
+        // Keeps the orbit from flipping over the top or diving under the table.
+        private static final float MIN_PITCH = (float) Math.toRadians(-10);
+        private static final float MAX_PITCH = (float) Math.toRadians(75);
+
         final float tanHalfFov = (float) Math.tan(Math.toRadians(28)); // 56° vertical
         final float aperture = 0.34f;
-        final float focusDist;
         final float aspect;
+        private final float radius, baseYaw, basePitch;
+
+        /** Accumulated right-drag orbit offsets (radians) — mutated from the GLFW
+         *  cursor callback thread, read from the render loop; both run on the same
+         *  "rtlab" thread so no synchronization is needed. */
+        float orbitYaw = 0f, orbitPitch = 0f;
 
         Camera(int width, int height) {
-            float tx = 0f, ty = 8.4f, tz = 0f;
-            fwd = normalize(tx - posX, ty - posY, tz - posZ);
+            aspect = (float) width / height;
+            float dx = BASE_X - TARGET_X, dy = BASE_Y - TARGET_Y, dz = BASE_Z - TARGET_Z;
+            radius = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+            baseYaw = (float) Math.atan2(dx, dz);
+            basePitch = (float) Math.asin(dy / radius);
+        }
+
+        RtScene.CameraFrame frame(float time, float blend) {
+            float yaw = baseYaw + orbitYaw;
+            float pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, basePitch + orbitPitch));
+            float cp = (float) Math.cos(pitch);
+            float posX = TARGET_X + radius * cp * (float) Math.sin(yaw);
+            float posY = TARGET_Y + radius * (float) Math.sin(pitch);
+            float posZ = TARGET_Z + radius * cp * (float) Math.cos(yaw);
+
+            float[] fwd = normalize(TARGET_X - posX, TARGET_Y - posY, TARGET_Z - posZ);
             // right = normalize(cross(fwd, worldUp)) — the sign matters now: mouse-x
             // maps straight to world x, so screen-right MUST be world +X when looking
             // down -Z (the old showcase used the mirrored vector and its symmetric
             // orbiting scene hid it).
-            right = normalize(-fwd[2], 0f, fwd[0]);
-            up = cross(right, fwd);
-            focusDist = (float) Math.sqrt((tx - posX) * (tx - posX) + (ty - posY) * (ty - posY) + (tz - posZ) * (tz - posZ));
-            aspect = (float) width / height;
-        }
+            float[] right = normalize(-fwd[2], 0f, fwd[0]);
+            float[] up = cross(right, fwd);
 
-        RtScene.CameraFrame frame(float time, float blend) {
             return new RtScene.CameraFrame(posX, posY, posZ,
                     fwd[0], fwd[1], fwd[2], right[0], right[1], right[2], up[0], up[1], up[2],
-                    tanHalfFov, time, aperture, focusDist, blend, aspect);
+                    tanHalfFov, time, aperture, radius, blend, aspect);
         }
     }
 

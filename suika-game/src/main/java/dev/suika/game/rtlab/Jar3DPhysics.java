@@ -126,6 +126,12 @@ public final class Jar3DPhysics {
         resolveContainer(restitution, dt);
 
         applyMerges();
+        // A merge can place its result's (larger) radius somewhere the smaller parents
+        // both satisfied containment individually but the merged ball no longer does
+        // (e.g. right at the shoulder taper) — resolve once more so a merged fruit is
+        // never even one frame outside the jar profile before the next tick's solver
+        // loop would otherwise catch it.
+        resolveContainer(restitution, dt);
         updateRestAndDeadline(dt);
     }
 

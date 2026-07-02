@@ -135,9 +135,12 @@ public final class RtScene implements AutoCloseable {
                 JAR_RADIUS - 0.1f, 1f, JAR_RADIUS - 0.1f, 0f, 0.02f, 0f);
 
         // 4 (optional): the metal drop chute, tracking the aim point above the mouth.
+        // Roughness raised from the original 0.25 (near-mirror) to 0.55 — brushed steel,
+        // not a chrome mirror; raygen's MAT_METAL branch reads this to broaden/soften
+        // the specular streak and dial back overall reflectivity.
         if (chuteVisible) {
             writeInstanceData(data, 0.62f, 0.63f, 0.66f, -1, -1, -1, MAT_METAL,
-                    meshes.cylinderSide, 1f, 1f, 0.25f, 1f);
+                    meshes.cylinderSide, 1f, 1f, 0.55f, 1f);
             writeTlasInstance(tlasInstances, meshes.cylinderBlas.deviceAddress(), index++, MASK_SOLID,
                     CHUTE_RADIUS, CHUTE_HEIGHT, CHUTE_RADIUS, chuteX, CHUTE_BOTTOM_Y, chuteZ);
         }
@@ -155,11 +158,13 @@ public final class RtScene implements AutoCloseable {
             } else {
                 r = srgb(tmp.r); g = srgb(tmp.g); b = srgb(tmp.b);
             }
+            // Roughness raised from 0.45 to 0.62 — less glossy/plastic-looking, reads
+            // more like real fruit skin under the studio softbox.
             writeInstanceData(data, r, g, b,
                     base >= 0 ? base + RtTextureSet.MAP_ALBEDO : -1,
                     base >= 0 ? base + RtTextureSet.MAP_NORMAL : -1,
                     base >= 0 ? base + RtTextureSet.MAP_ROUGHNESS : -1,
-                    MAT_FRUIT, meshes.sphere, 1f, 1f, 0.45f, (float) (f.radius() * Math.PI));
+                    MAT_FRUIT, meshes.sphere, 1f, 1f, 0.62f, (float) (f.radius() * Math.PI));
             writeTlasInstance(tlasInstances, meshes.sphereBlas.deviceAddress(), index++, MASK_SOLID,
                     f.radius(), f.radius(), f.radius(), f.x(), f.y(), f.z());
         }

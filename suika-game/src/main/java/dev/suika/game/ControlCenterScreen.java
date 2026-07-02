@@ -188,12 +188,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
         return MathUtils.clamp(gx, lo, hi);
     }
 
-    /** Only Evolution (champion weights) and Imitation (BC/DAgger policy) have trainable
-     *  state worth persisting — every other family's JVM surrogate has nothing to save. */
-    private boolean slotsSupported() {
-        return cfg.technique.family == AiTechnique.Family.EVOLUTION
-                || cfg.technique.family == AiTechnique.Family.IMITATION;
-    }
+    /** Every technique can save into its 3 slots: Evolution/Imitation persist trained
+     *  weights via {@link EvolutionRunner}/{@link ImitationRunner}; everything else is
+     *  fully determined by technique + hyperparameters, saved/loaded via
+     *  {@link AiSlotPlayer} — see its class doc. A saved slot (any technique) can then
+     *  be picked to autoplay in RT Lab. */
+    private boolean slotsSupported() { return true; }
 
     private void handleClick(float x, float y) {
         if (slotsOpen) {
@@ -307,25 +307,38 @@ public final class ControlCenterScreen extends ScreenAdapter {
     }
 
     private void doSaveSlot(int slot) {
-        boolean ok = runner instanceof EvolutionRunner er ? er.saveToSlot(slot)
-                   : runner instanceof ImitationRunner ir ? ir.saveToSlot(slot)
-                   : false;
+        boolean ok;
+        if (runner instanceof EvolutionRunner er) ok = er.saveToSlot(slot);
+        else if (runner instanceof ImitationRunner ir) ok = ir.saveToSlot(slot);
+        else {
+            AiSlotPlayer.save(cfg.technique, slot, null, cfg, runner.board().score());
+            ok = true;
+        }
         slotsMessage = ok ? "Saved to slot " + slot : "Nothing to save yet";
     }
 
     private void doLoadSlot(int slot) {
-        boolean ok = runner instanceof EvolutionRunner er ? er.loadFromSlot(slot)
-                   : runner instanceof ImitationRunner ir ? ir.loadFromSlot(slot)
-                   : false;
-        slotsMessage = ok ? "Loaded slot " + slot
-                : (runner instanceof EvolutionRunner || runner instanceof ImitationRunner)
-                        ? "Slot " + slot + " is empty" : "Not supported here";
+        if (runner instanceof EvolutionRunner er) {
+            slotsMessage = er.loadFromSlot(slot) ? "Loaded slot " + slot : "Slot " + slot + " is empty";
+            return;
+        }
+        if (runner instanceof ImitationRunner ir) {
+            slotsMessage = ir.loadFromSlot(slot) ? "Loaded slot " + slot : "Slot " + slot + " is empty";
+            return;
+        }
+        // Config-only techniques: apply the saved hyperparameters live (mirrors the
+        // hotswap modal) rather than rebuilding the runner — there's no weight array
+        // to restore, just the knobs that fully determine this technique's behavior.
+        ModelSlots.ConfigSlot saved = ModelSlots.loadConfig(cfg.technique.id, slot);
+        if (saved == null) { slotsMessage = "Slot " + slot + " is empty"; return; }
+        AiSlotPlayer.applyHyperparams(cfg, saved.params());
+        slotsMessage = "Loaded slot " + slot;
     }
 
     private ModelSlots.SlotInfo slotInfo(int slot) {
         if (runner instanceof EvolutionRunner er) return er.slotInfo(slot);
         if (runner instanceof ImitationRunner ir) return ir.slotInfo(slot);
-        return ModelSlots.SlotInfo.EMPTY;
+        return ModelSlots.info(cfg.technique.id, slot);
     }
 
     // -------------------------------------------------------------------------

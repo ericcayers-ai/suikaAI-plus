@@ -130,6 +130,12 @@ vec3 shadeOpaque(vec3 P, vec3 N, vec3 rd, vec3 albedo, float rough, int mat, vec
 
     vec3 c = ambient + diffuse + spec;
 
+    // Grazing-angle rim light — a cheap, universal "definition" pass: it traces the
+    // silhouette of every opaque object a little brighter so edges read crisply
+    // against the backdrop instead of dissolving into flat shading.
+    float rim = pow(1.0 - max(dot(N, V), 0.0), 4.0);
+    c += albedo * rim * 0.10 * LIGHT_COLOR;
+
     if (mat == MAT_WALL) {
         // "Professionally lit backdrop": a broad, subtle softbox hotspot high on
         // the wall, falling off smoothly — the photography-studio look, not a
@@ -185,19 +191,19 @@ void main() {
         vec3 N = hit.normalRough.xyz;
 
         if (mat == MAT_METAL) {
-            // The drop chute: polished metal — a mirror-weighted mix of the HDRI
-            // reflection and the key light's specular ping, tinted by the albedo
-            // (metals tint their reflections; dielectrics don't). No continuation
-            // ray: one env lookup along the reflection reads convincingly as
-            // brushed steel at gameplay viewing distance.
+            // The drop chute: brushed steel, not a chrome mirror — roughness (now
+            // 0.55 by default, see RtScene) lowers overall reflectivity and broadens
+            // the specular streak into a softer highlight instead of a razor mirror.
             vec3 R = reflect(rd, N);
             float ndv = clamp(dot(N, -rd), 0.0, 1.0);
-            float fres = 0.55 + 0.45 * pow(1.0 - ndv, 3.0);
+            float rough = clamp(hit.normalRough.w, 0.0, 1.0);
+            float fres = mix(0.72, 0.30, rough) + mix(0.28, 0.10, rough) * pow(1.0 - ndv, 3.0);
             vec3 base = hit.albedoMat.rgb;
             vec3 c = base * envColor(R) * fres;
             vec3 H = normalize(LIGHT_DIR - rd);
-            c += base * LIGHT_COLOR * pow(max(dot(N, H), 0.0), 220.0) * 2.0;
-            c += base * envColor(N) * 0.10;   // faint diffuse so unlit facets aren't black
+            float shininess = mix(260.0, 55.0, rough);
+            c += base * LIGHT_COLOR * pow(max(dot(N, H), 0.0), shininess) * mix(2.2, 1.05, rough);
+            c += base * envColor(N) * mix(0.08, 0.24, rough);   // rougher = more diffuse fill
             color += tint * c;
             break;
         }
@@ -207,13 +213,22 @@ void main() {
             // continues straight with a slight tint; the reflective side of the
             // Fresnel split is approximated with an environment lookup plus the
             // key light's specular ping — cheap, but reads unmistakably as glass.
+            //
+            // "Bold, with an edge to it": a sharp grazing-angle rim term on top of
+            // the base Fresnel reflection gives the jar's silhouette real presence
+            // (a cool-tinted glow that traces the profile) instead of the glass
+            // nearly vanishing head-on, and the through-tint darkens a touch more
+            // at those same grazing angles so the rim reads as glass THICKNESS,
+            // not just a highlight.
             float cosI = clamp(dot(-rd, N), 0.0, 1.0);
             float fres = fresnelSchlick(cosI);
+            float rim = pow(1.0 - cosI, 6.0);
             vec3 R = reflect(rd, N);
-            color += tint * fres * envColor(R) * 0.85;
+            color += tint * fres * envColor(R) * 1.05;
+            color += tint * rim * vec3(0.75, 0.85, 0.97) * 0.6;
             vec3 H = normalize(LIGHT_DIR - rd);
-            color += tint * LIGHT_COLOR * pow(max(dot(N, H), 0.0), 320.0) * 1.4;
-            tint *= vec3(0.955, 0.985, 0.975) * (1.0 - fres * 0.55);
+            color += tint * LIGHT_COLOR * pow(max(dot(N, H), 0.0), 260.0) * 1.6;
+            tint *= vec3(0.93, 0.965, 0.955) * (1.0 - fres * 0.6 - rim * 0.28);
             ro = P + rd * 0.004;             // continue through the pane
             continue;
         }

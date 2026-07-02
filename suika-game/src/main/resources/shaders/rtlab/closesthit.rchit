@@ -169,6 +169,12 @@ void main() {
     } else if (matType == MAT_FRUIT) {
         rough = clamp(rough + 0.25 * (fbm3(objNormal * 10.0 + 5.0) - 0.5), 0.05, 1.0);
     }
+    if (matType == MAT_FRUIT) {
+        // Uniformly less glossy than the raw texture/procedural value, whichever
+        // path produced it above — a straight roughness map reads as cheap wet
+        // plastic under the studio softbox; real fruit skin has a more matte sheen.
+        rough = clamp(rough + 0.18, 0.05, 1.0);
+    }
 
     hit.posT = vec4(P, gl_HitTEXT);
     hit.normalRough = vec4(N, rough);

@@ -62,8 +62,9 @@ class Jar3DPhysicsTest {
     @Test
     void twoWatermelonsVanishForTheBonus() {
         Jar3DPhysics p = new Jar3DPhysics(6);
-        p.balls().add(new Jar3DPhysics.Ball(FruitTier.WATERMELON, -3.0, 3.2, 0));
-        p.balls().add(new Jar3DPhysics.Ball(FruitTier.WATERMELON,  3.0, 3.2, 0));
+        double r = FruitTier.WATERMELON.radius;
+        p.balls().add(new Jar3DPhysics.Ball(FruitTier.WATERMELON, -3.0, r, 0));
+        p.balls().add(new Jar3DPhysics.Ball(FruitTier.WATERMELON,  3.0, r, 0));
         settle(p, 3.0);   // let them roll to the centre and touch
         assertEquals(0, p.balls().size(), "double watermelon should vanish");
         assertEquals(PhysicsConfig.DOUBLE_WATERMELON_BONUS, p.score());
@@ -95,6 +96,30 @@ class Jar3DPhysicsTest {
         double[] center = p.clampDrop(0, 0, 1.0);
         assertEquals(0, center[0], 1e-9);
         assertEquals(0, center[1], 1e-9);
+    }
+
+    @Test
+    void mergedFruitNeverEndsUpOutsideTheJarProfile() {
+        // A same-tier pair sitting right at the edge the SMALLER tier is allowed to
+        // occupy — each parent alone satisfies containment, but the merge result's
+        // bigger radius would not, at that same position, without the post-merge
+        // resolveContainer() pass in Jar3DPhysics.tick().
+        Jar3DPhysics p = new Jar3DPhysics(9);
+        double y = 8.0; // straight body section, so the limit is a fixed PLAY_RADIUS - r
+        double limit = Jar3DPhysics.PLAY_RADIUS - FruitTier.DEKOPON.radius;
+        Jar3DPhysics.Ball a = new Jar3DPhysics.Ball(FruitTier.GRAPE, limit - 0.02, y, 0);
+        Jar3DPhysics.Ball b = new Jar3DPhysics.Ball(FruitTier.GRAPE, limit + 0.02, y, 0);
+        a.vy = 0; b.vy = 0;
+        p.balls().add(a);
+        p.balls().add(b);
+        p.tick();
+        assertEquals(1, p.balls().size(), "the touching pair should merge");
+        Jar3DPhysics.Ball merged = p.balls().get(0);
+        assertEquals(FruitTier.DEKOPON, merged.tier);
+        double d = Math.sqrt(merged.x * merged.x + merged.z * merged.z);
+        double surfaceBound = Math.min(Jar3DPhysics.PLAY_RADIUS, JarShape.radiusAt(merged.y));
+        assertTrue(d + merged.radius <= surfaceBound + 0.05,
+                "merged fruit at d=" + d + " r=" + merged.radius + " must stay inside the jar");
     }
 
     @Test

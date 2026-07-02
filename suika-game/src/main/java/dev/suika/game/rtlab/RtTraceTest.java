@@ -59,27 +59,29 @@ public final class RtTraceTest {
                 // In 3D-scatter mode the same pile spreads across the depth axis the
                 // way Jar3DPhysics settles it — each z-offset is sized so
                 // sqrt(x^2+z^2)+radius stays inside RtScene.JAR_RADIUS (5.45); the two
-                // largest fruits (watermelon, melon) already sit at/near that limit at
-                // their given x alone, so they get little or no z-scatter — a bigger
-                // offset there would poke the fruit visibly through the glass, which an
-                // earlier version of this test did (a QA-harness bug, not a physics one:
-                // real Jar3DPhysics clamps every drop to PLAY_RADIUS via clampDrop()).
+                // largest fruits (watermelon, melon) sit close to their x-only limit at
+                // FruitTier's current (10%-bigger) radii, so they get little or no
+                // z-scatter — a bigger offset there would poke the fruit visibly through
+                // the glass, which an earlier version of this test did (a QA-harness bug,
+                // not a physics one: real Jar3DPhysics clamps every drop to PLAY_RADIUS
+                // via clampDrop()). Radii are read straight from FruitTier so this harness
+                // can never silently drift from the real gameplay sizes.
                 float z1 = scatter3d ? 0.5f : 0f, z2 = 0f,
                       z3 = scatter3d ? -2.0f : 0f, z4 = scatter3d ? 1.8f : 0f,
                       z5 = scatter3d ? 0.9f : 0f, z6 = scatter3d ? -1.1f : 0f;
                 // Hover fruit peeks from the chute exit; the chute follows the same aim.
                 float chuteX = 1.2f, chuteZ = scatter3d ? -0.8f : 0f;
                 List<RtScene.FruitInstance> fruits = new ArrayList<>(List.of(
-                        new RtScene.FruitInstance(-2.0f, 3.26f, z1, 3.2f, FruitTier.WATERMELON),
-                        new RtScene.FruitInstance( 2.6f, 2.86f, z2, 2.8f, FruitTier.MELON),
-                        new RtScene.FruitInstance( 0.6f, 7.10f, z5, 1.65f, FruitTier.APPLE),
-                        new RtScene.FruitInstance(-3.4f, 7.60f, z3, 1.15f, FruitTier.DEKOPON),
-                        new RtScene.FruitInstance( 3.9f, 6.30f, z4, 0.9f, FruitTier.GRAPE),
-                        new RtScene.FruitInstance(-1.2f, 9.20f, z6, 0.7f, FruitTier.STRAWBERRY),
-                        new RtScene.FruitInstance( 1.8f, 12.0f, z5, 0.5f, FruitTier.CHERRY),     // falling
+                        new RtScene.FruitInstance(-1.5f, FruitTier.WATERMELON.radius + 0.06f, z1, FruitTier.WATERMELON.radius, FruitTier.WATERMELON),
+                        new RtScene.FruitInstance( 2.0f, FruitTier.MELON.radius + 0.06f, z2, FruitTier.MELON.radius, FruitTier.MELON),
+                        new RtScene.FruitInstance( 0.6f, 7.10f, z5, FruitTier.APPLE.radius, FruitTier.APPLE),
+                        new RtScene.FruitInstance(-3.4f, 7.60f, z3, FruitTier.DEKOPON.radius, FruitTier.DEKOPON),
+                        new RtScene.FruitInstance( 3.9f, 6.30f, z4, FruitTier.GRAPE.radius, FruitTier.GRAPE),
+                        new RtScene.FruitInstance(-1.2f, 9.20f, z6, FruitTier.STRAWBERRY.radius, FruitTier.STRAWBERRY),
+                        new RtScene.FruitInstance( 1.8f, 12.0f, z5, FruitTier.CHERRY.radius, FruitTier.CHERRY),     // falling
                         new RtScene.FruitInstance(chuteX, RtScene.CHUTE_BOTTOM_Y - 0.2f, chuteZ,
-                                0.5f, FruitTier.CHERRY),                                          // hover, at chute exit
-                        new RtScene.FruitInstance(-6.9f, 17.6f, 0f, 0.65f, FruitTier.STRAWBERRY) // next chip
+                                FruitTier.CHERRY.radius, FruitTier.CHERRY),                                          // hover, at chute exit
+                        new RtScene.FruitInstance(-6.9f, 17.6f, 0f, 0.65f, FruitTier.STRAWBERRY) // next chip (UI-scaled, not gameplay radius)
                 ));
                 String suffix = scatter3d ? "_3d" : "";
 

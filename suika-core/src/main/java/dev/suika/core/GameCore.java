@@ -119,7 +119,9 @@ public class GameCore {
             return new StepResult(buildState(), 0.0, true, false, List.of());
         }
 
-        x = Math.clamp(x, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
+        // Radius-aware (matches spawnDrop/clampDropForRadius) — a fixed 0.2-unit margin
+        // would let a larger tier's fruit spawn with its edge past the wall.
+        x = clampDropForRadius(x, currentTier.radius);
 
         Body dropped = createFruitBody(currentTier, x, PhysicsConfig.DROP_Y);
         world.addBody(dropped);

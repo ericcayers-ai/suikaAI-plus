@@ -49,17 +49,17 @@ public record FruitLadder(
      */
     public static FruitLadder standard() {
         List<Entry> entries = List.of(
-                new Entry("Cherry",     0.50f,  0,  true),
-                new Entry("Strawberry", 0.70f,  1,  true),
-                new Entry("Grape",      0.90f,  3,  true),
-                new Entry("Dekopon",    1.15f,  6,  true),
-                new Entry("Persimmon",  1.40f, 10,  true),
-                new Entry("Apple",      1.65f, 15, false),
-                new Entry("Pear",       1.90f, 21, false),
-                new Entry("Peach",      2.15f, 28, false),
-                new Entry("Pineapple",  2.45f, 36, false),
-                new Entry("Melon",      2.80f, 45, false),
-                new Entry("Watermelon", 3.20f, 55, false)
+                new Entry("Cherry",     0.55f,  0,  true),
+                new Entry("Strawberry", 0.77f,  1,  true),
+                new Entry("Grape",      0.99f,  3,  true),
+                new Entry("Dekopon",    1.27f,  6,  true),
+                new Entry("Persimmon",  1.54f, 10,  true),
+                new Entry("Apple",      1.82f, 15, false),
+                new Entry("Pear",       2.09f, 21, false),
+                new Entry("Peach",      2.37f, 28, false),
+                new Entry("Pineapple",  2.70f, 36, false),
+                new Entry("Melon",      3.08f, 45, false),
+                new Entry("Watermelon", 3.52f, 55, false)
         );
         return new FruitLadder("Standard", "The canonical 11-tier Suika Game ladder.", entries);
     }
