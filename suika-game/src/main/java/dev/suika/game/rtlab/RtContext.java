@@ -89,9 +89,9 @@ public final class RtContext implements AutoCloseable {
         VkApplicationInfo appInfo = VkApplicationInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_APPLICATION_INFO)
                 .pApplicationName(stack.UTF8("Suika RT Lab"))
-                .applicationVersion(VK_MAKE_VERSION(0, 7, 0))
+                .applicationVersion(VK_MAKE_VERSION(0, 7, 1))
                 .pEngineName(stack.UTF8("SuikaRT"))
-                .engineVersion(VK_MAKE_VERSION(0, 7, 0))
+                .engineVersion(VK_MAKE_VERSION(0, 7, 1))
                 .apiVersion(VK_API_VERSION_1_2);
 
         int extraCount = validation ? 1 : 0;
