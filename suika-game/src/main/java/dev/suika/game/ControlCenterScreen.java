@@ -385,6 +385,15 @@ public final class ControlCenterScreen extends ScreenAdapter {
     /** Test/QA hook: true once the primary board's game has ended. */
     boolean isGameOverForCapture() { return runner.board().gameOver(); }
 
+    /** Test/QA hook: the primary board's live state, so the capture harness can inspect
+     *  it for anomalies (out-of-bounds fruit, frozen score) across a config sweep. */
+    GameState boardForCapture() { return runner.board(); }
+
+    /** Test/QA hook: how many live boards this technique is currently showing (1 for a
+     *  single board, up to 16 for an evolution elite grid) — lets the harness confirm
+     *  the multi-board tiling actually populated at a given elite-view count. */
+    int viewCountForCapture() { return viewCount(); }
+
     /** Test/QA hook: jump imitation runners straight to the TRAIN phase (see {@link ImitationRunner#forceTrainPhaseForCapture}). */
     void forceImitationTrainPhaseForCapture() {
         if (runner instanceof ImitationRunner ir) ir.forceTrainPhaseForCapture();
