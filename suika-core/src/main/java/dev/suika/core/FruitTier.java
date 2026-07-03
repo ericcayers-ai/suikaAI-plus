@@ -6,19 +6,22 @@ package dev.suika.core;
  */
 public enum FruitTier {
 
-    // Radii are the community-measured baseline scaled up 10% ("a little bit bigger")
-    // — still well within the jar's mouth/body clearance (see JarShape/Jar3DPhysics).
-    CHERRY     (1,  0.55f,   0),
-    STRAWBERRY (2,  0.77f,   1),
-    GRAPE      (3,  0.99f,   3),
-    DEKOPON    (4,  1.27f,   6),
-    PERSIMMON  (5,  1.54f,  10),
-    APPLE      (6,  1.82f,  15),
-    PEAR       (7,  2.09f,  21),
-    PEACH      (8,  2.37f,  28),
-    PINEAPPLE  (9,  2.70f,  36),
-    MELON      (10, 3.08f,  45),
-    WATERMELON (11, 3.52f,  55);
+    // Radii are the community-measured baseline, scaled up 10% ("a little bit
+    // bigger") and then another ~8% on top of that ("slightly bigger fruit again")
+    // — still well within the jar's mouth/body clearance (see JarShape/Jar3DPhysics)
+    // and within the RT Lab drop chute's clearance (see RtScene#CHUTE_RADIUS, sized
+    // to hug the largest droppable tier, PERSIMMON, without clipping it).
+    CHERRY     (1,  0.59f,   0),
+    STRAWBERRY (2,  0.83f,   1),
+    GRAPE      (3,  1.07f,   3),
+    DEKOPON    (4,  1.37f,   6),
+    PERSIMMON  (5,  1.66f,  10),
+    APPLE      (6,  1.97f,  15),
+    PEAR       (7,  2.26f,  21),
+    PEACH      (8,  2.56f,  28),
+    PINEAPPLE  (9,  2.92f,  36),
+    MELON      (10, 3.33f,  45),
+    WATERMELON (11, 3.80f,  55);
 
     /** 1-based tier index. */
     public final int tier;

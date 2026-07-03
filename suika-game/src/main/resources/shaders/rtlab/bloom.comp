@@ -1,0 +1,43 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0, rgba32f) uniform readonly image2D srcImage;
+layout(binding = 1, rgba32f) uniform writeonly image2D dstImage;
+
+// Cheap single-pass bloom, run once per frame on the already-tonemapped/denoised
+// image (this is also what replaces the old plain image copy onto `present`, so it
+// costs nothing extra in pipeline stages — just a compute shader instead of a copy).
+// Samples a sparse two-radius ring of neighbours, keeps only the bright ones (over
+// THRESHOLD, in the same 0..1 display-referred range raygen.rgen already tonemapped
+// into), and adds their averaged glow back onto the source pixel — a soft halo
+// around blown highlights (the wall's softbox hotspot, direct specular glints,
+// the metal chute's highlight streak) without a full multi-pass gaussian pyramid.
+const float THRESHOLD = 0.72;
+const float STRENGTH = 0.55;
+const int   RING_SAMPLES = 12;
+const float RADIUS = 10.0;
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(srcImage);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec4 center = imageLoad(srcImage, coord);
+
+    vec3 bloom = vec3(0.0);
+    for (int i = 0; i < RING_SAMPLES; i++) {
+        float a = 6.28318530718 * float(i) / float(RING_SAMPLES);
+        vec2 dir = vec2(cos(a), sin(a));
+        for (int r = 1; r <= 2; r++) {
+            ivec2 off = ivec2(dir * RADIUS * float(r) * 0.5);
+            ivec2 sc = clamp(coord + off, ivec2(0), size - ivec2(1));
+            vec3 s = imageLoad(srcImage, sc).rgb;
+            float lum = dot(s, vec3(0.299, 0.587, 0.114));
+            bloom += s * max(lum - THRESHOLD, 0.0);
+        }
+    }
+    bloom /= float(RING_SAMPLES * 2);
+
+    vec3 result = center.rgb + bloom * STRENGTH;
+    imageStore(dstImage, coord, vec4(result, center.a));
+}

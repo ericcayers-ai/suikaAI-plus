@@ -40,6 +40,43 @@ final class EnsembleAgents {
 
     private EnsembleAgents() {}
 
+    /**
+     * §10: bounded, shared, daemon thread pool for parallelizing genuinely
+     * independent inner-agent calls within a single ensemble decision. Only used
+     * where a research pass confirmed BOTH conditions hold: (a) the calls don't
+     * feed into each other (no result of one is an input to another — e.g.
+     * {@link McTsGreedyTiebreak} does NOT qualify, its tiebreak set depends on
+     * MCTS's own visit counts) and (b) none of them mutate the shared
+     * {@link GameCore} — every inner agent forks its own snapshot before
+     * simulating (see {@code GreedyOnePlyAgent#evaluateColumns}), so calling
+     * several concurrently against the same live core is safe.
+     *
+     * <p>Sized well below the core count (capped at 4, floor 2) so it composes
+     * with MCTS's OWN root-parallel search threads and the control center's
+     * multi-board tiling instead of every layer of parallelism fighting the others
+     * for cores — this is about overlapping otherwise-serial WAIT time (each
+     * inner call blocks on real search/simulation work), not about maximizing
+     * raw thread count. None of these techniques are GPU-capable (all
+     * {@code Family.PLANNING}, pure JVM search/heuristics — see
+     * {@link AiTechnique#gpuCapableTraining()}), so there's no GPU work to route
+     * here; that lever only applies to the separate Python-family training path.
+     */
+    private static final java.util.concurrent.ExecutorService ENSEMBLE_POOL =
+            java.util.concurrent.Executors.newFixedThreadPool(
+                    Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors() / 2)),
+                    r -> { Thread t = new Thread(r, "ensemble-inner"); t.setDaemon(true); return t; });
+
+    private static <T> T await(java.util.concurrent.Future<T> f) {
+        try {
+            return f.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new RuntimeException(e.getCause());
+        }
+    }
+
     /** Implemented by every ensemble whose decision runs through a real inner
      *  {@link MctsAgent} — lets the control center's search-tree diagram (see
      *  {@link ControlCenterScreen}) draw the same visualization for these as for
@@ -205,7 +242,14 @@ final class EnsembleAgents {
             return vote(mcts.selectAction(state, spec), greedy.selectAction(state, spec), heuristic.selectAction(state, spec));
         }
         @Override public Object selectAction(GameCore core, ActionSpec spec) {
-            return vote(mcts.selectAction(core, spec), greedy.selectAction(core, spec), heuristic.selectAction(core.getState(), spec));
+            // §10: all three votes are independent (none reads another's result) and
+            // none mutates the shared core (each forks its own snapshot) — see
+            // ENSEMBLE_POOL's doc. MCTS is the expensive one; running Greedy's real
+            // one-ply simulation alongside it (instead of after it) is the actual win.
+            var mctsF = ENSEMBLE_POOL.submit(() -> mcts.selectAction(core, spec));
+            var greedyF = ENSEMBLE_POOL.submit(() -> greedy.selectAction(core, spec));
+            Object heuristicResult = heuristic.selectAction(core.getState(), spec); // cheap — run inline
+            return vote(await(mctsF), await(greedyF), heuristicResult);
         }
         private Object vote(Object a, Object b, Object c) {
             int ai = ((Number) a).intValue(), bi = ((Number) b).intValue(), ci = ((Number) c).intValue();
@@ -312,9 +356,15 @@ final class EnsembleAgents {
         @Override public Object selectAction(GameState state, ActionSpec spec) { return rtg.selectAction(state, spec); }
 
         @Override public Object selectAction(GameCore core, ActionSpec spec) {
-            int pBin = ((Number) rtg.selectAction(core.getState(), spec)).intValue();
-            MctsAgent verifier = new MctsAgent(VERIFY_ROLLOUTS, Math.sqrt(2), 4, actionBins);
-            int mBin = ((Number) verifier.selectAction(core, spec)).intValue();
+            // §10: the return-conditioned proposal and the verifier's shallow MCTS
+            // search don't depend on each other's result — only the two quickEval
+            // calls below (which pick between them) need both bins already known.
+            var pF = ENSEMBLE_POOL.submit(() -> ((Number) rtg.selectAction(core.getState(), spec)).intValue());
+            var mF = ENSEMBLE_POOL.submit(() -> {
+                MctsAgent verifier = new MctsAgent(VERIFY_ROLLOUTS, Math.sqrt(2), 4, actionBins);
+                return ((Number) verifier.selectAction(core, spec)).intValue();
+            });
+            int pBin = await(pF), mBin = await(mF);
             if (pBin == mBin) return pBin;
             double pValue = quickEval(core, actionBins, pBin);
             double mValue = quickEval(core, actionBins, mBin);
@@ -389,9 +439,12 @@ final class EnsembleAgents {
                     ((Number) heuristic.selectAction(state, spec)).intValue());
         }
         @Override public Object selectAction(GameCore core, ActionSpec spec) {
-            return decide(core.getScore(), ((Number) mcts.selectAction(core, spec)).intValue(),
-                    ((Number) greedy.selectAction(core, spec)).intValue(),
-                    ((Number) heuristic.selectAction(core.getState(), spec)).intValue());
+            // §10: same independence/no-mutation guarantee as VotingCommittee above.
+            var mctsF = ENSEMBLE_POOL.submit(() -> mcts.selectAction(core, spec));
+            var greedyF = ENSEMBLE_POOL.submit(() -> greedy.selectAction(core, spec));
+            int heuristicBin = ((Number) heuristic.selectAction(core.getState(), spec)).intValue();
+            return decide(core.getScore(), ((Number) await(mctsF)).intValue(),
+                    ((Number) await(greedyF)).intValue(), heuristicBin);
         }
         private Object decide(long currentScore, int mctsBin, int greedyBin, int heuristicBin) {
             if (lastWinner >= 0) {

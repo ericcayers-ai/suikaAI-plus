@@ -15,6 +15,15 @@ public interface RtGameSession {
     /** A fruit sphere to render, in world coordinates. */
     record Ball(float x, float y, float z, float radius, FruitTier tier) {}
 
+    /** A merge that happened during the session's most recent {@link #step}, in RT
+     *  world coordinates (already translated the same way {@link #fruits()} is) —
+     *  drives {@link RtMergeFx}'s particle burst + coalesce flash. */
+    record MergeInfo(float x, float y, float z, FruitTier resultTier) {}
+
+    /** Merges since the last call, then clears them — call once per frame after
+     *  {@link #step}. Empty list, never null, when nothing merged. */
+    List<MergeInfo> drainMerges();
+
     /** Pointer position normalized to the window: x,y in 0..1, y down (GLFW cursor). */
     void setPointer(float nx, float ny);
 

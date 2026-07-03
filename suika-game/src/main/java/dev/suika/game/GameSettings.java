@@ -26,6 +26,8 @@ public final class GameSettings {
     public int     binIndex        = 1;     // default 32 drop columns
     public boolean randomSeed      = true;
     public long    fixedSeed       = 42L;
+    // ---- Experimental gameplay variants (their own labelled group in Settings —
+    // genuinely optional rule changes, not a gate on any other feature) ----
     /** When true the game ends the instant any fruit touches the deadline. */
     public boolean immediateDeadline = false;
 
@@ -41,18 +43,42 @@ public final class GameSettings {
         dev.suika.core.PhysicsConfig.restitution = bounceEnabled ? BOUNCE_RESTITUTION : 0.0;
     }
 
-    // ---- Experimental (RT Lab) ----
-    /**
-     * Master switch for the experimental feature set: the hardware ray-traced game
-     * window (RT Lab) and, within it, true 3D physics. Off by default — it needs an
-     * RT-capable GPU and is explicitly labelled experimental. While an RT Lab window
-     * is open the AI control center also clamps its multi-board tiling to a single
-     * board (see {@link dev.suika.game.rtlab.RtLabLauncher#isRunning()}) so both
-     * renderers aren't fighting over the same GPU.
-     */
-    public boolean experimentalMode = false;
+    // ---- Display (persisted — see SettingsPersistence) ----
+    /** Windowed-mode heights to choose from; width is derived at the 720:1280
+     *  portrait aspect, matching {@code DesktopLauncher}'s own default sizing. */
+    public static final int[] RES_HEIGHTS = {800, 900, 1000, 1080, 1200, 1280};
+    public int     resHeightIndex = 3;      // default ~1080-tall window
+    public boolean fullscreen     = false;
+    /** Text-size multiplier applied to every generated font (see
+     *  {@link SuikaGame#regenerateFonts()}) — kept to a modest range since labels,
+     *  buttons, and panels are laid out with fixed pixel geometry, not a scale-aware
+     *  layout system; a wider range would start clipping text against its container
+     *  before it stopped being legible. */
+    public static final float[] UI_SCALE_OPTIONS = {0.9f, 1.0f, 1.1f, 1.2f};
+    public int uiScaleIndex = 1;            // default 1.0x
+
+    public float uiScale() { return UI_SCALE_OPTIONS[uiScaleIndex]; }
+    public String uiScaleLabel() { return Math.round(uiScale() * 100) + "%"; }
+    public int windowHeight() { return RES_HEIGHTS[resHeightIndex]; }
+
+    /** Applies the resolution/fullscreen choice to the live window immediately. */
+    public void applyWindowMode() {
+        if (Gdx.graphics == null) return;
+        if (fullscreen) {
+            Gdx.graphics.setFullscreenMode(Gdx.graphics.getDisplayMode());
+        } else {
+            int h = windowHeight();
+            int w = (int) Math.round(h * 720.0 / 1280.0);
+            Gdx.graphics.setWindowedMode(w, h);
+        }
+    }
+
+    // ---- RT Lab ----
     /** RT Lab gameplay physics: false = classic 2D engine shown inside the jar,
-     *  true = true 3D physics (only reachable with {@link #experimentalMode} on). */
+     *  true = true 3D physics. A normal setting — RT Lab itself needs no toggle to
+     *  unlock any more (v0.11: the RT LAB / AI PLAYS buttons are always live; a
+     *  missing/incapable GPU is reported per-launch via
+     *  {@link dev.suika.game.rtlab.RtLabLauncher#lastFailure()}, not gated up front). */
     public boolean rt3dPhysics = false;
 
     // ---- AI Watch ----

@@ -159,7 +159,8 @@ final class RtHud implements AutoCloseable {
      * whose one-shot TLAS build waits the queue idle) so the staging buffer is never
      * rewritten while an in-flight copy still reads it.
      */
-    void draw(long score, FruitTier next, String modeName, String aiName, boolean gameOver, boolean use3d) {
+    void draw(long score, FruitTier next, String modeName, String aiName, boolean gameOver, boolean use3d,
+              boolean paused, boolean bloomOn, boolean trayExpanded) {
         Graphics2D g = canvas.createGraphics();
         g.setComposite(java.awt.AlphaComposite.Clear);
         g.fillRect(0, 0, width, height);
@@ -205,18 +206,26 @@ final class RtHud implements AutoCloseable {
         var fm = g.getFontMetrics();
         g.drawString(tierNum, cx - fm.stringWidth(tierNum) / 2, cy + fm.getAscent() / 2 - 1);
 
-        // ---- bottom: control hints ----
+        // ---- bottom: control hints (collapsible — see §5's hotkey tray) ----
         g.setFont(fontTiny);
         String hints = aiName != null
-                ? (use3d ? "RIGHT-DRAG ORBIT   ·   SCROLL ZOOM   ·   R RESTART   ·   D DENOISE   ·   ESC CLOSE"
-                         : "SCROLL ZOOM   ·   R RESTART   ·   D DENOISE   ·   ESC CLOSE")
-                : (use3d ? "CLICK DROP   ·   RIGHT-DRAG ORBIT   ·   SCROLL ZOOM   ·   R RESTART   ·   D DENOISE"
-                         : "CLICK DROP   ·   SCROLL ZOOM   ·   R RESTART   ·   D DENOISE");
-        float hintTracking = 1.1f;
-        int hw = trackedWidth(g.getFontMetrics(), hints, hintTracking);
-        int hpx = width / 2 - hw / 2;
-        panel(g, hpx - 18, height - 54, hw + 36, 38, 17, null);
-        drawTracked(g, fontTiny, hints, hpx, height - 29, FAINT, hintTracking);
+                ? (use3d ? "RIGHT-DRAG ORBIT   ·   SCROLL ZOOM   ·   R RESTART   ·   ESC PAUSE"
+                         : "SCROLL ZOOM   ·   R RESTART   ·   ESC PAUSE")
+                : (use3d ? "CLICK DROP   ·   RIGHT-DRAG ORBIT   ·   SCROLL ZOOM   ·   R RESTART   ·   ESC PAUSE"
+                         : "CLICK DROP   ·   SCROLL ZOOM   ·   R RESTART   ·   ESC PAUSE");
+        if (trayExpanded) {
+            float hintTracking = 1.1f;
+            int hw = trackedWidth(g.getFontMetrics(), hints, hintTracking);
+            int hpx = width / 2 - hw / 2;
+            panel(g, hpx - 18, height - 54, hw + 36, 38, 17, null);
+            drawTracked(g, fontTiny, hints, hpx, height - 29, FAINT, hintTracking);
+            // tiny collapse arrow, right of the tray
+            drawTrayArrow(g, true);
+        } else {
+            drawTrayArrow(g, false);
+        }
+
+        if (paused) drawPauseOverlay(g, bloomOn);
 
         // ---- game-over banner ----
         if (gameOver) {
@@ -242,8 +251,111 @@ final class RtHud implements AutoCloseable {
             g.drawString(sub, width / 2 - fmS2.stringWidth(sub) / 2, by + 142);
         }
         g.dispose();
+        packAndUpload();
+    }
 
-        // ARGB ints -> RGBA bytes for VK_FORMAT_R8G8B8A8_UNORM.
+    // ---- §5: collapsible hotkey tray + in-RT pause menu — geometry shared with
+    // RtLabLauncher's mouse-click hit-testing, so both sides always agree on where
+    // these controls actually are. ----
+    private static final int TRAY_ARROW_SIZE = 34;
+    int trayArrowX() { return width / 2 + 210; }
+    int trayArrowY() { return height - 54; }
+
+    private static final int PAUSE_BTN_W = 260, PAUSE_BTN_H = 58, PAUSE_BTN_GAP = 16;
+    int pauseResumeX() { return width / 2 - PAUSE_BTN_W / 2; }
+    int pauseResumeY() { return height / 2 - PAUSE_BTN_H / 2 - PAUSE_BTN_H - PAUSE_BTN_GAP; }
+    int pauseBloomX()  { return width / 2 - PAUSE_BTN_W / 2; }
+    int pauseBloomY()  { return height / 2 - PAUSE_BTN_H / 2; }
+    int pauseQuitX()   { return width / 2 - PAUSE_BTN_W / 2; }
+    int pauseQuitY()   { return height / 2 - PAUSE_BTN_H / 2 + PAUSE_BTN_H + PAUSE_BTN_GAP; }
+    int pauseBtnW() { return PAUSE_BTN_W; }
+    int pauseBtnH() { return PAUSE_BTN_H; }
+
+    private void drawTrayArrow(Graphics2D g, boolean expanded) {
+        int ax = trayArrowX(), ay = trayArrowY();
+        panel(g, ax, ay, TRAY_ARROW_SIZE, TRAY_ARROW_SIZE, 10, null);
+        g.setColor(FAINT);
+        g.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        int cx = ax + TRAY_ARROW_SIZE / 2, cy = ay + TRAY_ARROW_SIZE / 2;
+        // A simple chevron — up when the tray is out (tap to collapse it away),
+        // down when it's collapsed (tap to bring the hints back).
+        if (expanded) {
+            g.drawLine(cx - 6, cy + 2, cx, cy - 4);
+            g.drawLine(cx, cy - 4, cx + 6, cy + 2);
+        } else {
+            g.drawLine(cx - 6, cy - 2, cx, cy + 4);
+            g.drawLine(cx, cy + 4, cx + 6, cy - 2);
+        }
+    }
+
+    /** Live-updating graphics settings reachable from the pause menu — deliberately
+     *  scoped to knobs that don't need a swapchain rebuild (resolution/fullscreen
+     *  changes belong in the main app's Settings screen and take effect on RT Lab's
+     *  next launch, not mid-session) so every control here really does apply live,
+     *  no restart, the moment it's clicked. */
+    private void drawPauseOverlay(Graphics2D g, boolean bloomOn) {
+        g.setColor(new Color(6, 5, 12, 210));
+        g.fillRect(0, 0, width, height);
+
+        g.setColor(TEXT);
+        g.setFont(fontMed);
+        var fmT = g.getFontMetrics();
+        String title = "PAUSED";
+        g.drawString(title, width / 2 - fmT.stringWidth(title) / 2, pauseResumeY() - 46);
+
+        drawPauseButton(g, pauseResumeX(), pauseResumeY(), "RESUME", VIOLET);
+        drawPauseButton(g, pauseBloomX(), pauseBloomY(), "BLOOM: " + (bloomOn ? "ON" : "OFF"), GOLD_DEEP);
+        drawPauseButton(g, pauseQuitX(), pauseQuitY(), "QUIT", DANGER);
+    }
+
+    private void drawPauseButton(Graphics2D g, int x, int y, String label, Color accent) {
+        panel(g, x, y, PAUSE_BTN_W, PAUSE_BTN_H, 16, accent);
+        g.setColor(accent);
+        g.setStroke(new BasicStroke(1.5f));
+        g.drawRoundRect(x, y, PAUSE_BTN_W, PAUSE_BTN_H, 16, 16);
+        g.setColor(TEXT);
+        g.setFont(fontCaption);
+        var fm = g.getFontMetrics();
+        g.drawString(label, x + PAUSE_BTN_W / 2 - fm.stringWidth(label) / 2, y + PAUSE_BTN_H / 2 + fm.getAscent() / 2 - 2);
+    }
+
+    /**
+     * §5: a branded loading frame — drawn and blitted straight to the swapchain by
+     * {@link RtLabLauncher} BEFORE the expensive resources (shader compilation,
+     * photo textures, BLAS/TLAS builds) are created, so the player sees the app's
+     * own look immediately instead of a blank/undefined window for however long
+     * that takes. Unlike {@link #draw}, every pixel here must be fully OPAQUE —
+     * this is composited by nothing, there's no RT frame underneath it yet.
+     */
+    void drawLoading(String subtitle) {
+        Graphics2D g = canvas.createGraphics();
+        g.setComposite(java.awt.AlphaComposite.Src);
+        g.setPaint(new GradientPaint(0, 0, new Color(12, 9, 22, 255), 0, height, new Color(22, 15, 36, 255)));
+        g.fillRect(0, 0, width, height);
+        g.setComposite(java.awt.AlphaComposite.SrcOver);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+        g.setColor(VIOLET);
+        g.setFont(fontBig);
+        FontMetrics fmBig = g.getFontMetrics();
+        String title = "SUIKA RT LAB";
+        g.drawString(title, width / 2 - fmBig.stringWidth(title) / 2, height / 2 - 6);
+
+        g.setColor(GOLD_DEEP);
+        g.fillRect(width / 2 - 60, height / 2 + 18, 120, 3);
+
+        g.setColor(DIM);
+        g.setFont(fontSmall);
+        FontMetrics fmSmall = g.getFontMetrics();
+        g.drawString(subtitle, width / 2 - fmSmall.stringWidth(subtitle) / 2, height / 2 + 50);
+        g.dispose();
+        packAndUpload();
+    }
+
+    /** ARGB ints (Java2D's native layout) -> RGBA bytes for VK_FORMAT_R8G8B8A8_UNORM,
+     *  staged for {@link #recordUpload}. Shared tail of every draw method. */
+    private void packAndUpload() {
         int[] argb = ((DataBufferInt) canvas.getRaster().getDataBuffer()).getData();
         pixels.clear();
         for (int p : argb) {

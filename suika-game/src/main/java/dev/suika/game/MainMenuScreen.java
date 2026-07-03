@@ -41,8 +41,12 @@ public final class MainMenuScreen extends ScreenAdapter {
 
     private float time = 0f;
     private float mx, my;
-    /** Seconds left to show the "enable Experimental mode" hint under the RT button. */
+    /** Seconds left to show an RT-launch-failure hint under the RT button. */
     private float rtHintTimer = 0f;
+    private String rtHintText = "";
+    /** True right after clicking RT LAB / AI PLAYS while its background launch
+     *  thread is still starting up — cleared once it either goes running or fails. */
+    private boolean awaitingRtLaunch = false;
 
     // ---- AI-save picker modal (RT Lab autoplay) ----
     private record SaveEntry(AiTechnique technique, int slot, ModelSlots.SlotInfo info) {}
@@ -92,15 +96,10 @@ public final class MainMenuScreen extends ScreenAdapter {
                 else if (quitBtn.contains(touch.x, touch.y))
                     Gdx.app.exit();
                 else if (rtLabBtn.contains(touch.x, touch.y)) {
-                    // Gated behind the Experimental settings toggle — the ray-traced
-                    // game (and its 3D-physics option) only exists in experimental mode.
-                    if (game.settings.experimentalMode)
-                        dev.suika.game.rtlab.RtLabLauncher.launch(game.settings.rt3dPhysics);
-                    else
-                        rtHintTimer = 3.5f;
+                    dev.suika.game.rtlab.RtLabLauncher.launch(game.settings.rt3dPhysics);
+                    awaitingRtLaunch = true;
                 } else if (rtAiBtn.contains(touch.x, touch.y)) {
-                    if (game.settings.experimentalMode) openAiPicker();
-                    else rtHintTimer = 3.5f;
+                    openAiPicker();
                 }
                 return true;
             }
@@ -115,6 +114,22 @@ public final class MainMenuScreen extends ScreenAdapter {
     @Override
     public void render(float delta) {
         time += delta;
+        // RT Lab launches on a background thread; while we're waiting to find out if
+        // it took, poll for either it going live or a friendly failure reason (bad
+        // GPU/driver) — cleared as soon as either happens, so this doesn't re-arm
+        // the hint on every subsequent frame.
+        if (awaitingRtLaunch) {
+            if (dev.suika.game.rtlab.RtLabLauncher.isRunning()) {
+                awaitingRtLaunch = false;
+            } else {
+                String fail = dev.suika.game.rtlab.RtLabLauncher.lastFailure();
+                if (fail != null) {
+                    rtHintText = fail;
+                    rtHintTimer = 4.5f;
+                    awaitingRtLaunch = false;
+                }
+            }
+        }
         Gdx.gl.glClearColor(0.05f, 0.06f, 0.10f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         Gdx.gl.glEnable(GL20.GL_BLEND);
@@ -145,15 +160,10 @@ public final class MainMenuScreen extends ScreenAdapter {
         Ui.button(s, watchBtn,    Theme.ACCENT_BLUE, watchBtn.contains(mx, my),    true);
         Ui.button(s, settingsBtn, Theme.PANEL_EDGE,  settingsBtn.contains(mx, my), true);
         Ui.button(s, quitBtn,     Theme.ACCENT,      quitBtn.contains(mx, my),     true);
-        // Dimmed until Experimental mode is enabled in Settings.
-        if (game.settings.experimentalMode) {
-            Ui.button(s, rtLabBtn, RT_LAB_VIOLET, rtLabBtn.contains(mx, my), true);
-            Ui.button(s, rtAiBtn, Theme.ACCENT_2, rtAiBtn.contains(mx, my), true);
-        } else {
-            s.setColor(RT_LAB_VIOLET.r * 0.45f, RT_LAB_VIOLET.g * 0.45f, RT_LAB_VIOLET.b * 0.45f, 0.6f);
-            Ui.fillRoundRect(s, rtLabBtn.x, rtLabBtn.y, rtLabBtn.width, rtLabBtn.height, 12f);
-            Ui.fillRoundRect(s, rtAiBtn.x, rtAiBtn.y, rtAiBtn.width, rtAiBtn.height, 12f);
-        }
+        // RT LAB / AI PLAYS are always live — a missing/incapable GPU is reported
+        // per-launch via the rtHintText message below, not gated up front.
+        Ui.button(s, rtLabBtn, RT_LAB_VIOLET, rtLabBtn.contains(mx, my), true);
+        Ui.button(s, rtAiBtn, Theme.ACCENT_2, rtAiBtn.contains(mx, my), true);
 
         s.end();
 
@@ -170,19 +180,14 @@ public final class MainMenuScreen extends ScreenAdapter {
         Ui.textCenter(game.batch, game.fontMed, "WATCH AI", CX, watchBtn.y + 39,    Theme.TEXT);
         Ui.textCenter(game.batch, game.fontMed, "SETTINGS", CX, settingsBtn.y + 39, Theme.TEXT);
         Ui.textCenter(game.batch, game.fontMed, "QUIT",     CX, quitBtn.y + 39,     Theme.TEXT);
-        if (game.settings.experimentalMode) {
-            String mode = game.settings.rt3dPhysics ? "3D" : "2D";
-            Ui.textCenter(game.batch, game.fontSmall, "RT LAB · " + mode + " (experimental)",
-                    CX, rtLabBtn.y + 30, Theme.TEXT);
-        } else {
-            Ui.textCenter(game.batch, game.fontSmall, "RT LAB (experimental)", CX, rtLabBtn.y + 30, Theme.TEXT_DIM);
-        }
-        Ui.textCenter(game.batch, game.fontSmall, "AI PLAYS →",
-                rtAiBtn.x + rtAiBtn.width / 2f, rtAiBtn.y + 26,
-                game.settings.experimentalMode ? Theme.BG_BOTTOM : Theme.TEXT_FAINT);
+        String mode = game.settings.rt3dPhysics ? "3D" : "2D";
+        Ui.textCenter(game.batch, game.fontSmall, "RT LAB · " + mode,
+                CX, rtLabBtn.y + 30, Theme.TEXT);
+        Ui.textCenter(game.batch, game.fontSmall, "AI PLAYS ->",
+                rtAiBtn.x + rtAiBtn.width / 2f, rtAiBtn.y + 26, Theme.BG_BOTTOM);
         if (rtHintTimer > 0f) {
             rtHintTimer -= delta;
-            Ui.textCenter(game.batch, game.fontSmall, "Enable Experimental mode in Settings first",
+            Ui.textCenter(game.batch, game.fontSmall, rtHintText,
                     CX, rtLabBtn.y - 12, Theme.GOLD);
         }
 
@@ -250,6 +255,7 @@ public final class MainMenuScreen extends ScreenAdapter {
                 dev.suika.ai.AgentPlugin driver = AiSlotPlayer.load(e.technique(), e.slot());
                 if (driver == null) { aiPickerMessage = "Couldn't load that slot"; return; }
                 dev.suika.game.rtlab.RtLabLauncher.launch(game.settings.rt3dPhysics, driver);
+                awaitingRtLaunch = true;
                 aiPickerOpen = false;
                 return;
             }

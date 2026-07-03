@@ -75,6 +75,21 @@ float coneLod(int texIndex, float tileWorldSize, float ndv) {
     return clamp(log2(max(footprint * texels / max(tileWorldSize, 1e-4), 1e-6)), 0.0, 10.0);
 }
 
+// Fruit albedo/normal/roughness use a spherical (atan/acos) UV — classic "pole
+// pinch": right at each pole (objNormal.y -> +-1) the longitude angle atan(z, x)
+// spins through its full range over a vanishingly small surface patch, so one
+// screen pixel covers many texture repeats there. coneLod's footprint estimate has
+// no way to see that (it only knows world-space distance, not UV distortion), so
+// without this it undersamples right at the poles — exactly the "speckle" fixed
+// texel noise visible at the top/bottom of every photo-textured fruit. Standard
+// fix: bias the mip level up by 1/sin(polar angle) — the same factor that blows up
+// the UV's own rate of change there — so sampling blurs out smoothly approaching
+// the pole instead of aliasing.
+float polePinchLodBias(vec3 objNormal) {
+    float sinPolar = max(sqrt(max(1.0 - objNormal.y * objNormal.y, 0.0)), 0.06);
+    return log2(1.0 / sinPolar);
+}
+
 void main() {
     InstanceData d = inst[gl_InstanceCustomIndexEXT];
     int matType = d.tex.w;
@@ -136,8 +151,9 @@ void main() {
     }
 
     // ---- texture maps (or procedural fallback) ----
+    float poleLodBias = matType == MAT_FRUIT ? polePinchLodBias(objNormal) : 0.0;
     if (d.tex.x >= 0) {
-        float lod = coneLod(d.tex.x, d.params.w, ndv);
+        float lod = coneLod(d.tex.x, d.params.w, ndv) + poleLodBias;
         vec3 texel = textureLod(textures[nonuniformEXT(d.tex.x)], texUv, lod).rgb;
         // Maps are stored UNORM; linearise the color map here (see RtTexture).
         albedo *= pow(texel, vec3(2.2));
@@ -149,7 +165,7 @@ void main() {
     }
 
     if (d.tex.y >= 0) {
-        float lod = coneLod(d.tex.y, d.params.w, ndv);
+        float lod = coneLod(d.tex.y, d.params.w, ndv) + poleLodBias;
         vec3 nm = textureLod(textures[nonuniformEXT(d.tex.y)], texUv, lod).rgb * 2.0 - 1.0;
         // Keep the perturbation modest — RT highlights amplify normal-map noise.
         N = normalize(T * nm.x * 0.6 + B * nm.y * 0.6 + N * max(nm.z, 0.35));
@@ -165,7 +181,7 @@ void main() {
     }
 
     if (d.tex.z >= 0) {
-        float lod = coneLod(d.tex.z, d.params.w, ndv);
+        float lod = coneLod(d.tex.z, d.params.w, ndv) + poleLodBias;
         rough = clamp(textureLod(textures[nonuniformEXT(d.tex.z)], texUv, lod).r, 0.03, 1.0);
     } else if (matType == MAT_FRUIT) {
         rough = clamp(rough + 0.25 * (fbm3(objNormal * 10.0 + 5.0) - 0.5), 0.05, 1.0);

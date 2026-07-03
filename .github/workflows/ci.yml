@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: ["main"]
+  workflow_dispatch:
 
 jobs:
   build-and-test:
@@ -66,3 +67,78 @@ jobs:
         run: pip install ruff
       - name: Lint
         run: ruff check python/
+
+  # §12: opt-in only (manual "Run workflow" dispatch, never on a plain push) — a
+  # real LWJGL3/OpenGL window under xvfb takes real wall-clock time per cell, so
+  # this deliberately doesn't run on every commit. Axes are bounded (one technique
+  # per family, one alternate resolution) to keep it well under CI's patience;
+  # widen -Dsuika.capture.* below if a specific regression needs a bigger sweep.
+  # RT-mode capture (-Dsuika.rt.capture.dir, see RtLabLauncher) is NOT run here —
+  # GitHub-hosted runners have no ray-tracing-capable GPU, and RtLabLauncher's own
+  # capability probe would just report that failure on every run, which isn't a
+  # real regression signal. RT changes still need a local run on RT-capable
+  # hardware; see ROADMAP-NEXT.md §12's technical notes.
+  capture-matrix:
+    name: Capture-harness debug matrix (opt-in)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: Install a virtual display (xvfb)
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Build the app distribution
+        run: ./gradlew :suika-app:installDist --parallel
+
+      - name: Run the matrix capture (bounded axes) — portrait
+        run: |
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" \
+            suika-app/build/install/suika-app/bin/suika-app \
+            -Dsuika.capture.dir="$PWD/capture-out/portrait" \
+            -Dsuika.capture.mode=matrix \
+            -Dsuika.capture.techniques=mcts,neuroevo,dagger,ppo \
+            -Dsuika.capture.columns=32 \
+            -Dsuika.capture.speeds=1 \
+            -Dsuika.capture.durations=4 \
+            -Dsuika.capture.max=40
+
+      - name: Run the matrix capture (bounded axes) — landscape
+        run: |
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" \
+            suika-app/build/install/suika-app/bin/suika-app \
+            -Dsuika.capture.dir="$PWD/capture-out/landscape" \
+            -Dsuika.capture.land=true \
+            -Dsuika.capture.mode=matrix \
+            -Dsuika.capture.techniques=mcts,neuroevo \
+            -Dsuika.capture.columns=32 \
+            -Dsuika.capture.speeds=1 \
+            -Dsuika.capture.durations=4 \
+            -Dsuika.capture.max=20
+
+      - name: Fail on any reported anomaly
+        run: |
+          if grep -rl '\[!!\]' capture-out/*/report.txt 2>/dev/null; then
+            echo "::error::Capture matrix reported an anomaly — see report.txt above."
+            grep -r '\[!!\]' capture-out/*/report.txt
+            exit 1
+          fi
+          echo "No anomalies reported."
+
+      - name: Upload screenshots + reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture-matrix-results
+          path: capture-out/

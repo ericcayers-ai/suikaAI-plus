@@ -12,6 +12,10 @@ import org.lwjgl.system.Configuration;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.*;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.nio.ByteBuffer;
 import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,8 +37,8 @@ import static org.lwjgl.vulkan.VK12.*;
  * <p>This is REAL gameplay, not a tech demo: a full game runs inside the window —
  * fruits dropped into a cylindrical glass jar standing on a pine-wood table in a
  * brightly lit tan studio (the wall sits past the focal plane and melts into
- * bokeh). Move the mouse to aim, click to drop, R restarts, D toggles the
- * denoiser. The score and next fruit live in the window title (rendering crisp
+ * bokeh). Move the mouse to aim, click to drop, R restarts. The denoiser is
+ * always on. The score and next fruit live in the window title (rendering crisp
  * text through a raw Vulkan RT pipeline isn't worth the complexity for a lab).
  *
  * <p>Physics is selectable at launch: the classic 2D engine presented as a slice
@@ -52,10 +56,24 @@ public final class RtLabLauncher {
     private RtLabLauncher() {}
 
     private static volatile boolean running = false;
+    /** Set when the most recent launch attempt failed (e.g. no Vulkan RT support on
+     *  this GPU/driver); cleared at the start of every new attempt. {@code null} means
+     *  either nothing has been tried yet or the last attempt succeeded. RT Lab needs no
+     *  up-front capability gate any more — the caller (MainMenuScreen) just launches
+     *  and, if {@link #isRunning()} never goes true, reads this for a friendly message. */
+    private static volatile String lastFailure = null;
 
     /** True while an RT Lab window is open — the rest of the app can use this to
      *  shed GPU-hungry work (e.g. the control center clamps its multi-board view). */
     public static boolean isRunning() { return running; }
+
+    /** Why the most recent launch attempt failed, or {@code null} if the last attempt
+     *  (if any) succeeded. */
+    public static String lastFailure() { return lastFailure; }
+
+    private static boolean inRect(float x, float y, int rx, int ry, int rw, int rh) {
+        return x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
+    }
 
     /** Launches the RT Lab window on a background thread for a HUMAN player, or does
      *  nothing (log only) if one is already open. Safe to call from the LibGDX
@@ -77,6 +95,7 @@ public final class RtLabLauncher {
     public static void launch(boolean use3dPhysics, AgentPlugin aiDriver) {
         if (running) return;
         running = true;
+        lastFailure = null;
         Thread t = new Thread(() -> run(use3dPhysics, aiDriver), "rtlab");
         t.setDaemon(true);
         t.start();
@@ -86,13 +105,27 @@ public final class RtLabLauncher {
         try {
             runUnsafe(use3dPhysics, aiDriver);
         } catch (Throwable t) {
+            String reason = friendlyFailureReason(t);
+            lastFailure = reason;
             System.err.println("[RT Lab] Not available on this system: " + t);
         } finally {
             running = false;
         }
     }
 
-    private static void runUnsafe(boolean use3dPhysics, AgentPlugin aiDriver) {
+    /** Turns a raw exception into something worth showing a player, rather than a
+     *  stack-trace-flavoured string. Falls back to the exception's own message. */
+    private static String friendlyFailureReason(Throwable t) {
+        String msg = String.valueOf(t.getMessage());
+        if (msg.contains("Vulkan not supported")) return "This GPU/driver has no Vulkan support.";
+        if (msg.toLowerCase(java.util.Locale.ROOT).contains("ray tracing")
+                || msg.toLowerCase(java.util.Locale.ROOT).contains("raytracing"))
+            return "This GPU doesn't support hardware ray tracing.";
+        if (msg.contains("glfwInit failed")) return "Couldn't initialise the window system.";
+        return "RT Lab isn't available on this system (" + t.getClass().getSimpleName() + ").";
+    }
+
+    private static void runUnsafe(boolean use3dPhysics, AgentPlugin aiDriver) throws Exception {
         Configuration.STACK_SIZE.set(RtContext.STACK_SIZE_KB);
         // glfwInit() is idempotent — safe even though LibGDX's Lwjgl3Application has
         // already initialised GLFW for the main game window. We must NEVER call
@@ -122,19 +155,38 @@ public final class RtLabLauncher {
             RtSwapchain swap = new RtSwapchain(ctx.physicalDevice, ctx.device, window.surface, width, height);
 
             long commandPool = createCommandPool(ctx.device, ctx.graphicsQueueFamily);
-            try (RtOutputImage raw = new RtOutputImage(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
-                 RtOutputImage denoised = new RtOutputImage(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
-                 // The frame actually presented: raw/denoised copied here first, then the
-                 // HUD composites onto it — never onto raw, which doubles as the temporal
-                 // accumulation history (UI pixels would bleed into next frame's EMA).
-                 RtOutputImage present = new RtOutputImage(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
-                 RtPipeline pipeline = new RtPipeline(ctx.physicalDevice, ctx.device);
-                 RtDenoiser denoiser = new RtDenoiser(ctx.device, raw, denoised);
-                 RtHud hud = new RtHud(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
-                 RtHudCompositor hudCompositor = new RtHudCompositor(ctx.device, present, hud);
-                 RtTextureSet textures = new RtTextureSet(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue);
-                 RtMeshLibrary meshes = new RtMeshLibrary(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue);
-                 RtScene scene = new RtScene(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, meshes, textures)) {
+
+            // §5: HUD is cheap to build (Java2D + one small staging upload — no shader
+            // compilation, no photo textures, no BLAS/TLAS builds), so it's created
+            // FIRST and used to paint + present a branded loading frame before any of
+            // the genuinely expensive resources below start loading. That frame stays
+            // on screen (GLFW retains the last presented buffer) for however long that
+            // takes — a real loading screen, not a simulated delay.
+            // Optional one-shot visual QA capture: this window is a separate
+            // GLFW/Vulkan surface the LibGDX-side CaptureHarness can never reach, so
+            // -Dsuika.rt.capture.dir=<dir> drives a small scripted sequence — a couple
+            // of drops, a few screenshots, then a clean exit (see the switch below).
+            String rtCaptureDir = System.getProperty("suika.rt.capture.dir");
+
+            try (RtHud hud = new RtHud(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height)) {
+                showLoadingScreen(ctx, swap, commandPool, hud, width, height, rtCaptureDir);
+
+                try (RtOutputImage raw = new RtOutputImage(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
+                     RtOutputImage denoised = new RtOutputImage(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
+                     // The frame actually presented: raw/denoised copied here first, then the
+                     // HUD composites onto it — never onto raw, which doubles as the temporal
+                     // accumulation history (UI pixels would bleed into next frame's EMA).
+                     RtOutputImage present = new RtOutputImage(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
+                     RtPipeline pipeline = new RtPipeline(ctx.physicalDevice, ctx.device);
+                     RtDenoiser denoiser = new RtDenoiser(ctx.device, raw, denoised);
+                     // Bloom doubles as the old "copy denoised onto present" step (see its
+                     // class doc) — reads the denoised frame, writes the bloomed result
+                     // straight into present, no separate vkCmdCopyImage needed any more.
+                     RtBloom bloom = new RtBloom(ctx.device, denoised, present);
+                     RtHudCompositor hudCompositor = new RtHudCompositor(ctx.device, present, hud);
+                     RtTextureSet textures = new RtTextureSet(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue);
+                     RtMeshLibrary meshes = new RtMeshLibrary(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue);
+                     RtScene scene = new RtScene(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, meshes, textures)) {
 
                 pipeline.writeTextures(textures.all(), textures.environment());
 
@@ -149,16 +201,22 @@ public final class RtLabLauncher {
                 float[] lastCursor = {(float) width / 2f, (float) height / 2f};
                 float ORBIT_SENSITIVITY = 0.006f;
 
-                boolean[] denoiseOn = {true};
+                // §5 pause menu state. bloomOn is the one live-updating graphics setting
+                // reachable from it — see RtHud#drawPauseOverlay's doc for why the set
+                // is scoped to knobs that don't need a swapchain rebuild.
+                boolean[] paused = {false};
+                boolean[] bloomOn = {true};
+                boolean[] trayExpanded = {true};
+
+                // Always on now (was a D-key toggle) — the improved multi-sample
+                // shadow/DoF path above still benefits from denoising, and there's no
+                // good reason a player would want to see raw RT noise in normal play.
                 glfwSetKeyCallback(window.handle, (win, key, scancode, action, mods) -> {
                     if (action != GLFW_PRESS) return;
-                    if (key == GLFW_KEY_D) {
-                        denoiseOn[0] = !denoiseOn[0];
-                        System.out.println("[RT Lab] denoiser " + (denoiseOn[0] ? "ON" : "OFF"));
-                    } else if (key == GLFW_KEY_R) {
+                    if (key == GLFW_KEY_R) {
                         session.reset();
                     } else if (key == GLFW_KEY_ESCAPE) {
-                        glfwSetWindowShouldClose(win, true);
+                        paused[0] = !paused[0];
                     }
                 });
                 glfwSetCursorPosCallback(window.handle, (win, cx, cy) -> {
@@ -166,14 +224,30 @@ public final class RtLabLauncher {
                     if (orbiting[0]) {
                         cam.orbitYaw   += (fx - lastCursor[0]) * ORBIT_SENSITIVITY;
                         cam.orbitPitch -= (fy - lastCursor[1]) * ORBIT_SENSITIVITY;
-                    } else if (aiDriver == null) {
+                    } else if (aiDriver == null && !paused[0]) {
                         session.setPointer(fx / width, fy / height);
                     }
                     lastCursor[0] = fx; lastCursor[1] = fy;
                 });
                 glfwSetMouseButtonCallback(window.handle, (win, button, action, mods) -> {
-                    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS && aiDriver == null) session.drop();
-                    else if (button == GLFW_MOUSE_BUTTON_RIGHT) orbiting[0] = use3dPhysics && action == GLFW_PRESS;
+                    if (button != GLFW_MOUSE_BUTTON_LEFT || action != GLFW_PRESS) {
+                        if (button == GLFW_MOUSE_BUTTON_RIGHT) orbiting[0] = use3dPhysics && action == GLFW_PRESS;
+                        return;
+                    }
+                    float mx = lastCursor[0], my = lastCursor[1];
+                    if (paused[0]) {
+                        if (inRect(mx, my, hud.pauseResumeX(), hud.pauseResumeY(), hud.pauseBtnW(), hud.pauseBtnH())) {
+                            paused[0] = false;
+                        } else if (inRect(mx, my, hud.pauseBloomX(), hud.pauseBloomY(), hud.pauseBtnW(), hud.pauseBtnH())) {
+                            bloomOn[0] = !bloomOn[0];
+                        } else if (inRect(mx, my, hud.pauseQuitX(), hud.pauseQuitY(), hud.pauseBtnW(), hud.pauseBtnH())) {
+                            glfwSetWindowShouldClose(win, true);
+                        }
+                    } else if (inRect(mx, my, hud.trayArrowX(), hud.trayArrowY(), 34, 34)) {
+                        trayExpanded[0] = !trayExpanded[0];
+                    } else if (aiDriver == null) {
+                        session.drop();
+                    }
                 });
                 glfwSetScrollCallback(window.handle, (win, sx, sy) -> cam.zoom((float) sy));
 
@@ -191,6 +265,9 @@ public final class RtLabLauncher {
                 long lastHudScore = -1;
                 FruitTier lastHudNext = null;
                 boolean lastHudOver = false;
+                boolean lastHudPaused = false;
+                boolean lastHudBloomOn = true;
+                boolean lastHudTrayExpanded = true;
                 // AI autoplay paces itself like the classic AI-watch view rather than
                 // dropping every frame. The actual selectAction runs on its own thread
                 // (aiExec) — planning agents like MCTS think for hundreds of ms, and
@@ -206,6 +283,9 @@ public final class RtLabLauncher {
                             return t;
                         });
                 java.util.concurrent.Future<Double> aiFuture = null;
+                RtMergeFx mergeFx = new RtMergeFx();
+
+                int rtCaptureStage = 0;
 
                 while (!window.shouldClose()) {
                     window.pollEvents();
@@ -214,9 +294,13 @@ public final class RtLabLauncher {
                     lastNs = nowNs;
                     float time = (float) ((nowNs - startNs) / 1e9);
 
-                    session.step(dt);
+                    if (!paused[0]) {
+                        session.step(dt);
+                        mergeFx.spawn(session.drainMerges());
+                        mergeFx.update(dt);
+                    }
 
-                    if (aiDriver != null) {
+                    if (aiDriver != null && !paused[0]) {
                         if (session.gameOver()) {
                             // Keep rounds flowing: a short beat to read the final score,
                             // then a fresh game — no waiting on a keypress between rounds.
@@ -262,6 +346,7 @@ public final class RtLabLauncher {
                                 RtScene.CHUTE_BOTTOM_Y - cur.radius * 0.75f,
                                 session.hoverZ(), cur.radius, cur));
                     }
+                    mergeFx.appendTo(instances);
 
                     // First frame has no history to blend against — write through fully.
                     float blend = frame == 0 ? 1.0f : 0.30f;
@@ -273,17 +358,62 @@ public final class RtLabLauncher {
                     // updateFrame's one-shot TLAS build just waited the queue idle, so no
                     // in-flight copy can still be reading the HUD staging buffer.
                     if (session.score() != lastHudScore || session.nextTier() != lastHudNext
-                            || session.gameOver() != lastHudOver) {
+                            || session.gameOver() != lastHudOver || paused[0] != lastHudPaused
+                            || bloomOn[0] != lastHudBloomOn || trayExpanded[0] != lastHudTrayExpanded) {
                         lastHudScore = session.score();
                         lastHudNext = session.nextTier();
                         lastHudOver = session.gameOver();
+                        lastHudPaused = paused[0];
+                        lastHudBloomOn = bloomOn[0];
+                        lastHudTrayExpanded = trayExpanded[0];
                         hud.draw(lastHudScore, lastHudNext, session.modeName(),
                                 aiDriver != null ? aiDriver.displayName() : null,
-                                lastHudOver, use3dPhysics);
+                                lastHudOver, use3dPhysics, paused[0], bloomOn[0], trayExpanded[0]);
                     }
 
-                    renderFrame(ctx, swap, pipeline, denoiser, raw, denoised, present, hud, hudCompositor,
-                            denoiseOn[0], cmd, imageAvailable, renderFinished, inFlight, width, height);
+                    renderFrame(ctx, swap, pipeline, denoiser, bloom, bloomOn[0], raw, denoised, present, hud, hudCompositor,
+                            cmd, imageAvailable, renderFinished, inFlight, width, height);
+
+                    if (rtCaptureDir != null) {
+                        switch (rtCaptureStage) {
+                            case 0 -> { if (time > 0.6f) {
+                                vkDeviceWaitIdle(ctx.device);
+                                savePng(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue,
+                                        present, width, height, rtCaptureDir + "/rt-01-chute.png");
+                                rtCaptureStage = 1;
+                            } }
+                            case 1 -> { if (time > 0.8f) { session.setPointer(0.3f, 0.5f); session.drop(); rtCaptureStage = 2; } }
+                            case 2 -> { if (time > 1.6f) { session.setPointer(0.5f, 0.5f); session.drop(); rtCaptureStage = 3; } }
+                            case 3 -> { if (time > 2.4f) { session.setPointer(0.7f, 0.5f); session.drop(); rtCaptureStage = 4; } }
+                            case 4 -> { if (time > 3.6f) {
+                                vkDeviceWaitIdle(ctx.device);
+                                savePng(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue,
+                                        present, width, height, rtCaptureDir + "/rt-02-jar.png");
+                                // §4 merge FX: gameplay RNG won't reliably produce a same-tier
+                                // merge in a short scripted capture, so force one deterministically
+                                // — this is exactly what needs visual verification, not whether
+                                // random drops happen to touch.
+                                mergeFx.spawn(List.of(new RtGameSession.MergeInfo(0f, 10f, 0f, FruitTier.APPLE)));
+                                rtCaptureStage = 45;
+                            } }
+                            case 45 -> { if (time > 3.75f) {
+                                vkDeviceWaitIdle(ctx.device);
+                                savePng(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue,
+                                        present, width, height, rtCaptureDir + "/rt-03-mergefx.png");
+                                // §5: open the pause menu for a shot too.
+                                paused[0] = true;
+                                rtCaptureStage = 46;
+                            } }
+                            case 46 -> { if (time > 3.95f) {
+                                vkDeviceWaitIdle(ctx.device);
+                                savePng(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue,
+                                        present, width, height, rtCaptureDir + "/rt-04-pause.png");
+                                paused[0] = false;
+                                rtCaptureStage = 5;
+                            } }
+                            default -> glfwSetWindowShouldClose(window.handle, true);
+                        }
+                    }
                 }
                 if (aiExec != null) aiExec.shutdownNow();
                 vkDeviceWaitIdle(ctx.device);
@@ -291,6 +421,7 @@ public final class RtLabLauncher {
                 vkDestroySemaphore(ctx.device, imageAvailable, null);
                 vkDestroySemaphore(ctx.device, renderFinished, null);
                 vkDestroyFence(ctx.device, inFlight, null);
+                }
             }
             swap.close();
             vkDestroyCommandPool(ctx.device, commandPool, null);
@@ -363,7 +494,10 @@ public final class RtLabLauncher {
         private static final float ZOOM_MIN = 15f, ZOOM_MAX = 40f;
 
         final float tanHalfFov = (float) Math.tan(Math.toRadians(28)); // 56° vertical
-        final float aperture = 0.34f;
+        // Widened from 0.34 — the old aperture left the backdrop HDRI/wall too crisp
+        // to read as "melted into bokeh"; this blurs it convincingly while the jar
+        // (at focusDist) stays sharp.
+        final float aperture = 0.55f;
         final float aspect;
         private final float baseYaw, basePitch;
         private float radius;
@@ -423,9 +557,135 @@ public final class RtLabLauncher {
         };
     }
 
+    /** Draws + presents ONE branded loading frame, synchronously, before the caller
+     *  goes on to build the genuinely expensive RT resources — see the call site's
+     *  comment. Self-contained sync primitives (not the main loop's) since this runs
+     *  well before those exist. */
+    private static void showLoadingScreen(RtContext ctx, RtSwapchain swap, long commandPool, RtHud hud,
+                                           int width, int height, String rtCaptureDir) {
+        hud.drawLoading("Loading the studio scene...");
+
+        VkCommandBuffer cmd = allocateCommandBuffer(ctx.device, commandPool);
+        long imageAvailable = createSemaphore(ctx.device);
+        long renderFinished = createSemaphore(ctx.device);
+        long inFlight = createFence(ctx.device);
+        try (MemoryStack stack = stackPush()) {
+            java.nio.IntBuffer pIndex = stack.mallocInt(1);
+            ok(vkAcquireNextImageKHR(ctx.device, swap.handle, Long.MAX_VALUE, imageAvailable, VK_NULL_HANDLE, pIndex),
+                    "vkAcquireNextImageKHR (loading)");
+            int imageIndex = pIndex.get(0);
+            long swapImage = swap.images[imageIndex];
+
+            VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO);
+            ok(vkBeginCommandBuffer(cmd, beginInfo), "vkBeginCommandBuffer (loading)");
+
+            hud.recordUpload(cmd);
+            transition(stack, cmd, swapImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+
+            // hud.image is already fully opaque (drawLoading fills every pixel, unlike
+            // the transparent chrome draw() produces for alpha-compositing) — a plain
+            // blit onto the swapchain is enough, no clear or compositor pass needed.
+            VkMemoryBarrier.Buffer preBlit = VkMemoryBarrier.calloc(1, stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+                    .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                    .dstAccessMask(VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, preBlit, null, null);
+
+            VkImageBlit.Buffer blit = VkImageBlit.calloc(1, stack);
+            blit.get(0).srcSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
+            blit.get(0).srcOffsets(0, o -> o.set(0, 0, 0));
+            blit.get(0).srcOffsets(1, o -> o.set(swap.width, swap.height, 1));
+            blit.get(0).dstSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
+            blit.get(0).dstOffsets(0, o -> o.set(0, 0, 0));
+            blit.get(0).dstOffsets(1, o -> o.set(swap.width, swap.height, 1));
+            vkCmdBlitImage(cmd, hud.image, VK_IMAGE_LAYOUT_GENERAL, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    blit, VK_FILTER_LINEAR);
+
+            transition(stack, cmd, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
+            ok(vkEndCommandBuffer(cmd), "vkEndCommandBuffer (loading)");
+
+            VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                    .waitSemaphoreCount(1)
+                    .pWaitSemaphores(stack.longs(imageAvailable))
+                    .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_TRANSFER_BIT))
+                    .pCommandBuffers(stack.pointers(cmd))
+                    .pSignalSemaphores(stack.longs(renderFinished));
+            ok(vkQueueSubmit(ctx.graphicsQueue, submitInfo, inFlight), "vkQueueSubmit (loading)");
+
+            VkPresentInfoKHR presentInfo = VkPresentInfoKHR.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PRESENT_INFO_KHR)
+                    .pWaitSemaphores(stack.longs(renderFinished))
+                    .swapchainCount(1)
+                    .pSwapchains(stack.longs(swap.handle))
+                    .pImageIndices(stack.ints(imageIndex));
+            ok(vkQueuePresentKHR(ctx.graphicsQueue, presentInfo), "vkQueuePresentKHR (loading)");
+
+            ok(vkWaitForFences(ctx.device, inFlight, true, Long.MAX_VALUE), "vkWaitForFences (loading)");
+
+            // QA-only: the swapchain image is mid-present-ownership right after this
+            // (awkward to read back safely), so verify via hud.image instead — it's
+            // exactly the pixels that were blitted, just not through the swapchain's
+            // own format. Good enough to confirm drawLoading()'s content is correct.
+            if (rtCaptureDir != null) {
+                try {
+                    saveHudPng(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, hud,
+                            width, height, rtCaptureDir + "/rt-00-loading.png");
+                } catch (Exception e) {
+                    System.err.println("[RT Lab] loading-screen capture failed: " + e);
+                }
+            }
+        } finally {
+            vkDestroySemaphore(ctx.device, imageAvailable, null);
+            vkDestroySemaphore(ctx.device, renderFinished, null);
+            vkDestroyFence(ctx.device, inFlight, null);
+        }
+    }
+
+    /** QA-only readback of {@link RtHud}'s RGBA8 image (used to verify the loading
+     *  screen's content — see {@link #showLoadingScreen}). */
+    private static void saveHudPng(VkPhysicalDevice pd, VkDevice device, long commandPool, VkQueue queue,
+                                    RtHud hud, int w, int h, String path) throws Exception {
+        long bufSize = (long) w * h * 4;
+        RtBuffer staging = new RtBuffer(pd, device, bufSize,
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        try {
+            OneShotCommands.submit(device, commandPool, queue, cmd -> {
+                try (MemoryStack stack = stackPush()) {
+                    VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack)
+                            .bufferOffset(0).bufferRowLength(0).bufferImageHeight(0);
+                    region.get(0).imageSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
+                    region.get(0).imageOffset(o -> o.set(0, 0, 0));
+                    region.get(0).imageExtent(e -> e.width(w).height(h).depth(1));
+                    vkCmdCopyImageToBuffer(cmd, hud.image, VK_IMAGE_LAYOUT_GENERAL, staging.buffer, region);
+                }
+            });
+            try (MemoryStack stack = stackPush()) {
+                PointerBuffer pData = stack.mallocPointer(1);
+                ok(vkMapMemory(device, staging.memory, 0, bufSize, 0, pData), "vkMapMemory (hud capture)");
+                ByteBuffer pixels = org.lwjgl.system.MemoryUtil.memByteBuffer(pData.get(0), (int) bufSize);
+                BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        int base = (y * w + x) * 4;
+                        int r = pixels.get(base) & 0xFF, g = pixels.get(base + 1) & 0xFF,
+                            b = pixels.get(base + 2) & 0xFF, a = pixels.get(base + 3) & 0xFF;
+                        img.setRGB(x, y, (a << 24) | (r << 16) | (g << 8) | b);
+                    }
+                }
+                vkUnmapMemory(device, staging.memory);
+                ImageIO.write(img, "png", new File(path));
+                System.out.println("[RT Lab] wrote " + path);
+            }
+        } finally {
+            staging.close();
+        }
+    }
+
     private static void renderFrame(RtContext ctx, RtSwapchain swap, RtPipeline pipeline, RtDenoiser denoiser,
-                                     RtOutputImage raw, RtOutputImage denoised, RtOutputImage present,
-                                     RtHud hud, RtHudCompositor hudCompositor, boolean denoiseOn,
+                                     RtBloom bloom, boolean bloomOn, RtOutputImage raw, RtOutputImage denoised, RtOutputImage present,
+                                     RtHud hud, RtHudCompositor hudCompositor,
                                      VkCommandBuffer cmd, long imageAvailable, long renderFinished, long inFlight,
                                      int width, int height) {
         try (MemoryStack stack = stackPush()) {
@@ -447,51 +707,57 @@ public final class RtLabLauncher {
             vkCmdTraceRaysKHR(cmd, pipeline.raygenRegion, pipeline.missRegion, pipeline.hitRegion,
                     pipeline.callableRegion, width, height, 1);
 
-            long sourceImage = raw.image;
-            if (denoiseOn) {
-                // The compute shader must see the RT write, and the source image's
-                // layout is already GENERAL for both — a memory barrier is enough,
-                // no layout transition needed.
-                VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1, stack)
-                        .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
-                        .srcAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
-                        .dstAccessMask(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
-                vkCmdPipelineBarrier(cmd,
-                        org.lwjgl.vulkan.KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, barrier, null, null);
-                denoiser.dispatch(cmd, width, height);
-                sourceImage = denoised.image;
-            }
+            // The compute shader must see the RT write, and the source image's layout
+            // is already GENERAL for both — a memory barrier is enough, no layout
+            // transition needed. Denoising is always on now (was a D-key toggle).
+            VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1, stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+                    .srcAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
+                    .dstAccessMask(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+            vkCmdPipelineBarrier(cmd,
+                    org.lwjgl.vulkan.KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, barrier, null, null);
+            denoiser.dispatch(cmd, width, height);
 
             long swapImage = swap.images[imageIndex];
             transition(stack, cmd, swapImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
-            // The RT/denoiser output is GENERAL and already shader-writable; a barrier
-            // (not a layout change) is enough before reading it as a transfer source.
-            VkMemoryBarrier.Buffer preCopy = VkMemoryBarrier.calloc(1, stack)
+
+            // Bloom reads the just-denoised frame and writes the bloomed result onto
+            // the dedicated present image (replacing the old plain vkCmdCopyImage —
+            // see RtBloom's class doc) — never onto raw, which doubles as the
+            // temporal-accumulation history (UI/bloom pixels would bleed into next
+            // frame's EMA blend if written there instead). The one live-updating
+            // graphics setting the pause menu exposes: BLOOM ON falls through to the
+            // compute pass above; OFF does a plain image copy instead — same
+            // destination, same barrier shape either way.
+            VkMemoryBarrier.Buffer preBloom = VkMemoryBarrier.calloc(1, stack)
                     .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
                     .srcAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
-                    .dstAccessMask(VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
-            vkCmdPipelineBarrier(cmd,
-                    denoiseOn ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : org.lwjgl.vulkan.KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                    VK_PIPELINE_STAGE_TRANSFER_BIT, 0, preCopy, null, null);
-
-            // Copy the frame onto the dedicated present image and composite the HUD
-            // there — never onto raw (it doubles as the temporal-accumulation history;
-            // UI pixels written into it would bleed into next frame's EMA blend).
-            VkImageCopy.Buffer copy = VkImageCopy.calloc(1, stack);
-            copy.get(0).srcSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
-            copy.get(0).dstSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
-            copy.get(0).extent(e -> e.width(width).height(height).depth(1));
-            vkCmdCopyImage(cmd, sourceImage, VK_IMAGE_LAYOUT_GENERAL, present.image, VK_IMAGE_LAYOUT_GENERAL, copy);
+                    .dstAccessMask(bloomOn ? (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT) : VK_ACCESS_TRANSFER_WRITE_BIT);
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    bloomOn ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    0, preBloom, null, null);
+            if (bloomOn) {
+                bloom.dispatch(cmd, width, height);
+            } else {
+                VkImageCopy.Buffer copy = VkImageCopy.calloc(1, stack);
+                copy.get(0).srcSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
+                copy.get(0).dstSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
+                copy.get(0).extent(e -> e.width(width).height(height).depth(1));
+                vkCmdCopyImage(cmd, denoised.image, VK_IMAGE_LAYOUT_GENERAL, present.image, VK_IMAGE_LAYOUT_GENERAL, copy);
+            }
 
             hud.recordUpload(cmd);
 
+            // present's last write came from bloom's compute pass when bloom is on,
+            // or the plain copy above when it's off — the barrier into the
+            // compositor's compute read has to match whichever actually happened.
             VkMemoryBarrier.Buffer preComposite = VkMemoryBarrier.calloc(1, stack)
                     .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
-                    .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                    .srcAccessMask(bloomOn ? VK_ACCESS_SHADER_WRITE_BIT : VK_ACCESS_TRANSFER_WRITE_BIT)
                     .dstAccessMask(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                    0, preComposite, null, null);
+            vkCmdPipelineBarrier(cmd, bloomOn ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, preComposite, null, null);
 
             hudCompositor.dispatch(cmd, width, height);
 
@@ -586,5 +852,57 @@ public final class RtLabLauncher {
             ok(vkCreateFence(device, info, null, p), "vkCreateFence");
             return p.get(0);
         }
+    }
+
+    /** Copies an RGBA32F {@link RtOutputImage} to a host-visible staging buffer and
+     *  writes it out as a PNG — the {@code -Dsuika.rt.capture.dir} QA path's only way
+     *  to see this window's contents (mirrors {@link RtTraceTest#savePng}). Caller
+     *  must have already waited the device idle so the image contents are final. */
+    private static void savePng(VkPhysicalDevice pd, VkDevice device, long commandPool, VkQueue queue,
+                                 RtOutputImage output, int width, int height, String path) throws Exception {
+        long bufSize = (long) width * height * 4 * 4; // RGBA32F
+        RtBuffer staging = new RtBuffer(pd, device, bufSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        try {
+            OneShotCommands.submit(device, commandPool, queue, cmd -> {
+                try (MemoryStack stack = stackPush()) {
+                    VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack)
+                            .bufferOffset(0).bufferRowLength(0).bufferImageHeight(0);
+                    region.get(0).imageSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                            .mipLevel(0).baseArrayLayer(0).layerCount(1));
+                    region.get(0).imageOffset(o -> o.set(0, 0, 0));
+                    region.get(0).imageExtent(e -> e.width(width).height(height).depth(1));
+                    vkCmdCopyImageToBuffer(cmd, output.image, VK_IMAGE_LAYOUT_GENERAL, staging.buffer, region);
+                }
+            });
+
+            try (MemoryStack stack = stackPush()) {
+                PointerBuffer pData = stack.mallocPointer(1);
+                ok(vkMapMemory(device, staging.memory, 0, bufSize, 0, pData), "vkMapMemory (readback)");
+                ByteBuffer pixels = org.lwjgl.system.MemoryUtil.memByteBuffer(pData.get(0), (int) bufSize)
+                        .order(java.nio.ByteOrder.nativeOrder());
+
+                BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+                for (int y = 0; y < height; y++) {
+                    for (int x = 0; x < width; x++) {
+                        int base = (y * width + x) * 16;
+                        float r = pixels.getFloat(base);
+                        float g = pixels.getFloat(base + 4);
+                        float b = pixels.getFloat(base + 8);
+                        img.setRGB(x, y, (clamp255(r) << 16) | (clamp255(g) << 8) | clamp255(b));
+                    }
+                }
+                vkUnmapMemory(device, staging.memory);
+                ImageIO.write(img, "png", new File(path));
+                System.out.println("[RT Lab] wrote " + path);
+            }
+        } finally {
+            staging.close();
+        }
+    }
+
+    private static int clamp255(float v) {
+        int i = Math.round(v * 255f);
+        return Math.max(0, Math.min(255, i));
     }
 }

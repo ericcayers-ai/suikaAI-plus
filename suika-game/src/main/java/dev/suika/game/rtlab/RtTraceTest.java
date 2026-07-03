@@ -121,7 +121,7 @@ public final class RtTraceTest {
                      RtHud hudOverlay = new RtHud(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
                      RtHudCompositor compositor = new RtHudCompositor(ctx.device, present, hudOverlay)) {
                     hudOverlay.draw(1234, FruitTier.PERSIMMON, scatter3d ? "3D physics" : "2D physics",
-                            "MCTS", false, scatter3d);
+                            "MCTS", false, scatter3d, false, true, true);
                     OneShotCommands.submit(ctx.device, commandPool, ctx.graphicsQueue, cmd -> {
                         try (MemoryStack stack = stackPush()) {
                             VkImageCopy.Buffer copy = VkImageCopy.calloc(1, stack);

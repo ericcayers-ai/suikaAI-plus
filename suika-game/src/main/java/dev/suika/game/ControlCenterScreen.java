@@ -156,7 +156,8 @@ public final class ControlCenterScreen extends ScreenAdapter {
                 if (hotswapOpen || slotsOpen) return false;
                 float[] p = panelBounds();
                 if (mx < p[0] || mx > p[0] + p[2] || my < p[1] || my > p[1] + p[3]) return false;
-                statsScroll = MathUtils.clamp(statsScroll + amountY * 40f, 0f, maxStatsScroll());
+                // Negated — see AiPlaygroundScreen's identical fix for why.
+                statsScroll = MathUtils.clamp(statsScroll - amountY * 40f, 0f, maxStatsScroll());
                 return true;
             }
             @Override public boolean keyDown(int k) {
@@ -293,11 +294,11 @@ public final class ControlCenterScreen extends ScreenAdapter {
 
     // ---- view-count rule ----
     private int viewCount() {
-        // While the experimental ray-traced window is open, both renderers share one
-        // GPU — clamp the control center to a single board so the multi-board tiling
+        // While the ray-traced RT Lab window is open, both renderers share one GPU —
+        // clamp the control center to a single board so the multi-board tiling
         // (evolution elites, self-play rivals, imitation dual) doesn't pile extra
         // per-frame physics + rendering on top of the RT workload.
-        if (game.settings.experimentalMode && dev.suika.game.rtlab.RtLabLauncher.isRunning()) return 1;
+        if (dev.suika.game.rtlab.RtLabLauncher.isRunning()) return 1;
         if (runner instanceof EvolutionRunner && !cfg.ghostView) return cfg.eliteViewCount();
         if (cfg.technique == AiTechnique.SELF_PLAY)              return 2;
         if (cfg.technique.family == AiTechnique.Family.IMITATION) return 2; // YOU | AI clone
@@ -695,11 +696,70 @@ public final class ControlCenterScreen extends ScreenAdapter {
             int idx = (int) c[4];
             // Slot 3 is otherwise unused by any MCTS/ensemble technique (chart3() has
             // no meaningful third series for them) — repurpose it for a genuine
-            // node-and-edge search-tree diagram instead of leaving it blank.
-            if (idx == 3 && tree != null && chartFor(3) == null) {
+            // node-and-edge search-tree diagram instead of leaving it blank. Checked
+            // BEFORE the tree branch: MuZero/Dreamer's JVM surrogate is itself an
+            // MctsAgent stand-in (see mctsTreeSource()'s doc), so both checks would
+            // otherwise be true for them — the perception panel is the more on-topic
+            // pick for a "pixels" data-mode technique, and every other MCTS-based
+            // technique still gets the tree.
+            if (idx == 3 && perceptionApplicable() && chartFor(3) == null) {
+                drawPerceptionPanel(s, c[0], c[1], c[2], c[3]);
+            } else if (idx == 3 && tree != null && chartFor(3) == null) {
                 drawMctsTree(s, c[0], c[1], c[2], c[3], tree);
             } else {
                 chartFrame(s, c[0], c[1], c[2], c[3], chartFor(idx), chartColor(idx));
+            }
+        }
+    }
+
+    /** §11: MuZero/Dreamer are nominally "pixels" data-mode techniques (see
+     *  {@link AiTechnique#dataMode}) — this panel makes that concrete instead of
+     *  aspirational by rasterizing the SAME live board everything else on screen
+     *  reads from ({@code runner.board()}) into a low-res sensor-style grid, the
+     *  same "fruit as an intensity blob" idea {@code SoftwarePixelEncoder} (the
+     *  offline Python-training env's real pixel encoder) uses — this is a live JVM
+     *  re-derivation of that same look for the Control Center, not a shared
+     *  dependency on the training-side encoder. */
+    private boolean perceptionApplicable() {
+        return cfg.technique == AiTechnique.MUZERO || cfg.technique == AiTechnique.DREAMER;
+    }
+
+    private static final int PERCEPTION_GRID = 18;
+
+    private void drawPerceptionPanel(ShapeRenderer s, float x, float y, float w, float h) {
+        s.setColor(0.03f, 0.05f, 0.04f, 1f); // near-black "sensor feed" backing, not the normal panel color
+        Ui.fillRoundRect(s, x, y, w, h, 8f);
+
+        GameState gs = runner.board();
+        float gw = (float) PhysicsConfig.CONTAINER_WIDTH;
+        float gh = (float) PhysicsConfig.CONTAINER_HEIGHT;
+        float cellW = w / PERCEPTION_GRID, cellH = h / PERCEPTION_GRID;
+
+        // Each fruit lights up the grid cells its circle actually overlaps (not just
+        // its center cell) — small tiers would otherwise vanish at this resolution.
+        float[] intensity = new float[PERCEPTION_GRID * PERCEPTION_GRID];
+        for (var f : gs.fruits()) {
+            float fx = (float) f.x() / gw, fy = 1f - (float) f.y() / gh; // 0..1, y flipped (grid row 0 = top)
+            float fr = (float) f.radius() / gw;
+            float tierLevel = f.tier().tier / 11f;
+            int cxCell = (int) (fx * PERCEPTION_GRID), cyCell = (int) (fy * PERCEPTION_GRID);
+            int rCells = Math.max(1, Math.round(fr * PERCEPTION_GRID));
+            for (int gy = Math.max(0, cyCell - rCells); gy <= Math.min(PERCEPTION_GRID - 1, cyCell + rCells); gy++) {
+                for (int gx = Math.max(0, cxCell - rCells); gx <= Math.min(PERCEPTION_GRID - 1, cxCell + rCells); gx++) {
+                    float dx = gx - cxCell, dy = gy - cyCell;
+                    if (dx * dx + dy * dy <= rCells * rCells + 0.5f) {
+                        intensity[gy * PERCEPTION_GRID + gx] = Math.max(intensity[gy * PERCEPTION_GRID + gx], tierLevel);
+                    }
+                }
+            }
+        }
+        for (int gy = 0; gy < PERCEPTION_GRID; gy++) {
+            for (int gx = 0; gx < PERCEPTION_GRID; gx++) {
+                float v = intensity[gy * PERCEPTION_GRID + gx];
+                if (v <= 0f) continue;
+                float b = 0.25f + 0.75f * v; // faint grid never fully vanishes, brightest tiers pop
+                s.setColor(b * 0.55f, b, b * 0.65f, 1f); // monochrome-green "sensor" tint
+                s.rect(x + gx * cellW + 1f, y + h - (gy + 1) * cellH + 1f, cellW - 2f, cellH - 2f);
             }
         }
     }
@@ -863,11 +923,22 @@ public final class ControlCenterScreen extends ScreenAdapter {
             Ui.text(game.batch, game.fontSmall, hint, px + 18, minY + 2, Theme.GOLD);
         }
         MctsAgent treeForLabel = mctsTreeSource();
+        // Chart labels can run past the panel's own right edge at larger UI-scale font
+        // sizes (confirmed via the capture harness at 120% scale) — clamp to whatever
+        // room is actually left to the screen edge, same fix as the title above.
+        float vw = landscape ? Theme.VW_L : Theme.VW;
         for (float[] c : chartSlots()) {
             int idx = (int) c[4];
-            String lbl = idx == 3 && treeForLabel != null && chartFor(3) == null
-                    ? "search tree  ·  best-branch drill-down" : chartLabelFor(idx);
-            if (lbl != null) Ui.text(game.batch, game.fontSmall, lbl, c[0] + 4, c[1] + c[3] + 16, Theme.TEXT_DIM);
+            String lbl = idx == 3 && perceptionApplicable() && chartFor(3) == null
+                    ? "perception  ·  what the model sees"
+                    : idx == 3 && treeForLabel != null && chartFor(3) == null
+                    ? "search tree  ·  best-branch drill-down"
+                    : chartLabelFor(idx);
+            if (lbl != null) {
+                float maxLblW = vw - 16f - (c[0] + 4);
+                Ui.text(game.batch, game.fontSmall, ellipsize(lbl, game.fontSmall, maxLblW),
+                        c[0] + 4, c[1] + c[3] + 16, Theme.TEXT_DIM);
+            }
         }
     }
 

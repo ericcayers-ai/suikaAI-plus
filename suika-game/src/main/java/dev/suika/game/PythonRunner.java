@@ -71,7 +71,7 @@ public final class PythonRunner extends AgentRunner {
                 if (p.waitFor() == 0) {
                     String v = new String(p.getInputStream().readAllBytes()).trim();
                     pythonStatus = "system: " + (v.isEmpty() ? exe : v);
-                    torchStatus  = "torch: run Settings → AI ENV setup";
+                    torchStatus  = "torch: run Settings -> AI ENV setup";
                     gpuStatus    = "gpu: n/a (no venv)";
                     probed = true;
                     return;

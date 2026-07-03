@@ -8,122 +8,131 @@ package dev.suika.game;
  */
 public enum AiTechnique {
 
-    // id, display, category, dataMode, kind, family, jvmNative, python, parallel, speed, blurb
+    // id, display, category, dataMode, kind, family, jvmNative, python, parallel, speed, strength, blurb
+    // "strength" (0-100) is an authored, hand-reasoned expected-performance score —
+    // richer than the old "just use enum ordinal position" heuristic (see #strength
+    // and the AI Playground's ensemble dropdown, which sorts by it).
     // ---- Planning: strongest single-agent reasoners ----
     MCTS("mcts", "MCTS", "Planning", "either", "planning", Family.PLANNING,
-            true, false, true, true,
+            true, false, true, true, 95,
             "Monte-Carlo Tree Search over the perfect simulator. UCB1 selection + heuristic rollouts."),
     ALPHAZERO("alphazero", "AlphaZero", "Planning + Learning", "state", "both", Family.PLANNING,
-            true, true, true, true,
+            true, true, true, true, 97,
             "MCTS guided by a policy-value net. Search core JVM, net trains in Python."),
     GREEDY("greedy", "Greedy One-Ply", "Planning", "state", "planning", Family.PLANNING,
-            true, false, true, true,
+            true, false, true, true, 78,
             "Simulates every column for real, picks the best immediate score. Fast and solid."),
 
     // ---- Deep RL: policy-gradient and value-based learners (need Python) ----
     PPO("ppo", "PPO", "Deep RL", "either", "learning", Family.PYTHON,
-            false, true, true, true,
+            false, true, true, true, 80,
             "On-policy policy-gradient via Stable-Baselines3. Pairs with the vector env."),
     DQN("dqn", "DQN / Rainbow", "Deep RL", "either", "learning", Family.PYTHON,
-            false, true, false, true,
+            false, true, false, true, 68,
             "Value-based off-policy learning with replay. Discrete drop columns."),
     SAC("sac", "SAC", "Deep RL", "state", "learning", Family.PYTHON,
-            false, true, false, true,
+            false, true, false, true, 70,
             "Off-policy max-entropy actor-critic for continuous drop position."),
 
     // ---- Model-based: learn and plan inside a world model ----
     MUZERO("muzero", "MuZero", "Model-Based", "pixels", "both", Family.PYTHON,
-            false, true, true, true,
+            false, true, true, true, 88,
             "Learn a latent dynamics model and plan inside it. Compare vs the true sim."),
     DREAMER("dreamer", "Dreamer", "Model-Based", "pixels", "model-based", Family.PYTHON,
-            false, true, true, true,
+            false, true, true, true, 82,
             "World model trained from pixels; the policy learns inside the dream."),
 
     // ---- Evolution: gradient-free optimisation ----
     NEUROEVO("neuroevo", "Neuroevolution (GA)", "Evolution", "state", "learning", Family.EVOLUTION,
-            true, false, true, true,
+            true, false, true, true, 62,
             "Evolve MLP weights by tournament selection + Gaussian mutation. No gradients."),
     CMA_ES("cma-es", "CMA-ES", "Evolution", "state", "learning", Family.EVOLUTION,
-            true, false, true, true,
+            true, false, true, true, 65,
             "Covariance-adaptive evolution strategy. Strong on continuous weight spaces."),
     PBT("pbt", "Population-Based Training", "Self-Play", "either", "meta", Family.EVOLUTION,
-            true, false, true, true,
+            true, false, true, true, 60,
             "A population trains in parallel, copying winners and perturbing hyperparams."),
 
     // ---- Imitation: clone or distil human / expert play ----
     DAGGER("dagger", "DAgger", "Imitation", "state", "imitation", Family.IMITATION,
-            true, false, false, true,
+            true, false, false, true, 58,
             "Iterative imitation: relabel the states the agent actually visits."),
     BC("bc", "Behavioral Cloning", "Imitation", "state", "imitation", Family.IMITATION,
-            true, false, false, true,
+            true, false, false, true, 48,
             "Learn to copy YOUR drops from your recorded games. Train-on-my-playstyle."),
     GAIL("gail", "Inverse RL / GAIL", "Imitation", "state", "imitation+RL", Family.PYTHON,
-            false, true, false, true,
+            false, true, false, true, 64,
             "Recover the reward behind demos, then optimise it. Learns the why."),
 
     // ---- Offline: learn from logged data without live interaction ----
     DECISION_TRANSFORMER("dt", "Decision Transformer", "Offline", "state", "offline", Family.PYTHON,
-            true, true, false, true,
+            true, true, false, true, 59,
             "Return-conditioned sequence modeling. 'Play to reach score X.'"),
     OFFLINE_RL("offline", "Offline RL (CQL/IQL)", "Offline", "either", "offline", Family.PYTHON,
-            false, true, false, true,
+            false, true, false, true, 52,
             "Learn from logged games with no live interaction. Conservative value learning."),
 
     // ---- Generative: denoising / flow-based action generation ----
     DIFFUSION("diffusion", "Diffusion Policy", "Generative", "state", "generative", Family.PYTHON,
-            true, true, false, true,
+            true, true, false, true, 55,
             "Denoise an action from noise. Captures multimodal 'many good drops'."),
     FLOW("flow", "Flow Matching", "Generative", "state", "generative", Family.PYTHON,
-            true, true, false, true,
+            true, true, false, true, 54,
             "Continuous-flow cousin of diffusion. Fewer inference steps, real-time."),
 
     // ---- Self-play / adversarial ----
     SELF_PLAY("self-play", "Racing Self-Play", "Self-Play", "either", "learning", Family.PYTHON,
-            true, true, true, true,
+            true, true, true, true, 67,
             "Two agents race the same fruit sequence; reward is relative score."),
 
     // ---- Baselines (weakest) ----
     HEURISTIC("heuristic", "Heuristic", "Baseline", "state", "scripted", Family.PLANNING,
-            true, false, false, true,
+            true, false, false, true, 35,
             "Seek same-tier merges, else keep the surface flat. Scripted, no learning."),
     RANDOM("random", "Random", "Baseline", "either", "—", Family.PLANNING,
-            true, false, false, true,
+            true, false, false, true, 5,
             "Uniformly random drops. The floor every learner must beat."),
 
     // ---- Ensemble: composed agents combining two or more of the techniques above.
     // Family.PLANNING so they run through PlanningRunner (live board, no separate
     // trainer loop needed) — each genuinely calls through to the real agents it
-    // combines; see EnsembleAgents.java for the actual composition logic. ----
-    ENS_MCTS_NET("ens-mcts-net", "MCTS + Policy Net", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true,
-            "MCTS search narrows the choice; a policy net's logits nudge the final pick."),
-    ENS_GREEDY_GUARD("ens-greedy-guard", "Policy Net + Greedy Guard", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true,
-            "Plays a policy net normally, but Greedy One-Ply overrides it on an immediate merge."),
-    ENS_MCTS_TIEBREAK("ens-mcts-greedy-tiebreak", "MCTS + Greedy Tiebreak", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true,
-            "MCTS's genuinely-tied top columns get an exact one-ply evaluation to break the tie."),
-    ENS_VOTING("ens-voting-committee", "Voting Committee", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true,
-            "MCTS, Greedy, and Heuristic each propose a column; majority wins."),
-    ENS_EVOLVED_MCTS("ens-evolved-mcts", "MCTS + Evolved Value Net", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true,
-            "MCTS blended with a CMA-ES-evolved value net (heavily trusted when a slot is saved)."),
-    ENS_IMITATION_MCTS("ens-imitation-mcts", "MCTS + Imitation Blend", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true,
-            "Defers to a DAgger-trained policy's pick unless MCTS's search strongly disagrees."),
-    ENS_RTG_VERIFIED("ens-rtg-verified", "Return-Conditioned + MCTS Verify", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true,
-            "A return-conditioned proposal gets sanity-checked against a shallow MCTS search."),
-    ENS_GENERATIVE_GREEDY("ens-generative-greedy", "Generative + Greedy Filter", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true,
-            "Samples several diffusion-style proposals, keeps whichever scores best exactly."),
+    // combines; see EnsembleAgents.java for the actual composition logic.
+    //
+    // Strength ranking rationale (best to worst — drives the Playground's ensemble
+    // dropdown sort order): online-adapting composites (learn which member to trust
+    // as they play) rank above static blends; blends with an exact-evaluation
+    // fallback (real drop-and-settle, not a net's guess) rank above pure net-nudge
+    // blends, since nets here start untrained. ----
     ENS_ADAPTIVE_VOTE("ens-adaptive-vote", "Adaptive Voting Committee", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true,
+            true, false, false, true, 92,
             "Like Voting Committee, but each member's trust weight adapts to its recent results."),
     ENS_BANDIT("ens-bandit-meta", "Bandit Meta-Controller", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true,
-            "A UCB1 bandit learns, move by move, which single agent to trust right now.");
+            true, false, false, true, 90,
+            "A UCB1 bandit learns, move by move, which single agent to trust right now."),
+    ENS_EVOLVED_MCTS("ens-evolved-mcts", "MCTS + Evolved Value Net", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true, 88,
+            "MCTS blended with a CMA-ES-evolved value net (heavily trusted when a slot is saved)."),
+    ENS_RTG_VERIFIED("ens-rtg-verified", "Return-Conditioned + MCTS Verify", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true, 86,
+            "A return-conditioned proposal gets sanity-checked against a shallow MCTS search."),
+    ENS_MCTS_TIEBREAK("ens-mcts-greedy-tiebreak", "MCTS + Greedy Tiebreak", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true, 84,
+            "MCTS's genuinely-tied top columns get an exact one-ply evaluation to break the tie."),
+    ENS_GENERATIVE_GREEDY("ens-generative-greedy", "Generative + Greedy Filter", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true, 80,
+            "Samples several diffusion-style proposals, keeps whichever scores best exactly."),
+    ENS_IMITATION_MCTS("ens-imitation-mcts", "MCTS + Imitation Blend", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true, 74,
+            "Defers to a DAgger-trained policy's pick unless MCTS's search strongly disagrees."),
+    ENS_VOTING("ens-voting-committee", "Voting Committee", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true, 72,
+            "MCTS, Greedy, and Heuristic each propose a column; majority wins."),
+    ENS_MCTS_NET("ens-mcts-net", "MCTS + Policy Net", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true, 70,
+            "MCTS search narrows the choice; a policy net's logits nudge the final pick."),
+    ENS_GREEDY_GUARD("ens-greedy-guard", "Policy Net + Greedy Guard", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, false, true, 65,
+            "Plays a policy net normally, but Greedy One-Ply overrides it on an immediate merge.");
 
     /** Which specialised control-center drives this technique. */
     public enum Family { PLANNING, EVOLUTION, IMITATION, PYTHON }
@@ -139,14 +148,19 @@ public enum AiTechnique {
      * honestly shows "n/a" instead of a knob that silently does nothing.
      */
     public final boolean jvmNative, python, parallel, speed;
+    /** Authored expected-performance score, 0-100 — see the field-list comment above
+     *  the enum constants for how it's reasoned out. Drives the infocard's Performance
+     *  bar and the AI Playground's ensemble dropdown sort order. */
+    public final int strength;
 
     AiTechnique(String id, String display, String category, String dataMode, String kind,
                 Family family, boolean jvmNative, boolean python, boolean parallel, boolean speed,
-                String blurb) {
+                int strength, String blurb) {
         this.id = id; this.display = display; this.category = category;
         this.dataMode = dataMode; this.kind = kind; this.family = family;
         this.jvmNative = jvmNative; this.python = python;
-        this.parallel = parallel; this.speed = speed; this.blurb = blurb;
+        this.parallel = parallel; this.speed = speed;
+        this.strength = strength; this.blurb = blurb;
     }
 
     public boolean imitationBased() { return family == Family.IMITATION; }

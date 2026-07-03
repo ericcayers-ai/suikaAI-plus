@@ -72,7 +72,10 @@ vec2 hash2(vec2 p, float seed) {
 // opaque surface comes from. Linear radiance straight from the file; EXPOSURE
 // scales it into the same range the key light works in.
 layout(binding = 7, set = 0) uniform sampler2D envMap;
-const float ENV_EXPOSURE = 1.55;
+// Lowered from 1.55 — the old exposure washed out the HDRI backdrop and blew the
+// wall's softbox hotspot toward flat white; this keeps the studio look moodier and
+// leaves more headroom for the ACES shoulder to do real work instead of clipping.
+const float ENV_EXPOSURE = 1.25;
 
 vec3 envColor(vec3 d) {
     // Equirect mapping: u wraps around Y (atan), v = polar angle. The HDRI is
@@ -85,7 +88,7 @@ vec3 envColor(vec3 d) {
 // Key light: one big warm softbox up-right-front. Direction TOWARD the light.
 const vec3  LIGHT_DIR   = normalize(vec3(0.35, 0.90, 0.55));
 const vec3  LIGHT_COLOR = vec3(1.00, 0.97, 0.90);
-const float LIGHT_INTENSITY = 2.35;
+const float LIGHT_INTENSITY = 2.05; // lowered alongside ENV_EXPOSURE — see its comment
 const float LIGHT_RADIUS = 0.16;      // disk jitter -> penumbra width
 const float FILL = 0.30;              // ambient/fill fraction (a touch of contrast for the cinematic grade)
 
@@ -122,29 +125,48 @@ float traceShadow(vec3 origin, vec3 lightDir) {
     return shadowVisibility;
 }
 
+// Soft-shadow samples per pixel per frame. Was 1 — the single jittered sample
+// relied entirely on temporal accumulation to converge, so the penumbra stayed
+// visibly grainy for several frames after anything moved (every falling fruit).
+// Averaging 3 independent light-disk samples up front converges almost
+// immediately, at a real but affordable extra cost (3 shadow rays instead of 1
+// per opaque hit) — worth it since RT Lab targets modern RTX-class hardware.
+const int SHADOW_SAMPLES = 3;
+
 vec3 shadeOpaque(vec3 P, vec3 N, vec3 rd, vec3 albedo, float rough, int mat, vec2 seed) {
-    // Jitter the light direction on a disk for a soft penumbra.
     vec3 arb = abs(LIGHT_DIR.y) < 0.99 ? vec3(0, 1, 0) : vec3(1, 0, 0);
     vec3 lt = normalize(cross(arb, LIGHT_DIR));
     vec3 lb = cross(LIGHT_DIR, lt);
-    float r = sqrt(seed.x) * LIGHT_RADIUS;
-    float th = seed.y * 6.28318530718;
-    vec3 L = normalize(LIGHT_DIR + r * cos(th) * lt + r * sin(th) * lb);
 
-    float ndotl = max(dot(N, L), 0.0);
-    float vis = ndotl > 0.0 ? traceShadow(P + N * 0.01, L) : 0.0;
+    vec3 V = -rd;
+    float shininess = mix(110.0, 10.0, clamp(rough, 0.0, 1.0));
+    float specStrength = mix(0.55, 0.06, clamp(rough, 0.0, 1.0));
+
+    float ndotlSum = 0.0, visSum = 0.0;
+    vec3 diffuse = vec3(0.0), spec = vec3(0.0);
+    for (int i = 0; i < SHADOW_SAMPLES; i++) {
+        vec2 s = hash2(seed * 7.13 + float(i) * 29.7, cam.time + float(i) * 4.63);
+        float r = sqrt(s.x) * LIGHT_RADIUS;
+        float th = s.y * 6.28318530718;
+        vec3 L = normalize(LIGHT_DIR + r * cos(th) * lt + r * sin(th) * lb);
+
+        float ndotl = max(dot(N, L), 0.0);
+        float vis = ndotl > 0.0 ? traceShadow(P + N * 0.01, L) : 0.0;
+        ndotlSum += ndotl;
+        visSum += vis;
+
+        diffuse += albedo * LIGHT_COLOR * (LIGHT_INTENSITY * ndotl * vis);
+        vec3 H = normalize(L + V);
+        spec += LIGHT_COLOR * (pow(max(dot(N, H), 0.0), shininess) * specStrength * vis);
+    }
+    float invN = 1.0 / float(SHADOW_SAMPLES);
+    diffuse *= invN; spec *= invN;
+    float ndotl = ndotlSum * invN;   // mean values, reused below for caustics masking
+    float vis = visSum * invN;
 
     // Fill/ambient from the environment in the normal direction — keeps shadowed
     // areas alive (a brightly lit studio has strong bounce fill, not black shadows).
     vec3 ambient = albedo * envColor(N) * FILL;
-    vec3 diffuse = albedo * LIGHT_COLOR * (LIGHT_INTENSITY * ndotl * vis);
-
-    // Blinn-Phong gloss driven by the (textured) roughness.
-    vec3 V = -rd;
-    vec3 H = normalize(L + V);
-    float shininess = mix(110.0, 10.0, clamp(rough, 0.0, 1.0));
-    float specStrength = mix(0.55, 0.06, clamp(rough, 0.0, 1.0));
-    vec3 spec = LIGHT_COLOR * (pow(max(dot(N, H), 0.0), shininess) * specStrength * vis);
 
     vec3 c = ambient + diffuse + spec;
 
@@ -179,7 +201,13 @@ vec3 shadeOpaque(vec3 P, vec3 N, vec3 rd, vec3 albedo, float rough, int mat, vec
 }
 
 void main() {
-    vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+    // Sub-pixel jitter: a different point within the pixel each frame instead of
+    // always its exact center. On its own this would just look noisy, but combined
+    // with the temporal EMA blend below it's free antialiasing (TAA) — hard silhouette
+    // edges accumulate a smooth gradient across frames instead of a fixed jagged
+    // stairstep. Kept within +-0.5px so it never samples a neighboring pixel's cone.
+    vec2 aaJitter = hash2(vec2(gl_LaunchIDEXT.xy) + 0.5, cam.time * 1.37 + 91.0) - 0.5;
+    vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5) + aaJitter;
     vec2 uv = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
     // y is FLIPPED: launch row 0 is the TOP of the presented image, so the top of
     // the window must map to +up (the old version skipped this and rendered the
@@ -260,15 +288,17 @@ void main() {
             vec3 H = normalize(LIGHT_DIR - rd);
             color += tint * LIGHT_COLOR * pow(max(dot(N, H), 0.0), 260.0) * 1.2;
 
-            // Faint deadline line on the jar wall: resting fruit above this height
-            // ends the game. Band on the side glass only (not the base disc).
-            // Etched into the glass, not painted on top: the band both EMITS a warm
-            // tone and DARKENS transmission, so it stays legible against the bright
-            // studio wall behind the jar instead of washing out.
-            float band = 1.0 - smoothstep(0.0, 0.14, abs(P.y - DEADLINE_Y));
+            // Deadline line on the jar wall: resting fruit above this height ends the
+            // game. Band on the side glass only (not the base disc). Etched into the
+            // glass, not painted on top: the band both EMITS a warm tone and DARKENS
+            // transmission, so it stays legible against the bright studio wall behind
+            // the jar instead of washing out. Widened and brightened — the old band
+            // read as barely-there at a glance, and this is a rule the player actually
+            // needs to see, not a subtle production detail.
+            float band = 1.0 - smoothstep(0.0, 0.22, abs(P.y - DEADLINE_Y));
             if (band > 0.0 && length(P.xz) > 3.0) {
-                color += tint * vec3(1.0, 0.35, 0.22) * band * 0.5;
-                tint *= 1.0 - band * 0.30;
+                color += tint * vec3(1.0, 0.32, 0.20) * band * 0.85;
+                tint *= 1.0 - band * 0.40;
             }
 
             tint *= vec3(0.90, 0.945, 0.93) * (1.0 - fres * 0.55 - rim * 0.55);
@@ -283,11 +313,20 @@ void main() {
     // Cinematic finish: ACES filmic tonemap (real highlight shoulder + gentle toe,
     // richer mids than the old soft-Reinhard) plus a subtle lens vignette so the
     // frame's corners fall off like glass optics, keeping the eye on the jar.
-    color = max(color * 0.92, vec3(0.0));
+    // Exposure trimmed further (0.92 -> 0.82, alongside the lowered ENV_EXPOSURE/
+    // LIGHT_INTENSITY above) — the old combination read as slightly overexposed,
+    // washing the HDRI backdrop toward flat white instead of a moody studio.
+    color = max(color * 0.82, vec3(0.0));
     color = clamp((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0.0, 1.0);
     float vig = 1.0 - 0.26 * pow(clamp(length(d * vec2(cam.aspect, 1.0)) / 1.55, 0.0, 1.0), 2.3);
     color *= vig;
     color = pow(color, vec3(1.0 / 2.2));
+
+    // Color grade: a gentle S-curve contrast pass in display-referred space (the
+    // usual place a grading LUT works), pivoted at mid-gray so blacks/whites don't
+    // just clip — punchier without crushing shadow detail.
+    const float CONTRAST = 1.10;
+    color = clamp((color - 0.5) * CONTRAST + 0.5, 0.0, 1.0);
 
     // Temporal EMA against last frame's value already in the output image.
     ivec2 pix = ivec2(gl_LaunchIDEXT.xy);

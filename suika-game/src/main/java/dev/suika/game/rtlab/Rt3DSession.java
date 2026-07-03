@@ -71,6 +71,8 @@ public final class Rt3DSession implements RtGameSession {
         return out;
     }
 
+    @Override public List<MergeInfo> drainMerges() { return physics.drainMerges(); }
+
     @Override public FruitTier currentTier() { return physics.currentTier(); }
     @Override public FruitTier nextTier()    { return physics.nextTier(); }
     @Override public float hoverX()          { return hoverX; }

@@ -39,7 +39,15 @@ public final class SettingsScreen extends ScreenAdapter {
         DoubleSupplier   frac;      // SLIDER fill 0..1
         DoubleConsumer   setFrac;   // SLIDER click
         final Rectangle area = new Rectangle();
+        /** 0 = use the standard {@link #ROW_H}. Sliders need extra headroom for the
+         *  value readout drawn above the bar (see {@link #rowHeight}). */
+        float heightOverride = 0f;
     }
+
+    /** Effective row height — sliders get extra vertical room so their value label
+     *  (drawn above the bar) never crowds the row above/below it (was the "Max GPU
+     *  utilization" formatting bug: the "100%" readout sat right at the row's edge). */
+    private float rowHeight(Row r) { return r.heightOverride > 0f ? r.heightOverride : ROW_H; }
 
     private final SuikaGame game;
     private final GameSettings cfg;
@@ -83,6 +91,20 @@ public final class SettingsScreen extends ScreenAdapter {
     }
 
     private void buildRows() {
+        // ---- Display (§VI: resolution/fullscreen/UI scale, persisted across launches) ----
+        cycle("DISPLAY", "Window height", () -> cfg.windowHeight() + "p",
+                () -> { cfg.resHeightIndex = wrap(cfg.resHeightIndex - 1, GameSettings.RES_HEIGHTS.length);
+                        cfg.applyWindowMode(); SettingsPersistence.save(cfg); },
+                () -> { cfg.resHeightIndex = wrap(cfg.resHeightIndex + 1, GameSettings.RES_HEIGHTS.length);
+                        cfg.applyWindowMode(); SettingsPersistence.save(cfg); });
+        toggle(null, "Fullscreen", () -> cfg.fullscreen,
+                () -> { cfg.fullscreen = !cfg.fullscreen; cfg.applyWindowMode(); SettingsPersistence.save(cfg); });
+        cycle(null, "UI scale", cfg::uiScaleLabel,
+                () -> { cfg.uiScaleIndex = wrap(cfg.uiScaleIndex - 1, GameSettings.UI_SCALE_OPTIONS.length);
+                        game.regenerateFonts(); SettingsPersistence.save(cfg); },
+                () -> { cfg.uiScaleIndex = wrap(cfg.uiScaleIndex + 1, GameSettings.UI_SCALE_OPTIONS.length);
+                        game.regenerateFonts(); SettingsPersistence.save(cfg); });
+
         // ---- Graphics ----
         cycle("GRAPHICS", "Frame rate", () -> cfg.fpsLabel(),
                 () -> { cfg.fpsIndex = wrap(cfg.fpsIndex - 1, GameSettings.FPS_OPTIONS.length); cfg.applyDisplay(); },
@@ -102,22 +124,24 @@ public final class SettingsScreen extends ScreenAdapter {
                 .value = () -> cfg.randomSeed ? "Random" : "Fixed " + cfg.fixedSeed;
 
         // ---- Gameplay ----
-        toggle("GAMEPLAY", "Immediate game over (no safety delay)",
-                () -> cfg.immediateDeadline, () -> cfg.immediateDeadline = !cfg.immediateDeadline);
-        toggle(null, "Bouncy fruit (no instant settle)",
-                () -> cfg.bounceEnabled, () -> { cfg.bounceEnabled = !cfg.bounceEnabled; cfg.applyPhysics(); });
+        // Not gated behind any master toggle — RT Lab itself needs no experimental
+        // flag to unlock (see MainMenuScreen); this is just its own physics choice.
+        cycle("GAMEPLAY", "RT Lab physics", () -> cfg.rt3dPhysics ? "3D (true 3D)" : "2D (classic)",
+                () -> cfg.rt3dPhysics = !cfg.rt3dPhysics,
+                () -> cfg.rt3dPhysics = !cfg.rt3dPhysics);
 
         // AI training knobs (eval parallelism, sims/generation, ghost lineage) and AI
         // Watch configuration both live inside the AI game itself (per-technique drawer
         // in the AI Playground / quick-settings in the control center), not here —
         // they only apply to specific techniques, not the app globally.
 
-        // ---- Experimental ----
-        toggle("EXPERIMENTAL", "Experimental mode (ray tracing / 3D)",
-                () -> cfg.experimentalMode, () -> cfg.experimentalMode = !cfg.experimentalMode);
-        cycle(null, "RT Lab gameplay physics", () -> cfg.rt3dPhysics ? "3D (true 3D)" : "2D (classic)",
-                () -> cfg.rt3dPhysics = !cfg.rt3dPhysics,
-                () -> cfg.rt3dPhysics = !cfg.rt3dPhysics);
+        // ---- Experimental gameplay variants ----
+        // Genuinely optional rule changes — no master gate; each is its own toggle,
+        // same as every other setting on this screen.
+        toggle("EXPERIMENTAL", "Immediate game over (no safety delay)",
+                () -> cfg.immediateDeadline, () -> cfg.immediateDeadline = !cfg.immediateDeadline);
+        toggle(null, "Bouncy fruit (no instant settle)",
+                () -> cfg.bounceEnabled, () -> { cfg.bounceEnabled = !cfg.bounceEnabled; cfg.applyPhysics(); });
 
         // ---- AI Environment ----
         cycle("AI ENVIRONMENT", "Python env", () -> installStatus, null, null);
@@ -158,7 +182,12 @@ public final class SettingsScreen extends ScreenAdapter {
         Row r = add(section, label, Kind.CYCLE); r.value = value; r.prev = prev; r.next = next; return r;
     }
     private Row slider(String section, String label, DoubleSupplier frac, DoubleConsumer set) {
-        Row r = add(section, label, Kind.SLIDER); r.frac = frac; r.setFrac = set; return r;
+        Row r = add(section, label, Kind.SLIDER); r.frac = frac; r.setFrac = set;
+        // Three lines stacked in one tall row (label / value readout / bar) need more
+        // headroom than the old +24 gave — the value readout was landing right on top
+        // of the label baseline (confirmed via the capture harness).
+        r.heightOverride = ROW_H + 40f;
+        return r;
     }
     private Row button(String section, String label, Supplier<String> btnText, Runnable act) {
         Row r = add(section, label, Kind.BUTTON); r.next = act; r.value = btnText; return r;
@@ -176,7 +205,8 @@ public final class SettingsScreen extends ScreenAdapter {
                 camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight()); mx = touch.x; my = touch.y; return false;
             }
             @Override public boolean scrolled(float ax, float ay) {
-                scroll = Math.max(0f, Math.min(scroll + ay * 46f, maxScroll()));
+                // Negated — see AiPlaygroundScreen's identical fix for why.
+                scroll = Math.max(0f, Math.min(scroll - ay * 46f, maxScroll()));
                 return true;
             }
             @Override public boolean keyDown(int k) {
@@ -191,7 +221,7 @@ public final class SettingsScreen extends ScreenAdapter {
         float y = 0f;
         for (Row r : rows) {
             if (r.section != null) y -= SECTION_GAP;
-            y -= ROW_H;
+            y -= rowHeight(r);
             y -= ROW_GAP;
         }
         return -y;
@@ -242,9 +272,10 @@ public final class SettingsScreen extends ScreenAdapter {
         float y = LIST_TOP + scroll;
         for (Row r : rows) {
             if (r.section != null) y -= SECTION_GAP;     // reserve a band for the header
+            float rh = rowHeight(r);
             float rowTop = y;
-            float rowBot = y - ROW_H;
-            r.area.set(ctrlX, rowBot + 9f, CTRL_W, ROW_H - 18f);
+            float rowBot = y - rh;
+            r.area.set(ctrlX, rowBot + 9f, CTRL_W, rh - 18f);
 
             // Rows scrolled outside the visible list band ([LIST_BOT, LIST_TOP]) are
             // simply not drawn — the fixed-position title and BACK button live outside
@@ -252,7 +283,7 @@ public final class SettingsScreen extends ScreenAdapter {
             if (rowTop > LIST_BOT && rowBot < LIST_TOP) {
                 // row background
                 s.setColor(Theme.PANEL.r, Theme.PANEL.g, Theme.PANEL.b, 0.55f);
-                Ui.fillRoundRect(s, MARGIN_X, rowBot + 4f, Theme.VW - 2 * MARGIN_X, ROW_H - 8f, 10f);
+                Ui.fillRoundRect(s, MARGIN_X, rowBot + 4f, Theme.VW - 2 * MARGIN_X, rh - 8f, 10f);
 
                 switch (r.kind) {
                     case TOGGLE -> Ui.toggle(s, r.area.x + r.area.width - 70f, r.area.y + 3f, 60f, r.area.height - 6f, r.on.getAsBoolean());
@@ -266,13 +297,17 @@ public final class SettingsScreen extends ScreenAdapter {
                         Ui.fillRoundRect(s, r.area.x + r.area.width - 36f, r.area.y + 4f, 32f, r.area.height - 8f, 6f);
                     }
                     case SLIDER -> {
+                        // The bar sits at the very bottom of this row's (taller) area;
+                        // the value readout and label stack above it in the text pass,
+                        // each with its own clear vertical band (see labelY/valueY there).
+                        float barY = r.area.y + 8f;
                         s.setColor(Theme.PANEL_DEEP);
-                        Ui.fillRoundRect(s, r.area.x, r.area.y + r.area.height / 2f - 5f, r.area.width, 10f, 5f);
+                        Ui.fillRoundRect(s, r.area.x, barY - 5f, r.area.width, 10f, 5f);
                         float f = (float) r.frac.getAsDouble();
                         s.setColor(Theme.ACCENT_2);
-                        Ui.fillRoundRect(s, r.area.x, r.area.y + r.area.height / 2f - 5f, r.area.width * f, 10f, 5f);
+                        Ui.fillRoundRect(s, r.area.x, barY - 5f, r.area.width * f, 10f, 5f);
                         s.setColor(0.97f, 0.98f, 1f, 1f);
-                        s.circle(r.area.x + r.area.width * f, r.area.y + r.area.height / 2f, 11f, 18);
+                        s.circle(r.area.x + r.area.width * f, barY, 11f, 18);
                     }
                     case BUTTON -> {
                         boolean hov = r.area.contains(mx, my);
@@ -298,10 +333,14 @@ public final class SettingsScreen extends ScreenAdapter {
                     Ui.text(game.batch, game.fontMed, r.section, MARGIN_X, y - 14f, Theme.GOLD);
                 y -= SECTION_GAP;
             }
+            float rh = rowHeight(r);
             float rowTop = y;
-            float rowBot = y - ROW_H;
+            float rowBot = y - rh;
             if (rowTop > LIST_BOT && rowBot < LIST_TOP) {   // same band as the shape pass
-                float labelY = rowBot + ROW_H / 2f + 8f;
+                // Sliders stack three elements in their taller row — label, value
+                // readout, bar — top to bottom, each in its own clear vertical band
+                // (see the matching valueY/barY below) so none of them overlap.
+                float labelY = r.kind == Kind.SLIDER ? r.area.y + r.area.height - 10f : rowBot + rh / 2f + 8f;
                 Ui.text(game.batch, game.font, r.label, MARGIN_X + 16f, labelY, Theme.TEXT);
                 if (r.kind == Kind.CYCLE) {
                     Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
@@ -312,8 +351,11 @@ public final class SettingsScreen extends ScreenAdapter {
                     Ui.textRight(game.batch, game.fontSmall, r.value.get(),
                             r.area.x + r.area.width - 80f, labelY - 2f, Theme.TEXT_DIM);
                 } else if (r.kind == Kind.SLIDER && r.value != null) {
+                    // Value readout sits in the middle band, clear of both the label
+                    // above and the bar below (see barY in the shapes pass / labelY above).
+                    float barY = r.area.y + 8f;
                     Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
-                            r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f + 22f, Theme.TEXT);
+                            r.area.x + r.area.width / 2f, barY + 22f, Theme.TEXT);
                 } else if (r.kind == Kind.BUTTON) {
                     Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
                             r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);

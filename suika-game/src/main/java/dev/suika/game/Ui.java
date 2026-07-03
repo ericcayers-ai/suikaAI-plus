@@ -55,9 +55,12 @@ public final class Ui {
         // face
         s.setColor(face);
         fillRoundRect(s, r.x, r.y, r.width, r.height, 16f);
-        // top sheen (subtle — bright reflections are distracting, especially on dark overlays)
-        s.setColor(1f, 1f, 1f, hovered ? 0.09f : 0.05f);
-        fillRoundRect(s, r.x + 7f, r.y + r.height * 0.50f, r.width - 14f, r.height * 0.42f, 12f);
+        // top sheen — a thin gloss strip hugging the top edge only. Labels are drawn
+        // centered around the button's vertical middle (see Ui.textCenter callers), so
+        // this must stay clear of that whole zone or it visibly washes out the text
+        // underneath (confirmed via the capture harness on the pause-menu buttons).
+        s.setColor(1f, 1f, 1f, hovered ? 0.16f : 0.10f);
+        fillRoundRect(s, r.x + 7f, r.y + r.height * 0.82f, r.width - 14f, r.height * 0.14f, 8f);
     }
 
     /** A pill toggle; draws an on/off track with a knob. */

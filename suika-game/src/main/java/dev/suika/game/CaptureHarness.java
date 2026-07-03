@@ -64,6 +64,7 @@ public final class CaptureHarness implements ApplicationListener {
     private AiPlaygroundScreen playground;
     private ControlCenterScreen cc;
     private SettingsScreen settings;
+    private SuikaScreen humanPlay;
 
     private static final AiTechnique[] TECHS = AiTechnique.values();
     private int techIndex = 0;
@@ -88,13 +89,20 @@ public final class CaptureHarness implements ApplicationListener {
     private static final int[]    RETURNS  = {1000, 2000, 4000};
     private static final double[] LRS      = {1e-3, 3e-3, 1e-2};
 
-    /** One cell of the debug matrix. */
+    /** One cell of the debug matrix. {@code uiScaleIndex} is §12's display axis —
+     *  the one display setting that can vary between cells within a single running
+     *  process (a font regen, not a window resize/recreate); resolution/fullscreen
+     *  are process-wide (see DesktopLauncher's {@code -Dsuika.capture.land}) and
+     *  swept by launching the harness once per value instead — see the CI job's
+     *  two separate portrait/landscape invocations in .github/workflows/ci.yml. */
     private record Job(AiTechnique tech, int bins, float speed, float dwell,
-                       int eliteViews, String paramName, double paramVal, String paramLabel) {
+                       int eliteViews, String paramName, double paramVal, String paramLabel,
+                       int uiScaleIndex) {
         String fileName() {
             String base = String.format(Locale.ROOT, "mtx_%s_c%d_s%s_d%s",
                     tech.id, bins, speedTag(speed), durTag(dwell));
             if (paramName != null) base += "_" + paramLabel;
+            if (uiScaleIndex != 1) base += "_ui" + GameSettings.UI_SCALE_OPTIONS[uiScaleIndex];
             return base.replaceAll("[^A-Za-z0-9_.-]", "") + ".png";
         }
     }
@@ -107,6 +115,14 @@ public final class CaptureHarness implements ApplicationListener {
     @Override public void create() {
         game = new SuikaGame();
         game.create();
+        // -Dsuika.capture.uiscale=<index into GameSettings.UI_SCALE_OPTIONS> — QA hook
+        // to torture-test every screen at a non-default text size in one pass, instead
+        // of writing a dedicated stage per scale level.
+        String uiScale = System.getProperty("suika.capture.uiscale");
+        if (uiScale != null) {
+            game.settings.uiScaleIndex = Integer.parseInt(uiScale.trim());
+            game.regenerateFonts();
+        }
         if (matrixMode) buildMatrix();
     }
 
@@ -133,6 +149,11 @@ public final class CaptureHarness implements ApplicationListener {
         float[] durs  = parseFloats(System.getProperty("suika.capture.durations", "4"), new float[]{4f});
         int[]   elites= parseInts(System.getProperty("suika.capture.elites", "1"), new int[]{1});
         boolean sweepParams = "on".equalsIgnoreCase(System.getProperty("suika.capture.params", "off"));
+        // §12: display axis — indices into GameSettings.UI_SCALE_OPTIONS (0=90%,
+        // 1=100% default, 2=110%, 3=120%). Defaults to just 100% so existing
+        // -Dsuika.capture.* invocations don't silently multiply their cell count;
+        // opt in with e.g. -Dsuika.capture.uiscales=0,1,2,3 for a full sweep.
+        int[] uiScales = parseInts(System.getProperty("suika.capture.uiscales", "1"), new int[]{1});
         int max = parseInt(System.getProperty("suika.capture.max", "240"), 240);
 
         int dropped = 0;
@@ -145,9 +166,11 @@ public final class CaptureHarness implements ApplicationListener {
                     for (float d : durs) {
                         for (int[] ev : elitesForTech) {
                             for (Object[] p : params) {
-                                if (jobs.size() >= max) { dropped++; continue; }
-                                jobs.add(new Job(t, bins, sp, d, ev[0],
-                                        (String) p[0], (Double) p[1], (String) p[2]));
+                                for (int ui : uiScales) {
+                                    if (jobs.size() >= max) { dropped++; continue; }
+                                    jobs.add(new Job(t, bins, sp, d, ev[0],
+                                            (String) p[0], (Double) p[1], (String) p[2], ui));
+                                }
                             }
                         }
                     }
@@ -161,7 +184,8 @@ public final class CaptureHarness implements ApplicationListener {
               .append("  speeds=").append(System.getProperty("suika.capture.speeds", "1"))
               .append("  durations=").append(System.getProperty("suika.capture.durations", "4"))
               .append("  elites=").append(System.getProperty("suika.capture.elites", "1"))
-              .append("  params=").append(sweepParams ? "on" : "off").append('\n');
+              .append("  params=").append(sweepParams ? "on" : "off")
+              .append("  uiscales=").append(System.getProperty("suika.capture.uiscales", "1")).append('\n');
         double estSecs = 0; for (Job j : jobs) estSecs += j.dwell() + 0.35f;
         report.append(String.format(Locale.ROOT, "planned cells: %d (%d dropped over cap %d)  ~%.0fs wall%n%n",
                 jobs.size(), dropped, max, estSecs));
@@ -243,6 +267,10 @@ public final class CaptureHarness implements ApplicationListener {
     }
 
     private void launchJob(Job job) {
+        if (game.settings.uiScaleIndex != job.uiScaleIndex()) {
+            game.settings.uiScaleIndex = job.uiScaleIndex();
+            game.regenerateFonts();
+        }
         PlaygroundConfig c = new PlaygroundConfig();
         c.selectDefaultsFor(job.tech());
         c.actionBins = job.bins();
@@ -403,20 +431,28 @@ public final class CaptureHarness implements ApplicationListener {
         switch (stage) {
             case 0 -> { if (stageT > 0.6f) { shoot("00-menu.png"); settings = new SettingsScreen(game, MainMenuScreen::new); game.setScreen(settings); nextStage(); } }
             case 1 -> { if (stageT > 0.7f) { shoot("01-settings.png"); settings.scrollToBottomForCapture(); nextStage(); } }
-            case 2 -> { if (stageT > 0.4f) { shoot("01b-settings-experimental.png");
-                        game.settings.experimentalMode = true;
-                        game.setScreen(new MainMenuScreen(game)); nextStage(); } }
-            case 3 -> { if (stageT > 0.5f) { shoot("00b-menu-experimental.png"); openPlayground(); nextStage(); } }
-            case 4 -> { if (stageT > 0.6f) { shoot("02-playground.png"); playground.openInfocardForCapture(AiTechnique.PPO); nextStage(); } }
-            case 5 -> { if (stageT > 0.4f) { shoot("03-infocard-modal.png"); playground.openInfocardForCapture(null); launchControlCenter(AiTechnique.MCTS, false); nextStage(); } }
-            case 6 -> { if (stageT > 3.5f) { shoot("04-mcts-cc.png"); cc.openHotswapForCapture(); nextStage(); } }
-            case 7 -> { if (stageT > 0.5f) { shoot("05-hotswap-modal.png"); launchControlCenter(AiTechnique.NEUROEVO, false); nextStage(); } }
-            case 8 -> { if (stageT > 3.0f) { cc.openSlotsForCapture(); nextStage(); } }
-            case 9 -> { if (stageT > 0.5f) { shoot("06-slots-modal.png"); startSixteenXGrid(); nextStage(); } }
-            case 10 -> { if (stageT > 9.0f) { shoot("07-neuroevo-16x-grid.png"); techIndex = 0; startTechnique(TECHS[techIndex]); nextStage(); } }
+            // Separate stage so the scrolled state (EXPERIMENTAL + AI ENVIRONMENT incl.
+            // the GPU-utilization slider) actually renders a frame before the shot —
+            // shooting in the same stage as the scroll call captured the pre-scroll frame.
+            case 2 -> { if (stageT > 0.3f) { shoot("01c-settings-scrolled.png"); nextStage(); } }
+            // RT LAB / AI PLAYS are always live now (no experimental-mode gate) — one
+            // shot of the main menu is enough to confirm both buttons render active.
+            case 3 -> { if (stageT > 0.4f) { game.setScreen(new MainMenuScreen(game)); nextStage(); } }
+            case 4 -> { if (stageT > 0.5f) { shoot("00b-menu-rtlab.png"); openPlayground(); nextStage(); } }
+            case 5 -> { if (stageT > 0.6f) { shoot("02-playground.png"); playground.setEnsemblesExpandedForCapture(true); nextStage(); } }
+            // Separate stage so the expanded ensemble dropdown (§8: sorted best->worst)
+            // actually renders before the shot — same shoot-before-state-change pitfall
+            // as the settings scroll above.
+            case 6 -> { if (stageT > 0.3f) { shoot("02b-playground-ensembles.png"); playground.setEnsemblesExpandedForCapture(false); playground.openInfocardForCapture(AiTechnique.PPO); nextStage(); } }
+            case 7 -> { if (stageT > 0.4f) { shoot("03-infocard-modal.png"); playground.openInfocardForCapture(null); launchControlCenter(AiTechnique.MCTS, false); nextStage(); } }
+            case 8 -> { if (stageT > 3.5f) { shoot("04-mcts-cc.png"); cc.openHotswapForCapture(); nextStage(); } }
+            case 9 -> { if (stageT > 0.5f) { shoot("05-hotswap-modal.png"); launchControlCenter(AiTechnique.NEUROEVO, false); nextStage(); } }
+            case 10 -> { if (stageT > 3.0f) { cc.openSlotsForCapture(); nextStage(); } }
+            case 11 -> { if (stageT > 0.5f) { shoot("06-slots-modal.png"); startSixteenXGrid(); nextStage(); } }
+            case 12 -> { if (stageT > 9.0f) { shoot("07-neuroevo-16x-grid.png"); techIndex = 0; startTechnique(TECHS[techIndex]); nextStage(); } }
 
             // ---- full technique sweep: one screenshot per AiTechnique ----
-            case 11 -> {
+            case 13 -> {
                 AiTechnique tech = TECHS[techIndex];
                 if (tech.family == AiTechnique.Family.IMITATION) {
                     driveImitationAutoPlay(dt);
@@ -431,13 +467,14 @@ public final class CaptureHarness implements ApplicationListener {
             }
 
             // ---- extra curated views the default sweep doesn't cover ----
-            case 12-> { if (stageT > 0.2f) { launchControlCenter(AiTechnique.SELF_PLAY, false); nextStage(); } }
-            case 13-> { if (stageT > 5.0f) { shoot("90-selfplay-2view.png"); launchControlCenter(AiTechnique.NEUROEVO, true); nextStage(); } }
-            case 14-> { if (stageT > 9.0f) { shoot("91-neuroevo-ghost.png"); nextStage(); } }
+            case 14-> { if (stageT > 0.2f) { launchControlCenter(AiTechnique.SELF_PLAY, false); nextStage(); } }
+            case 15-> { if (stageT > 5.0f) { shoot("90-selfplay-2view.png"); launchControlCenter(AiTechnique.NEUROEVO, true); nextStage(); } }
+            case 16-> { if (stageT > 9.0f) { shoot("91-neuroevo-ghost.png"); nextStage(); } }
 
-            case 15-> { if (stageT > 0.2f) { game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN)); nextStage(); } }
-            case 16-> { if (stageT > 1.5f) { shoot("92-human-play.png"); openGameOver(); nextStage(); } }
-            case 17-> { if (stageT > 1.0f) { shoot("93-game-over.png"); nextStage(); Gdx.app.exit(); } }
+            case 17-> { if (stageT > 0.2f) { humanPlay = new SuikaScreen(game, SuikaScreen.Mode.HUMAN); game.setScreen(humanPlay); nextStage(); } }
+            case 18-> { if (stageT > 1.5f) { shoot("92-human-play.png"); humanPlay.pauseForCapture(); nextStage(); } }
+            case 19-> { if (stageT > 0.5f) { shoot("92b-human-pause.png"); openGameOver(); nextStage(); } }
+            case 20-> { if (stageT > 1.0f) { shoot("93-game-over.png"); nextStage(); Gdx.app.exit(); } }
             default -> { }
         }
     }

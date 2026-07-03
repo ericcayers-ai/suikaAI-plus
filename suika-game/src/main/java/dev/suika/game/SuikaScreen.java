@@ -149,6 +149,9 @@ public final class SuikaScreen extends ScreenAdapter {
         hoverGameX = (float) GameCore.clampDropForRadius(gx, radius);
     }
 
+    /** Test/QA hook: open the pause overlay (used by the capture harness). */
+    void pauseForCapture() { paused = true; }
+
     private void handlePauseClick(float x, float y) {
         if (resumeBtn.contains(x, y)) paused = false;
         else if (restartBtn.contains(x, y)) game.setScreen(new SuikaScreen(game, mode));

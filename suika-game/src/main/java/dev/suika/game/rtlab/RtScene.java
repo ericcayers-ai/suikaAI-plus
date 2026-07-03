@@ -50,9 +50,14 @@ public final class RtScene implements AutoCloseable {
 
     // The movable metal drop chute (the "drop cursor" of the reference scene):
     // an open steel tube hovering above the jar mouth, following the pointer.
-    public static final float CHUTE_RADIUS = 1.45f;
+    // Sized to snugly HUG the largest droppable tier (PERSIMMON, radius 1.66 — see
+    // FruitTier) rather than swim loosely around it: just enough clearance that the
+    // fruit doesn't clip the wall, no more. Taller than before too, so more of it
+    // runs out of frame at the top (was already partly off-screen; now emphatically
+    // so) instead of reading as a short stubby collar.
+    public static final float CHUTE_RADIUS = 1.82f;
     public static final float CHUTE_BOTTOM_Y = 19.6f;   // just above JarShape.MOUTH_TOP
-    public static final float CHUTE_HEIGHT = 4.5f;      // top runs out of frame, like the photo
+    public static final float CHUTE_HEIGHT = 7.0f;      // top runs well out of frame
 
     /** Cull masks (must match raygen.rgen): shadow rays skip MASK_GLASS. */
     private static final int MASK_SOLID = 0x01, MASK_GLASS = 0x02;

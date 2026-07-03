@@ -56,6 +56,8 @@ public final class Jar3DPhysics {
 
     private final List<Ball> balls = new ArrayList<>();
     private final Random rng;
+    /** Merges since the last {@link #drainMerges()} call — see its doc. */
+    private final List<RtGameSession.MergeInfo> pendingMerges = new ArrayList<>();
 
     private long score = 0;
     private boolean gameOver = false;
@@ -210,8 +212,8 @@ public final class Jar3DPhysics {
                 score += (result != null) ? result.mergeScore : PhysicsConfig.DOUBLE_WATERMELON_BONUS;
 
                 if (result != null) {
-                    Ball merged = new Ball(result,
-                            (a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+                    double mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, mz = (a.z + b.z) / 2;
+                    Ball merged = new Ball(result, mx, my, mz);
                     // conserve momentum so a merge mid-fall doesn't freeze in the air
                     double m = a.mass + b.mass;
                     merged.vx = (a.vx * a.mass + b.vx * b.mass) / m;
@@ -219,6 +221,7 @@ public final class Jar3DPhysics {
                     merged.vz = (a.vz * a.mass + b.vz * b.mass) / m;
                     balls.remove(j);
                     balls.set(i, merged);
+                    pendingMerges.add(new RtGameSession.MergeInfo((float) mx, (float) my, (float) mz, result));
                 } else {
                     balls.remove(j);
                     balls.remove(i);
@@ -265,4 +268,12 @@ public final class Jar3DPhysics {
     public boolean isGameOver()        { return gameOver; }
     public FruitTier currentTier()     { return currentTier; }
     public FruitTier nextTier()        { return nextTier; }
+
+    /** Merges since the last call, then clears them. */
+    public List<RtGameSession.MergeInfo> drainMerges() {
+        if (pendingMerges.isEmpty()) return List.of();
+        List<RtGameSession.MergeInfo> out = new ArrayList<>(pendingMerges);
+        pendingMerges.clear();
+        return out;
+    }
 }

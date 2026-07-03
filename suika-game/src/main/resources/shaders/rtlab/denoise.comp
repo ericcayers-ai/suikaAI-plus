@@ -17,8 +17,12 @@ void main() {
     vec4 centerColor = imageLoad(noisyImage, coord);
     float centerLum = dot(centerColor.rgb, vec3(0.299, 0.587, 0.114));
 
-    const int radius = 3;
-    const float spatialSigma = 2.0;
+    // Widened from 3 — now that this always runs (no more player-facing on/off
+    // toggle) and feeds off a less noisy 3-sample shadow signal (see raygen.rgen's
+    // SHADOW_SAMPLES), a slightly bigger kernel buys smoother results for a real but
+    // affordable extra cost on the RTX-class hardware this targets.
+    const int radius = 4;
+    const float spatialSigma = 2.4;
     const float rangeSigma = 0.12;
 
     vec4 sum = vec4(0.0);

@@ -2,6 +2,7 @@ package dev.suika.game.rtlab;
 
 import dev.suika.core.FruitTier;
 import dev.suika.core.GameCore;
+import dev.suika.core.MergeEvent;
 import dev.suika.core.PhysicsConfig;
 
 import java.util.ArrayList;
@@ -23,6 +24,7 @@ public final class Rt2DSession implements RtGameSession {
     private double accumulator = 0;
     private float dropCooldown = 0f;
     private float hoverGameX = 5f;
+    private final List<MergeInfo> pendingMerges = new ArrayList<>();
 
     public Rt2DSession(long seed) {
         this.core = new GameCore(seed);
@@ -61,10 +63,23 @@ public final class Rt2DSession implements RtGameSession {
         accumulator += Math.min(dt, 0.05f);
         int steps = 0;
         while (accumulator >= PhysicsConfig.FIXED_DT && steps < PhysicsConfig.MAX_SUB_STEPS) {
-            core.tick();
+            List<MergeEvent> merges = core.tick();
+            for (MergeEvent m : merges) {
+                if (m.resultTier() == null) continue; // double-watermelon: no ball left to flash
+                pendingMerges.add(new MergeInfo(
+                        (float) m.spawnX() - 5f, (float) m.spawnY() + FLOOR_LIFT, 0f, m.resultTier()));
+            }
             accumulator -= PhysicsConfig.FIXED_DT;
             steps++;
         }
+    }
+
+    @Override
+    public List<MergeInfo> drainMerges() {
+        if (pendingMerges.isEmpty()) return List.of();
+        List<MergeInfo> out = new ArrayList<>(pendingMerges);
+        pendingMerges.clear();
+        return out;
     }
 
     @Override
@@ -72,6 +87,7 @@ public final class Rt2DSession implements RtGameSession {
         core = new GameCore(System.nanoTime());
         accumulator = 0;
         dropCooldown = 0f;
+        pendingMerges.clear();
     }
 
     @Override
