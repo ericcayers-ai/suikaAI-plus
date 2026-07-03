@@ -201,11 +201,12 @@ public final class RtLabLauncher {
                 float[] lastCursor = {(float) width / 2f, (float) height / 2f};
                 float ORBIT_SENSITIVITY = 0.006f;
 
-                // §5 pause menu state. bloomOn is the one live-updating graphics setting
-                // reachable from it — see RtHud#drawPauseOverlay's doc for why the set
-                // is scoped to knobs that don't need a swapchain rebuild.
+                // §5 pause menu state + the live graphics settings it exposes (bloom,
+                // denoise, depth of field, temporal accumulation) — see
+                // RtGraphicsSettings for why the set is scoped to knobs that don't
+                // need a swapchain rebuild.
                 boolean[] paused = {false};
-                boolean[] bloomOn = {true};
+                RtGraphicsSettings gfx = new RtGraphicsSettings();
                 boolean[] trayExpanded = {true};
 
                 // Always on now (was a D-key toggle) — the improved multi-sample
@@ -236,14 +237,20 @@ public final class RtLabLauncher {
                     }
                     float mx = lastCursor[0], my = lastCursor[1];
                     if (paused[0]) {
-                        if (inRect(mx, my, hud.pauseResumeX(), hud.pauseResumeY(), hud.pauseBtnW(), hud.pauseBtnH())) {
-                            paused[0] = false;
-                        } else if (inRect(mx, my, hud.pauseBloomX(), hud.pauseBloomY(), hud.pauseBtnW(), hud.pauseBtnH())) {
-                            bloomOn[0] = !bloomOn[0];
-                        } else if (inRect(mx, my, hud.pauseQuitX(), hud.pauseQuitY(), hud.pauseBtnW(), hud.pauseBtnH())) {
-                            glfwSetWindowShouldClose(win, true);
+                        // Rows 0-5 share RtHud's pauseBtnY(i) geometry exactly.
+                        for (int i = 0; i < RtHud.PAUSE_BTN_COUNT; i++) {
+                            if (!inRect(mx, my, hud.pauseBtnX(), hud.pauseBtnY(i), hud.pauseBtnW(), hud.pauseBtnH())) continue;
+                            switch (i) {
+                                case 0 -> paused[0] = false;
+                                case 1 -> gfx.toggleBloom();
+                                case 2 -> gfx.toggleDenoise();
+                                case 3 -> gfx.cycleDof();
+                                case 4 -> gfx.cycleAccum();
+                                default -> glfwSetWindowShouldClose(win, true);
+                            }
+                            break;
                         }
-                    } else if (inRect(mx, my, hud.trayArrowX(), hud.trayArrowY(), 34, 34)) {
+                    } else if (inRect(mx, my, hud.trayArrowX(), hud.trayArrowY(), hud.trayArrowSize(), hud.trayArrowSize())) {
                         trayExpanded[0] = !trayExpanded[0];
                     } else if (aiDriver == null) {
                         session.drop();
@@ -266,7 +273,7 @@ public final class RtLabLauncher {
                 FruitTier lastHudNext = null;
                 boolean lastHudOver = false;
                 boolean lastHudPaused = false;
-                boolean lastHudBloomOn = true;
+                int lastHudGfxRevision = -1;
                 boolean lastHudTrayExpanded = true;
                 // AI autoplay paces itself like the classic AI-watch view rather than
                 // dropping every frame. The actual selectAction runs on its own thread
@@ -349,7 +356,10 @@ public final class RtLabLauncher {
                     mergeFx.appendTo(instances);
 
                     // First frame has no history to blend against — write through fully.
-                    float blend = frame == 0 ? 1.0f : 0.30f;
+                    // Otherwise the temporal-accumulation strength is a live pause-menu
+                    // graphics setting, as is the thin-lens aperture (depth of field).
+                    float blend = frame == 0 ? 1.0f : gfx.accumBlend();
+                    cam.aperture = gfx.aperture();
                     scene.updateFrame(pipeline, raw, instances,
                             session.hoverX(), session.hoverZ(), playing, cam.frame(time, blend));
                     frame++;
@@ -359,19 +369,19 @@ public final class RtLabLauncher {
                     // in-flight copy can still be reading the HUD staging buffer.
                     if (session.score() != lastHudScore || session.nextTier() != lastHudNext
                             || session.gameOver() != lastHudOver || paused[0] != lastHudPaused
-                            || bloomOn[0] != lastHudBloomOn || trayExpanded[0] != lastHudTrayExpanded) {
+                            || gfx.revision != lastHudGfxRevision || trayExpanded[0] != lastHudTrayExpanded) {
                         lastHudScore = session.score();
                         lastHudNext = session.nextTier();
                         lastHudOver = session.gameOver();
                         lastHudPaused = paused[0];
-                        lastHudBloomOn = bloomOn[0];
+                        lastHudGfxRevision = gfx.revision;
                         lastHudTrayExpanded = trayExpanded[0];
                         hud.draw(lastHudScore, lastHudNext, session.modeName(),
                                 aiDriver != null ? aiDriver.displayName() : null,
-                                lastHudOver, use3dPhysics, paused[0], bloomOn[0], trayExpanded[0]);
+                                lastHudOver, use3dPhysics, paused[0], gfx, trayExpanded[0]);
                     }
 
-                    renderFrame(ctx, swap, pipeline, denoiser, bloom, bloomOn[0], raw, denoised, present, hud, hudCompositor,
+                    renderFrame(ctx, swap, pipeline, denoiser, bloom, gfx, raw, denoised, present, hud, hudCompositor,
                             cmd, imageAvailable, renderFinished, inFlight, width, height);
 
                     if (rtCaptureDir != null) {
@@ -494,10 +504,9 @@ public final class RtLabLauncher {
         private static final float ZOOM_MIN = 15f, ZOOM_MAX = 40f;
 
         final float tanHalfFov = (float) Math.tan(Math.toRadians(28)); // 56° vertical
-        // Widened from 0.34 — the old aperture left the backdrop HDRI/wall too crisp
-        // to read as "melted into bokeh"; this blurs it convincingly while the jar
-        // (at focusDist) stays sharp.
-        final float aperture = 0.55f;
+        // Thin-lens aperture — set every frame from the pause menu's DEPTH OF FIELD
+        // setting (0 = pinhole, 0.55 = the cinematic default the scene was framed for).
+        float aperture = 0.55f;
         final float aspect;
         private final float baseYaw, basePitch;
         private float radius;
@@ -684,7 +693,7 @@ public final class RtLabLauncher {
     }
 
     private static void renderFrame(RtContext ctx, RtSwapchain swap, RtPipeline pipeline, RtDenoiser denoiser,
-                                     RtBloom bloom, boolean bloomOn, RtOutputImage raw, RtOutputImage denoised, RtOutputImage present,
+                                     RtBloom bloom, RtGraphicsSettings gfx, RtOutputImage raw, RtOutputImage denoised, RtOutputImage present,
                                      RtHud hud, RtHudCompositor hudCompositor,
                                      VkCommandBuffer cmd, long imageAvailable, long renderFinished, long inFlight,
                                      int width, int height) {
@@ -707,17 +716,30 @@ public final class RtLabLauncher {
             vkCmdTraceRaysKHR(cmd, pipeline.raygenRegion, pipeline.missRegion, pipeline.hitRegion,
                     pipeline.callableRegion, width, height, 1);
 
-            // The compute shader must see the RT write, and the source image's layout
-            // is already GENERAL for both — a memory barrier is enough, no layout
-            // transition needed. Denoising is always on now (was a D-key toggle).
+            // The next consumer of the RT write is either the denoiser's compute pass
+            // or (DENOISE OFF — a live pause-menu graphics setting) a plain image copy
+            // of the raw traced frame into the denoised slot, so the rest of the chain
+            // (bloom/composite) is identical either way. The source image's layout is
+            // already GENERAL for both — a memory barrier is enough.
+            boolean denoiseOn = gfx.denoise;
             VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1, stack)
                     .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
                     .srcAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
-                    .dstAccessMask(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+                    .dstAccessMask(denoiseOn ? (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
+                                             : (VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT));
             vkCmdPipelineBarrier(cmd,
                     org.lwjgl.vulkan.KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, barrier, null, null);
-            denoiser.dispatch(cmd, width, height);
+                    denoiseOn ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    0, barrier, null, null);
+            if (denoiseOn) {
+                denoiser.dispatch(cmd, width, height);
+            } else {
+                VkImageCopy.Buffer rawCopy = VkImageCopy.calloc(1, stack);
+                rawCopy.get(0).srcSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
+                rawCopy.get(0).dstSubresource(s -> s.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1));
+                rawCopy.get(0).extent(e -> e.width(width).height(height).depth(1));
+                vkCmdCopyImage(cmd, raw.image, VK_IMAGE_LAYOUT_GENERAL, denoised.image, VK_IMAGE_LAYOUT_GENERAL, rawCopy);
+            }
 
             long swapImage = swap.images[imageIndex];
             transition(stack, cmd, swapImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -730,11 +752,15 @@ public final class RtLabLauncher {
             // graphics setting the pause menu exposes: BLOOM ON falls through to the
             // compute pass above; OFF does a plain image copy instead — same
             // destination, same barrier shape either way.
+            boolean bloomOn = gfx.bloom;
             VkMemoryBarrier.Buffer preBloom = VkMemoryBarrier.calloc(1, stack)
                     .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
-                    .srcAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
-                    .dstAccessMask(bloomOn ? (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT) : VK_ACCESS_TRANSFER_WRITE_BIT);
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    // denoised's last write was the denoiser's compute pass, or the
+                    // raw->denoised transfer copy when DENOISE is off.
+                    .srcAccessMask(denoiseOn ? VK_ACCESS_SHADER_WRITE_BIT : VK_ACCESS_TRANSFER_WRITE_BIT)
+                    .dstAccessMask(bloomOn ? (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
+                                           : (VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT));
+            vkCmdPipelineBarrier(cmd, denoiseOn ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
                     bloomOn ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
                     0, preBloom, null, null);
             if (bloomOn) {

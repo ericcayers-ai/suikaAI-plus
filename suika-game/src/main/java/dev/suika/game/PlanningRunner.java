@@ -78,6 +78,21 @@ public final class PlanningRunner extends AgentRunner {
         } else {
             s.add("policy       " + cfg.technique.kind);
         }
+        // Ensembles: an explicit member manifest plus, for the learning ones
+        // (adaptive committee / bandit), their live trust statistics.
+        if (cfg.technique.isEnsemble()) {
+            String[] members = cfg.technique.ensembleMembers();
+            for (int i = 0; i < members.length; i++) {
+                s.add((i == 0 ? "uses         " : "             ") + members[i]);
+            }
+            if (agent() instanceof EnsembleAgents.HasLearnedState h) {
+                java.util.Collections.addAll(s, h.learnedStateLines());
+            }
+            if (agent() instanceof EnsembleAgents.NetGuidedMcts n) {
+                s.add("donor        " + n.donor.display + (n.donorTrained ? " (trained save)" : " (untrained — train it first)"));
+                s.add("net weight   " + Math.round(cfg.ensembleNetWeight() * 100) + "% of the final blend");
+            }
+        }
         s.add("doing now    " + cfg.technique.liveHint());
         s.add("tendency     " + tendencyLabel());
         return s.toArray(new String[0]);

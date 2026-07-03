@@ -28,8 +28,9 @@ public final class EvolutionRunner extends AgentRunner {
     private CmaEsTrainer   cma;
     private final boolean  isCma;
 
-    private final LiveChart fitnessChart  = new LiveChart(260);
-    private final LiveChart meanFitChart  = new LiveChart(260);
+    private final LiveChart fitnessChart   = new LiveChart(260);
+    private final LiveChart meanFitChart   = new LiveChart(260);
+    private final LiveChart diversityChart = new LiveChart(260);
 
     private volatile int    generation = 0;
     private volatile double bestFit = 0, meanFit = 0, bestSoFar = 0;
@@ -87,7 +88,8 @@ public final class EvolutionRunner extends AgentRunner {
             cma = new CmaEsTrainer(0.3, sims, seed, threads);
         } else {
             int pop = Math.max(8, cfg.populationSize);
-            ga = new GeneticTrainer(pop, Math.max(2, pop / 6), cfg.mutationSigma, sims, seed, threads);
+            ga = new GeneticTrainer(pop, Math.max(2, pop / 6), cfg.mutationSigma, sims, seed, threads,
+                    cfg.selection(), cfg.crossover, cfg.sigmaAnneal);
         }
         ghostCount    = Math.max(0, cfg.eliteViewCount() - 1);
         ghostCores    = new GameCore[ghostCount];
@@ -120,6 +122,7 @@ public final class EvolutionRunner extends AgentRunner {
         bestFit = 0; meanFit = 0; bestSoFar = 0;
         fitnessChart.clear();
         meanFitChart.clear();
+        diversityChart.clear();
         topAgents = new ArrayList<>();
         holdChampion = false;
         start();
@@ -169,6 +172,7 @@ public final class EvolutionRunner extends AgentRunner {
                 bestSoFar = Math.max(bestSoFar, bestFit);
                 fitnessChart.add((float) bestSoFar);
                 meanFitChart.add((float) meanFit);
+                diversityChart.add((float) diversitySigma());
                 // refresh ghost agents
                 List<AgentPlugin> ta = topAgents;
                 for (int i = 0; i < ghostCount; i++) {
@@ -277,6 +281,12 @@ public final class EvolutionRunner extends AgentRunner {
         return labels;
     }
 
+    // Evolution's three charts are the convergence proof the spec asks for: best-so-far
+    // (monotone envelope), mean (population-level progress), and diversity σ (collapse
+    // toward convergence). The default score chart gives way to diversity here — the
+    // champion's live score is already a stats line.
+    @Override public LiveChart chart1()      { return diversityChart; }
+    @Override public String    chart1Label() { return "diversity σ  ·  " + Math.round(diversitySigma()); }
     @Override public LiveChart chart3()      { return meanFitChart; }
     @Override public String    chart3Label() { return "mean fitness  ·  " + Math.round(meanFit); }
 
@@ -323,7 +333,13 @@ public final class EvolutionRunner extends AgentRunner {
         java.util.List<String> s = new java.util.ArrayList<>();
         s.add("elapsed      " + elapsedLabel() + "  ·  " + String.format("%.1f", gensPerMin()) + " gens/min");
         s.add("throughput   " + Math.round(evalsPerSec()) + " games/sec (parallel)");
-        s.add("diversity σ  " + Math.round(diversitySigma()) + "  ·  mutation " + String.format("%.3f", cfg.mutationSigma));
+        s.add("diversity σ  " + Math.round(diversitySigma()) + "  ·  mutation σ "
+                + String.format("%.3f", ga != null ? ga.currentSigma() : cfg.mutationSigma)
+                + (cfg.sigmaAnneal && !isCma ? " (annealing)" : ""));
+        if (!isCma) {
+            s.add("selection    " + cfg.selection().label
+                    + "  ·  crossover " + (cfg.crossover ? "uniform" : "off"));
+        }
         s.add("ghost lineage " + Math.max(1, cfg.ghostCullGens()) + " gens  ·  " + (ghostCount + 1) + " views");
         s.add("genome       one MLP's weights, flattened to a single number list");
         s.add("fitness      mean score over " + Math.max(1, cfg.simsPerGen())

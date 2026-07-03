@@ -16,6 +16,12 @@ import com.badlogic.gdx.utils.viewport.FitViewport;
 /**
  * AI Playground — scrollable technique matrix with per-technique info cards,
  * a config drawer for the selected technique, and a LAUNCH button.
+ *
+ * <p>The drawer's top row is the hardware-aware quality preset (Slow = best quality /
+ * Normal / High = fastest — see {@link HardwarePresets}); below it, only the knobs
+ * the selected technique actually reads are enabled, including the per-ensemble
+ * customization (donor net, blend weight, tie threshold, UCB c, adapt rate) and the
+ * evolution selection-math controls.
  */
 public final class AiPlaygroundScreen extends ScreenAdapter {
 
@@ -28,8 +34,8 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private float mx, my;
 
     // Ensembles get their own sorted (best -> worst, by AiTechnique#strength),
-    // collapsible section at the top of the list instead of being interleaved with
-    // everything else — the rest of the matrix keeps its existing curated order.
+    // collapsible section at the top of the list; the rest of the matrix keeps its
+    // curated order.
     private final AiTechnique[] ensembleTechs;
     private final AiTechnique[] otherTechs;
     private boolean ensemblesExpanded = false;
@@ -38,7 +44,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     // Layout constants
     private static final float CARD_H   = 60f;
     private static final float LIST_TOP = Theme.VH - 158f;
-    private static final float LIST_BOT = 380f;
+    private static final float LIST_BOT = 470f;
     private static final float CARD_X   = 36f;
     private static final float CARD_W   = Theme.VW - 72f;
 
@@ -46,19 +52,27 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private static final float INFO_R  = 11f;
     private static final float INFO_CX = CARD_X + CARD_W - INFO_R - 12f;
 
-    // Drawer controls — 7 stacked rows so evolution's launch knobs (sims/gen, ghost
-    // lineage, elite view count) fit in the same drawer as everything else, "n/a"
-    // elsewhere just like Parallelism/Param/Ghost-view already are for techniques that
-    // don't use them.
-    private final Rectangle speedCtrl     = new Rectangle(420, 286, 260, 24);
-    private final Rectangle paraCtrl      = new Rectangle(420, 256, 260, 24);
-    private final Rectangle paramCtrl     = new Rectangle(420, 226, 260, 24);
-    private final Rectangle simsCtrl      = new Rectangle(420, 196, 260, 24);
-    private final Rectangle ghostCullCtrl = new Rectangle(420, 166, 260, 24);
-    private final Rectangle eliteViewCtrl = new Rectangle(420, 136, 260, 24);
-    private final Rectangle ghostCtrl     = new Rectangle(420, 106, 260, 24);
+    // Drawer controls — 11 stacked rows; rows are enabled per technique ("n/a"
+    // elsewhere), with rows 5-10 context-switching between evolution's selection-math
+    // knobs and the ensembles' customization knobs.
+    private static final float CTRL_X = 420, CTRL_W = 260, CTRL_H = 24, CTRL_STEP = 30;
+    private final Rectangle presetCtrl    = row(0);
+    private final Rectangle speedCtrl     = row(1);
+    private final Rectangle paraCtrl      = row(2);
+    private final Rectangle paramCtrl     = row(3);
+    private final Rectangle ctx1Ctrl      = row(4);
+    private final Rectangle ctx2Ctrl      = row(5);
+    private final Rectangle ctx3Ctrl      = row(6);
+    private final Rectangle simsCtrl      = row(7);
+    private final Rectangle eliteViewCtrl = row(8);
+    private final Rectangle ghostCullCtrl = row(9);
+    private final Rectangle ghostCtrl     = row(10);
     private final Rectangle backBtn       = new Rectangle(36, 16, 300, 64);
     private final Rectangle launchBtn     = new Rectangle(Theme.VW - 336, 16, 300, 64);
+
+    private static Rectangle row(int i) {
+        return new Rectangle(CTRL_X, 386 - i * CTRL_STEP, CTRL_W, CTRL_H);
+    }
 
     // Infocard modal (null = closed)
     private AiTechnique infocardTech = null;
@@ -87,7 +101,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
         java.util.List<AiTechnique> ens = new java.util.ArrayList<>();
         java.util.List<AiTechnique> other = new java.util.ArrayList<>();
-        for (AiTechnique t : AiTechnique.values()) (t.kind.equals("ensemble") ? ens : other).add(t);
+        for (AiTechnique t : AiTechnique.values()) (t.isEnsemble() ? ens : other).add(t);
         ens.sort((a, b) -> b.strength - a.strength);
         ensembleTechs = ens.toArray(new AiTechnique[0]);
         otherTechs = other.toArray(new AiTechnique[0]);
@@ -129,8 +143,8 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             }
             @Override public boolean scrolled(float ax, float ay) {
                 // Negated: wheel-down (ay > 0) must reveal content further down the
-                // list, not scroll back toward the top — was backwards (confirmed by
-                // hands-on testing), the classic y-up-virtual-space scroll-sign trap.
+                // list, not scroll back toward the top — the classic y-up-virtual-space
+                // scroll-sign trap.
                 if (infocardTech == null)
                     scroll = MathUtils.clamp(scroll - ay * 46f, 0f, maxScroll());
                 return true;
@@ -160,17 +174,31 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         return dx * dx + dy * dy <= (INFO_R + 6f) * (INFO_R + 6f);
     }
 
+    /** A row is clickable only while its card centre is inside the visible list band —
+     *  the same rule the text pass uses to decide whether to draw its label. Clicking a
+     *  card that's mostly masked behind the header/drawer used to still select it
+     *  (invisible selection = the "scrolled list clicks the wrong card" bug). */
+    private boolean rowClickable(int i) {
+        float cy = cardTop(i) - CARD_H / 2f;
+        return cy > LIST_BOT && cardTop(i) - CARD_H <= LIST_TOP;
+    }
+
     private void handleClick(float x, float y) {
         if (infocardTech != null) { infocardTech = null; return; }
 
         if (backBtn.contains(x, y))   { game.setScreen(new MainMenuScreen(game)); return; }
         if (launchBtn.contains(x, y)) {
-            // §9: the control center's multi-board / stats layout reads far better in
-            // landscape, so launching from here defaults the window to it instead of
-            // asking the player to resize manually — a portrait window they already
-            // had (e.g. deliberately narrowed) is left alone.
+            // The control center's multi-board / stats layout reads far better in
+            // landscape, so launching from here defaults the window to it — a portrait
+            // window the player deliberately narrowed is left alone.
             if (Gdx.graphics.getWidth() <= Gdx.graphics.getHeight() * 1.3f) goLandscape();
             game.setScreen(new ControlCenterScreen(game, cfg));
+            return;
+        }
+        if (presetCtrl.contains(x, y)) {
+            var presets = HardwarePresets.values();
+            int idx = Math.floorMod(cfg.preset.ordinal() + dir(x, presetCtrl), presets.length);
+            presets[idx].applyTo(cfg);
             return;
         }
         if (speedCtrl.contains(x, y)) {
@@ -181,35 +209,43 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             cfg.parallelism = MathUtils.clamp(cfg.parallelism + dir(x, paraCtrl), 0, cores); return;
         }
         if (paramCtrl.contains(x, y) && paramApplicable()) { cycleParam(dir(x, paramCtrl)); return; }
-        if (simsCtrl.contains(x, y) && ghostApplicable()) {
+        if (ctx1Ctrl.contains(x, y) && ctx1Applicable()) { cycleCtx1(dir(x, ctx1Ctrl)); return; }
+        if (ctx2Ctrl.contains(x, y) && ctx2Applicable()) { cycleCtx2(dir(x, ctx2Ctrl)); return; }
+        if (ctx3Ctrl.contains(x, y) && ctx3Applicable()) { cycleCtx3(dir(x, ctx3Ctrl)); return; }
+        boolean evo = evolutionApplicable();
+        if (simsCtrl.contains(x, y) && evo) {
             cfg.simsPerGenIndex = wrap(cfg.simsPerGenIndex + dir(x, simsCtrl), PlaygroundConfig.SIMS_PER_GEN_OPTIONS.length);
             return;
         }
-        if (ghostCullCtrl.contains(x, y) && ghostApplicable()) {
-            cfg.ghostCullIndex = wrap(cfg.ghostCullIndex + dir(x, ghostCullCtrl), PlaygroundConfig.GHOST_CULL_OPTIONS.length);
-            return;
-        }
-        if (eliteViewCtrl.contains(x, y) && ghostApplicable()) {
+        if (eliteViewCtrl.contains(x, y) && evo) {
             cfg.eliteViewIndex = wrap(cfg.eliteViewIndex + dir(x, eliteViewCtrl), PlaygroundConfig.ELITE_VIEW_OPTIONS.length);
             return;
         }
-        if (ghostCtrl.contains(x, y) && ghostApplicable()) { cfg.ghostView = !cfg.ghostView; return; }
+        if (ghostCullCtrl.contains(x, y) && evo) {
+            cfg.ghostCullIndex = wrap(cfg.ghostCullIndex + dir(x, ghostCullCtrl), PlaygroundConfig.GHOST_CULL_OPTIONS.length);
+            return;
+        }
+        if (ghostCtrl.contains(x, y) && evo) { cfg.ghostView = !cfg.ghostView; return; }
 
         for (int i = 0; i < rowCount(); i++) {
+            if (!rowClickable(i)) continue;
             float top = cardTop(i);
-            if (top < LIST_BOT || top - CARD_H > LIST_TOP) continue;
+            boolean inCard = x >= CARD_X && x <= CARD_X + CARD_W && y <= top && y >= top - CARD_H + 6;
             AiTechnique t = rowTech(i);
-            if (t == null) { // header row — toggle the ensemble dropdown
-                if (x >= CARD_X && x <= CARD_X + CARD_W && y <= top && y >= top - CARD_H + 6) {
+            if (t == null) {
+                // Header row: toggle only when actually hit — clicks that miss it must
+                // keep falling through to the cards BELOW it. (An unconditional return
+                // here used to swallow every selection click while the header was
+                // visible — the "ensembles selection" bug.)
+                if (inCard) {
                     ensemblesExpanded = !ensemblesExpanded;
                     scroll = MathUtils.clamp(scroll, 0f, maxScroll());
+                    return;
                 }
-                return;
+                continue;
             }
             if (hitInfoIcon(i, x, y)) { infocardTech = t; return; }
-            if (x >= CARD_X && x <= CARD_X + CARD_W && y <= top && y >= top - CARD_H + 6) {
-                cfg.selectDefaultsFor(t); return;
-            }
+            if (inCard) { cfg.selectDefaultsFor(t); return; }
         }
     }
 
@@ -225,49 +261,47 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         Gdx.graphics.setWindowedMode(winW, winH);
     }
 
-    private boolean ghostApplicable() {
+    private boolean evolutionApplicable() {
         return cfg.technique.family == AiTechnique.Family.EVOLUTION;
     }
 
     // Ensembles built on MCTS search share its Rollouts knob; ENS_RTG_VERIFIED shares
-    // Decision Transformer's Return knob. ENS_GREEDY_GUARD/ENS_GENERATIVE_GREEDY have
-    // no adjustable launch parameter (they only take the fixed action-bin count).
+    // Decision Transformer's Return knob.
     private static final java.util.Set<AiTechnique> ROLLOUT_PARAM_TECHS = java.util.Set.of(
             AiTechnique.MCTS, AiTechnique.ALPHAZERO, AiTechnique.ENS_MCTS_NET,
-            AiTechnique.ENS_MCTS_TIEBREAK, AiTechnique.ENS_VOTING, AiTechnique.ENS_EVOLVED_MCTS,
-            AiTechnique.ENS_IMITATION_MCTS, AiTechnique.ENS_ADAPTIVE_VOTE, AiTechnique.ENS_BANDIT);
+            AiTechnique.ENS_MCTS_TIEBREAK, AiTechnique.ENS_ADAPTIVE_VOTE, AiTechnique.ENS_BANDIT);
 
     private boolean paramApplicable() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return true;
         return switch (cfg.technique) {
-            case NEUROEVO, PBT, DECISION_TRANSFORMER, OFFLINE_RL, BC, DAGGER, ENS_RTG_VERIFIED -> true;
+            case NEUROEVO, CMA_ES, DECISION_TRANSFORMER, DAGGER, ENS_RTG_VERIFIED -> true;
             default -> false;
         };
     }
     private String paramLabel() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return "Rollouts";
         return switch (cfg.technique) {
-            case NEUROEVO, PBT                                      -> "Population";
-            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> "Target return";
-            case BC, DAGGER                                         -> "Learning rate";
-            default                                                 -> "—";
+            case NEUROEVO, CMA_ES                         -> "Population";
+            case DECISION_TRANSFORMER, ENS_RTG_VERIFIED   -> "Target return";
+            case DAGGER                                   -> "Learning rate";
+            default                                       -> "—";
         };
     }
     private String paramValue() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return Integer.toString(cfg.rollouts);
         return switch (cfg.technique) {
-            case NEUROEVO, PBT                                      -> Integer.toString(cfg.populationSize);
-            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> Integer.toString((int) cfg.targetReturn);
-            case BC, DAGGER                                         -> String.format("%.0e", cfg.learningRate);
-            default                                                 -> "—";
+            case NEUROEVO, CMA_ES                         -> Integer.toString(cfg.populationSize);
+            case DECISION_TRANSFORMER, ENS_RTG_VERIFIED   -> Integer.toString((int) cfg.targetReturn);
+            case DAGGER                                   -> String.format("%.0e", cfg.learningRate);
+            default                                       -> "—";
         };
     }
     private void cycleParam(int d) {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) { cfg.rollouts = cycleInt(ROLLOUTS, cfg.rollouts, d); return; }
         switch (cfg.technique) {
-            case NEUROEVO, PBT                                      -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
-            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
-            case BC, DAGGER                                         -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
+            case NEUROEVO, CMA_ES                         -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
+            case DECISION_TRANSFORMER, ENS_RTG_VERIFIED   -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
+            case DAGGER                                   -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
             default -> { }
         }
     }
@@ -280,9 +314,86 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         return opts[wrap(idx + d, opts.length)];
     }
 
+    // ---- context rows 5-7: evolution selection math OR ensemble customization ----
+
+    private boolean ctx1Applicable() {
+        if (cfg.technique == AiTechnique.NEUROEVO) return true;                 // Selection
+        return switch (cfg.technique) {
+            case ENS_MCTS_NET, ENS_MCTS_TIEBREAK, ENS_BANDIT, ENS_ADAPTIVE_VOTE -> true;
+            default -> false;
+        };
+    }
+    private String ctx1Label() {
+        if (cfg.technique == AiTechnique.NEUROEVO) return "Selection";
+        return switch (cfg.technique) {
+            case ENS_MCTS_NET      -> "Donor net";
+            case ENS_MCTS_TIEBREAK -> "Tie threshold";
+            case ENS_BANDIT        -> "Explore (UCB c)";
+            case ENS_ADAPTIVE_VOTE -> "Adapt rate";
+            default                -> "—";
+        };
+    }
+    private String ctx1Value() {
+        if (cfg.technique == AiTechnique.NEUROEVO) return cfg.selection().label;
+        return switch (cfg.technique) {
+            case ENS_MCTS_NET      -> cfg.ensembleDonor().display
+                    + (EnsembleAgents.donorTrained(cfg.ensembleDonor()) ? "" : " (untrained)");
+            case ENS_MCTS_TIEBREAK -> Math.round(cfg.ensembleTieThreshold() * 100) + "%";
+            case ENS_BANDIT        -> String.format("%.1f", cfg.ensembleUcbC());
+            case ENS_ADAPTIVE_VOTE -> String.format("%.2f", cfg.ensembleAdaptLr());
+            default                -> "—";
+        };
+    }
+    private void cycleCtx1(int d) {
+        switch (cfg.technique) {
+            case NEUROEVO          -> cfg.selectionIndex = wrap(cfg.selectionIndex + d,
+                    dev.suika.ai.GeneticTrainer.Selection.values().length);
+            case ENS_MCTS_NET      -> cfg.ensembleDonorIndex = wrap(cfg.ensembleDonorIndex + d, PlaygroundConfig.ENSEMBLE_DONORS.length);
+            case ENS_MCTS_TIEBREAK -> cfg.tieThresholdIndex = wrap(cfg.tieThresholdIndex + d, PlaygroundConfig.TIE_THRESHOLD_OPTIONS.length);
+            case ENS_BANDIT        -> cfg.ucbCIndex = wrap(cfg.ucbCIndex + d, PlaygroundConfig.UCB_C_OPTIONS.length);
+            case ENS_ADAPTIVE_VOTE -> cfg.adaptLrIndex = wrap(cfg.adaptLrIndex + d, PlaygroundConfig.ADAPT_LR_OPTIONS.length);
+            default -> { }
+        }
+    }
+
+    private boolean ctx2Applicable() {
+        return cfg.technique == AiTechnique.NEUROEVO || cfg.technique == AiTechnique.ENS_MCTS_NET;
+    }
+    private String ctx2Label() {
+        return cfg.technique == AiTechnique.ENS_MCTS_NET ? "Net weight" : "Mutation σ";
+    }
+    private String ctx2Value() {
+        if (cfg.technique == AiTechnique.ENS_MCTS_NET)
+            return Math.round(cfg.ensembleNetWeight() * 100) + "%";
+        return String.format("%.2f", PlaygroundConfig.MUTATION_SIGMA_OPTIONS[cfg.mutationSigmaIndex]);
+    }
+    private void cycleCtx2(int d) {
+        if (cfg.technique == AiTechnique.ENS_MCTS_NET) {
+            cfg.netWeightIndex = wrap(cfg.netWeightIndex + d, PlaygroundConfig.NET_WEIGHT_OPTIONS.length);
+        } else {
+            cfg.mutationSigmaIndex = wrap(cfg.mutationSigmaIndex + d, PlaygroundConfig.MUTATION_SIGMA_OPTIONS.length);
+            cfg.mutationSigma = PlaygroundConfig.MUTATION_SIGMA_OPTIONS[cfg.mutationSigmaIndex];
+        }
+    }
+
+    /** Breeding combo (crossover on/off × σ-anneal on/off) as one 4-way cycler. */
+    private boolean ctx3Applicable() { return cfg.technique == AiTechnique.NEUROEVO; }
+    private String ctx3Value() {
+        if (cfg.crossover && cfg.sigmaAnneal) return "Crossover + anneal";
+        if (cfg.crossover)   return "Crossover";
+        if (cfg.sigmaAnneal) return "Mutation + anneal";
+        return "Mutation only";
+    }
+    private void cycleCtx3(int d) {
+        int cur = (cfg.crossover ? 1 : 0) | (cfg.sigmaAnneal ? 2 : 0);
+        int next = wrap(cur + d, 4);
+        cfg.crossover   = (next & 1) != 0;
+        cfg.sigmaAnneal = (next & 2) != 0;
+    }
+
     private Color familyColor(AiTechnique t) {
         return switch (t.family) {
-            case PLANNING  -> Theme.ACCENT_BLUE;
+            case PLANNING  -> t.isEnsemble() ? Theme.GOLD : Theme.ACCENT_BLUE;
             case EVOLUTION -> Theme.ACCENT_2;
             case IMITATION -> Theme.GOLD;
             case PYTHON    -> Theme.ACCENT;
@@ -311,7 +422,8 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             float top = cardTop(i);
             if (top < LIST_BOT || top - CARD_H > LIST_TOP) continue;
             AiTechnique t = rowTech(i);
-            boolean hov = mx >= CARD_X && mx <= CARD_X + CARD_W
+            boolean hov = rowClickable(i)
+                       && mx >= CARD_X && mx <= CARD_X + CARD_W
                        && my <= top    && my >= top - CARD_H + 6;
             if (t == null) { // collapsible "ENSEMBLES" header row
                 s.setColor(hov ? Theme.GOLD : Theme.PANEL_EDGE);
@@ -340,16 +452,20 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         Ui.fillRoundRect(s, 0, 0, Theme.VW, LIST_BOT, 0);
 
         // Drawer controls
-        boolean ghostEn = ghostApplicable();
+        boolean evo = evolutionApplicable();
+        drawCycler(s, presetCtrl, true);
         drawCycler(s, speedCtrl, true);
         drawCycler(s, paraCtrl,  cfg.technique.parallel);
         drawCycler(s, paramCtrl, paramApplicable());
-        drawCycler(s, simsCtrl,      ghostEn);
-        drawCycler(s, ghostCullCtrl, ghostEn);
-        drawCycler(s, eliteViewCtrl, ghostEn);
-        s.setColor(ghostEn ? Theme.PANEL_DEEP : new Color(0.10f, 0.11f, 0.16f, 0.6f));
+        drawCycler(s, ctx1Ctrl, ctx1Applicable());
+        drawCycler(s, ctx2Ctrl, ctx2Applicable());
+        drawCycler(s, ctx3Ctrl, ctx3Applicable());
+        drawCycler(s, simsCtrl,      evo);
+        drawCycler(s, eliteViewCtrl, evo);
+        drawCycler(s, ghostCullCtrl, evo);
+        s.setColor(evo ? Theme.PANEL_DEEP : new Color(0.10f, 0.11f, 0.16f, 0.6f));
         Ui.fillRoundRect(s, ghostCtrl.x, ghostCtrl.y, ghostCtrl.width, ghostCtrl.height, 8);
-        if (ghostEn) Ui.toggle(s,
+        if (evo) Ui.toggle(s,
                 ghostCtrl.x + ghostCtrl.width - 64f, ghostCtrl.y + 3f,
                 58f, ghostCtrl.height - 6f, cfg.ghostView);
         Ui.button(s, backBtn,   Theme.PANEL_EDGE, backBtn.contains(mx, my),   true);
@@ -357,11 +473,11 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
         // Infocard modal overlay — drawn opaque so the busy list behind it is fully hidden.
         if (infocardTech != null) {
-            s.setColor(0.03f, 0.04f, 0.07f, 0.94f);     // near-opaque dim over everything
+            s.setColor(0.03f, 0.04f, 0.07f, 0.94f);
             s.rect(0, 0, Theme.VW, Theme.VH);
-            float mW = 580f, mH = 400f;
+            float mW = 580f, mH = 440f;
             float mX = (Theme.VW - mW) / 2f, mY = (Theme.VH - mH) / 2f;
-            s.setColor(0.08f, 0.09f, 0.13f, 1f);        // solid card backing (no bleed-through)
+            s.setColor(0.08f, 0.09f, 0.13f, 1f);
             Ui.fillRoundRect(s, mX, mY, mW, mH, 18);
             Ui.panel(s, mX, mY, mW, mH, 18, Theme.PANEL, Theme.PANEL_EDGE);
             s.setColor(familyColor(infocardTech));
@@ -373,13 +489,12 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
         // ---- Text pass ----
         game.batch.begin();
-        // Background text (header, cards, drawer) is suppressed while the modal is open,
-        // so nothing bleeds through the dimmed overlay.
         if (infocardTech == null) {
             Ui.textCenter(game.batch, game.fontBig, "AI PLAYGROUND",
                     Theme.VW / 2f, Theme.VH - 86, Theme.TEXT);
             Ui.textCenter(game.batch, game.fontSmall,
-                    "Capability matrix · " + AiTechnique.values().length + " techniques · scroll to browse",
+                    "Top " + otherTechs.length + " techniques + " + ensembleTechs.length
+                            + " ensembles · " + HardwarePresets.hardwareLabel(),
                     Theme.VW / 2f, Theme.VH - 126, Theme.TEXT_DIM);
 
             // Card labels — only when card centre is above the drawer
@@ -399,12 +514,11 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
                 }
                 Ui.text(game.batch, game.font,      t.display,
                         CARD_X + 46, cy + 12, Theme.TEXT);
-                Ui.text(game.batch, game.fontSmall, t.category + "  ·  " + t.kind,
+                Ui.text(game.batch, game.fontSmall,
+                        t.isEnsemble() ? "uses " + shortMembers(t) : t.category + "  ·  " + t.kind,
                         CARD_X + 46, cy - 12, Theme.TEXT_DIM);
-                // env badge left of the "i" circle
                 Ui.textRight(game.batch, game.fontSmall, t.envBadge(),
                         INFO_CX - INFO_R - 10f, cy + 6, familyColor(t));
-                // "i" glyph
                 boolean iHov = hitInfoIcon(i, mx, my);
                 Ui.textCenter(game.batch, game.fontSmall, "i",
                         INFO_CX, cy + 5, iHov ? Theme.TEXT : Theme.TEXT_DIM);
@@ -416,7 +530,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         // Infocard modal text
         if (infocardTech != null) {
             AiTechnique t = infocardTech;
-            float mW = 580f, mH = 400f;
+            float mW = 580f, mH = 440f;
             float mX = (Theme.VW - mW) / 2f, mY = (Theme.VH - mH) / 2f;
             float tx  = mX + 28f;
             Ui.text(game.batch, game.fontMed, t.display,
@@ -433,11 +547,20 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
                 Ui.text(game.batch, game.fontSmall, lines[li], tx, ey, Theme.TEXT);
                 ey -= 22f;
             }
+            // Ensembles: an explicit member manifest, so what's inside is never a mystery.
+            if (t.isEnsemble()) {
+                Ui.text(game.batch, game.fontSmall, "MEMBERS", tx, mY + 230f, Theme.TEXT_DIM);
+                float my2 = mY + 230f;
+                for (String m : t.ensembleMembers()) {
+                    Ui.text(game.batch, game.fontSmall, "· " + m, tx + 100f, my2, Theme.TEXT);
+                    my2 -= 22f;
+                }
+            }
             // Attribute bars section
-            Ui.text(game.batch, game.fontSmall, "ATTRIBUTES", tx, mY + 192f, Theme.TEXT_DIM);
-            Ui.text(game.batch, game.fontSmall, "Performance", tx, mY + 164f, Theme.TEXT_DIM);
-            Ui.text(game.batch, game.fontSmall, "Speed",       tx, mY + 124f, Theme.TEXT_DIM);
-            Ui.text(game.batch, game.fontSmall, "Setup ease",  tx, mY + 84f,  Theme.TEXT_DIM);
+            Ui.text(game.batch, game.fontSmall, "ATTRIBUTES", tx, mY + 152f, Theme.TEXT_DIM);
+            Ui.text(game.batch, game.fontSmall, "Performance", tx, mY + 124f, Theme.TEXT_DIM);
+            Ui.text(game.batch, game.fontSmall, "Speed",       tx, mY + 94f,  Theme.TEXT_DIM);
+            Ui.text(game.batch, game.fontSmall, "Setup ease",  tx, mY + 64f,  Theme.TEXT_DIM);
             Ui.textCenter(game.batch, game.fontSmall, "tap anywhere to close",
                     Theme.VW / 2f, mY + 26, Theme.TEXT_FAINT);
         }
@@ -445,11 +568,23 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         game.batch.end();
     }
 
+    /** Compact "MCTS + Greedy + Heuristic" line for the card subtitle. */
+    private static String shortMembers(AiTechnique t) {
+        String[] members = t.ensembleMembers();
+        StringBuilder sb = new StringBuilder();
+        for (String m : members) {
+            if (sb.length() > 0) sb.append(" + ");
+            int paren = m.indexOf(" (");
+            sb.append(paren > 0 ? m.substring(0, paren) : m);
+        }
+        return sb.toString();
+    }
+
     private void drawInfoBarsShapes(ShapeRenderer s, AiTechnique t, float mX, float mY, float mW) {
         float bX   = mX + 158f;   // left edge of bar (after 130px label column)
-        float bW   = mW - 186f;   // bar width (580 - 28 margin - 130 label - 28 margin)
+        float bW   = mW - 186f;
         float barH = 14f;
-        float[] bY = {mY + 157f, mY + 117f, mY + 77f};
+        float[] bY = {mY + 117f, mY + 87f, mY + 57f};
         float[] frac = {
             t.strength / 100f,
             techSpeedFrac(t),
@@ -466,7 +601,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
     private static float techSpeedFrac(AiTechnique t) {
         return switch (t.family) {
-            case PLANNING  -> 0.82f;
+            case PLANNING  -> t.isEnsemble() ? 0.65f : 0.82f;
             case EVOLUTION -> 0.60f;
             case IMITATION -> 0.50f;
             case PYTHON    -> 0.30f;
@@ -487,26 +622,30 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private void drawDrawerText() {
         AiTechnique t = cfg.technique;
         Ui.text(game.batch, game.fontMed, t.display,
-                CARD_X + 4, 358, Theme.TEXT);
+                CARD_X + 4, LIST_BOT - 18, Theme.TEXT);
         Ui.textRight(game.batch, game.fontSmall, t.envBadge(),
-                Theme.VW - 40, 356, familyColor(t));
+                Theme.VW - 40, LIST_BOT - 20, familyColor(t));
         Ui.text(game.batch, game.fontSmall,
-                t.category + "  ·  " + t.kind,
-                CARD_X + 4, 330, Theme.TEXT_DIM);
+                t.isEnsemble() ? "uses " + shortMembers(t) : t.category + "  ·  " + t.kind,
+                CARD_X + 4, LIST_BOT - 44, Theme.TEXT_DIM);
 
-        cyclerText("Speed",       cfg.speedLabel(),      speedCtrl, true);
-        cyclerText("Parallelism", cfg.parallelismLabel(), paraCtrl,  t.parallel);
-        cyclerText(paramLabel(),  paramValue(),          paramCtrl, paramApplicable());
+        cyclerText("Preset",      cfg.preset.cyclerLabel(),  presetCtrl, true);
+        cyclerText("Speed",       cfg.speedLabel(),          speedCtrl, true);
+        cyclerText("Parallelism", cfg.parallelismLabel(),    paraCtrl,  t.parallel);
+        cyclerText(paramLabel(),  paramValue(),              paramCtrl, paramApplicable());
+        cyclerText(ctx1Applicable() ? ctx1Label() : "Strategy", ctx1Value(), ctx1Ctrl, ctx1Applicable());
+        cyclerText(ctx2Applicable() ? ctx2Label() : "Blend",    ctx2Value(), ctx2Ctrl, ctx2Applicable());
+        cyclerText("Breeding",    ctx3Value(),               ctx3Ctrl, ctx3Applicable());
 
-        boolean ghostEn = ghostApplicable();
-        cyclerText("Sims/generation", Integer.toString(cfg.simsPerGen()),   simsCtrl,      ghostEn);
-        cyclerText("Ghost lineage",   cfg.ghostCullGens() + " gens",        ghostCullCtrl, ghostEn);
-        cyclerText("Elite views",     cfg.eliteViewCount() + "x",           eliteViewCtrl, ghostEn);
+        boolean evo = evolutionApplicable();
+        cyclerText("Sims/generation", Integer.toString(cfg.simsPerGen()),   simsCtrl,      evo);
+        cyclerText("Elite views",     cfg.eliteViewCount() + "x",           eliteViewCtrl, evo);
+        cyclerText("Ghost lineage",   cfg.ghostCullGens() + " gens",        ghostCullCtrl, evo);
 
-        Color glc = ghostEn ? Theme.TEXT : Theme.TEXT_FAINT;
+        Color glc = evo ? Theme.TEXT : Theme.TEXT_FAINT;
         Ui.text(game.batch, game.font, "Ghost overlay",
                 CARD_X + 4, ghostCtrl.y + ghostCtrl.height / 2f + 8, glc);
-        if (!ghostEn) Ui.textCenter(game.batch, game.fontSmall, "n/a (evolution only)",
+        if (!evo) Ui.textCenter(game.batch, game.fontSmall, "n/a (evolution only)",
                 ghostCtrl.x + ghostCtrl.width / 2f - 28f,
                 ghostCtrl.y + ghostCtrl.height / 2f, Theme.TEXT_FAINT);
 

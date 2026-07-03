@@ -49,17 +49,30 @@ final class AiSlotPlayer {
         ModelSlots.ConfigSlot saved = ModelSlots.loadConfig(t.id, slot);
         if (saved == null) return null;
         applyHyperparams(cfg, saved.params());
-        return Agents.build(cfg);
+        AgentPlugin agent = Agents.build(cfg);
+        // Learning ensembles saved their live trust statistics into the same param
+        // map — restore them so a loaded save resumes with its accumulated learning.
+        if (agent instanceof EnsembleAgents.HasLearnedState h) h.importLearnedState(saved.params());
+        return agent;
+    }
+
+    static void save(AiTechnique t, int slot, MlpPolicy policy, PlaygroundConfig cfg, double score) {
+        save(t, slot, policy, cfg, score, Map.of());
     }
 
     /** Persists the technique's current state into a slot: real weights when
      *  {@code policy} is non-null and the technique is weight-bearing, otherwise the
-     *  current hyperparameters from {@code cfg}. */
-    static void save(AiTechnique t, int slot, MlpPolicy policy, PlaygroundConfig cfg, double score) {
+     *  current hyperparameters from {@code cfg} merged with any {@code learnedState}
+     *  (an ensemble's trust weights / bandit pulls — see
+     *  {@link EnsembleAgents.HasLearnedState}). */
+    static void save(AiTechnique t, int slot, MlpPolicy policy, PlaygroundConfig cfg, double score,
+                     Map<String, Double> learnedState) {
         if (isWeightBearing(t) && policy != null) {
             ModelSlots.save(t.id, slot, policy, score);
         } else {
-            ModelSlots.saveConfig(t.id, slot, hyperparamsOf(cfg), score);
+            Map<String, Double> params = hyperparamsOf(cfg);
+            params.putAll(learnedState);
+            ModelSlots.saveConfig(t.id, slot, params, score);
         }
     }
 
@@ -71,6 +84,15 @@ final class AiSlotPlayer {
         m.put("targetReturn", cfg.targetReturn);
         m.put("learningRate", cfg.learningRate);
         m.put("actionBins", (double) cfg.actionBins);
+        // v0.12 additions — ensemble customization + evolution selection math.
+        m.put("ensembleDonorIndex", (double) cfg.ensembleDonorIndex);
+        m.put("netWeightIndex", (double) cfg.netWeightIndex);
+        m.put("tieThresholdIndex", (double) cfg.tieThresholdIndex);
+        m.put("ucbCIndex", (double) cfg.ucbCIndex);
+        m.put("adaptLrIndex", (double) cfg.adaptLrIndex);
+        m.put("selectionIndex", (double) cfg.selectionIndex);
+        m.put("crossover", cfg.crossover ? 1.0 : 0.0);
+        m.put("sigmaAnneal", cfg.sigmaAnneal ? 1.0 : 0.0);
         return m;
     }
 
@@ -83,5 +105,23 @@ final class AiSlotPlayer {
         if (p.containsKey("targetReturn"))   cfg.targetReturn   = p.get("targetReturn");
         if (p.containsKey("learningRate"))   cfg.learningRate   = p.get("learningRate");
         if (p.containsKey("actionBins"))     cfg.actionBins     = p.get("actionBins").intValue();
+        if (p.containsKey("ensembleDonorIndex")) cfg.ensembleDonorIndex =
+                clampIdx(p.get("ensembleDonorIndex"), PlaygroundConfig.ENSEMBLE_DONORS.length);
+        if (p.containsKey("netWeightIndex")) cfg.netWeightIndex =
+                clampIdx(p.get("netWeightIndex"), PlaygroundConfig.NET_WEIGHT_OPTIONS.length);
+        if (p.containsKey("tieThresholdIndex")) cfg.tieThresholdIndex =
+                clampIdx(p.get("tieThresholdIndex"), PlaygroundConfig.TIE_THRESHOLD_OPTIONS.length);
+        if (p.containsKey("ucbCIndex")) cfg.ucbCIndex =
+                clampIdx(p.get("ucbCIndex"), PlaygroundConfig.UCB_C_OPTIONS.length);
+        if (p.containsKey("adaptLrIndex")) cfg.adaptLrIndex =
+                clampIdx(p.get("adaptLrIndex"), PlaygroundConfig.ADAPT_LR_OPTIONS.length);
+        if (p.containsKey("selectionIndex")) cfg.selectionIndex =
+                clampIdx(p.get("selectionIndex"), dev.suika.ai.GeneticTrainer.Selection.values().length);
+        if (p.containsKey("crossover"))   cfg.crossover   = p.get("crossover") > 0.5;
+        if (p.containsKey("sigmaAnneal")) cfg.sigmaAnneal = p.get("sigmaAnneal") > 0.5;
+    }
+
+    private static int clampIdx(double v, int len) {
+        return Math.max(0, Math.min(len - 1, (int) Math.round(v)));
     }
 }

@@ -121,7 +121,7 @@ public final class RtTraceTest {
                      RtHud hudOverlay = new RtHud(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, width, height);
                      RtHudCompositor compositor = new RtHudCompositor(ctx.device, present, hudOverlay)) {
                     hudOverlay.draw(1234, FruitTier.PERSIMMON, scatter3d ? "3D physics" : "2D physics",
-                            "MCTS", false, scatter3d, false, true, true);
+                            "MCTS", false, scatter3d, false, new RtGraphicsSettings(), true);
                     OneShotCommands.submit(ctx.device, commandPool, ctx.graphicsQueue, cmd -> {
                         try (MemoryStack stack = stackPush()) {
                             VkImageCopy.Buffer copy = VkImageCopy.calloc(1, stack);
@@ -141,8 +141,29 @@ public final class RtTraceTest {
                     });
                     savePng(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, present, width, height,
                             new File(outDir, "rtlab_hud" + suffix + ".png").getPath());
+
+                    // Second composite with the pause menu open — verifies the full
+                    // graphics-settings panel (bloom/denoise/DoF/accumulation rows)
+                    // renders and composites correctly, headlessly.
+                    hudOverlay.draw(1234, FruitTier.PERSIMMON, scatter3d ? "3D physics" : "2D physics",
+                            "MCTS", false, scatter3d, true, new RtGraphicsSettings(), true);
+                    OneShotCommands.submit(ctx.device, commandPool, ctx.graphicsQueue, cmd -> {
+                        try (MemoryStack stack = stackPush()) {
+                            hudOverlay.recordUpload(cmd);
+                            VkMemoryBarrier.Buffer bar = VkMemoryBarrier.calloc(1, stack)
+                                    .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+                                    .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                                    .dstAccessMask(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+                            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                    0, bar, null, null);
+                            compositor.dispatch(cmd, width, height);
+                        }
+                    });
+                    savePng(ctx.physicalDevice, ctx.device, commandPool, ctx.graphicsQueue, present, width, height,
+                            new File(outDir, "rtlab_pause" + suffix + ".png").getPath());
                 }
                 System.out.println("SUCCESS: wrote rtlab_hud" + suffix + ".png (denoised + GUI overlay, what the player sees)");
+                System.out.println("SUCCESS: wrote rtlab_pause" + suffix + ".png (pause menu graphics settings)");
             }
             vkDestroyCommandPool(ctx.device, commandPool, null);
         }

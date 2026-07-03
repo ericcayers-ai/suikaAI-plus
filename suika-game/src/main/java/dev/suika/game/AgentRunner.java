@@ -210,18 +210,9 @@ public abstract class AgentRunner extends LiveBoardRunner {
             if (m.lastVisits().length > 0) return m.lastVisits();
         }
         if (a instanceof GreedyOnePlyAgent g && g.lastScores().length > 0) return g.lastScores();
-        if (a instanceof Agents.GenerativeAgent g) {
-            double[][] history = g.lastStepHistory();
-            if (history.length > 0) {
-                // Final step's distribution — what was actually sampled from after
-                // refining from noise. Scaled to 0-100 like Greedy's bars, since these
-                // are probabilities (typically all under 1.0), not raw counts.
-                double[] finalDist = history[history.length - 1];
-                double max = 0; for (double v : finalDist) max = Math.max(max, v);
-                int[] bars = new int[finalDist.length];
-                if (max > 1e-9) for (int i = 0; i < bars.length; i++) bars[i] = (int) Math.round(100.0 * finalDist[i] / max);
-                return bars;
-            }
+        // Ensembles built on an inner MCTS expose that search's visit distribution.
+        if (a instanceof EnsembleAgents.HasMctsCore h && h.mctsCore().lastVisits().length > 0) {
+            return h.mctsCore().lastVisits();
         }
         return null;
     }

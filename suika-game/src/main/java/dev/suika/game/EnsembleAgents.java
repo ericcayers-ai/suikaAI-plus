@@ -2,12 +2,10 @@ package dev.suika.game;
 
 import dev.suika.ai.ActionSpec;
 import dev.suika.ai.AgentPlugin;
-import dev.suika.ai.GenerativeModelBridge;
 import dev.suika.ai.GreedyOnePlyAgent;
 import dev.suika.ai.HeuristicAgent;
 import dev.suika.ai.MctsAgent;
 import dev.suika.ai.MlpPolicy;
-import dev.suika.ai.NeuralAgent;
 import dev.suika.ai.ReturnConditionedAgent;
 import dev.suika.core.GameCore;
 import dev.suika.core.GameState;
@@ -15,20 +13,24 @@ import dev.suika.core.PhysicsConfig;
 import dev.suika.core.StepResult;
 import dev.suika.env.StateObservationEncoder;
 
-import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Random;
 
 /**
- * Ten composed {@link AgentPlugin}s, each genuinely combining two or more of the
- * existing building-block agents into a different decision process — every one calls
- * straight through to the real {@code selectAction}/search/forward-pass of the pieces
- * it's built from, not a cosmetic label wrapping a single agent.
+ * The five composed {@link AgentPlugin}s surfaced as "Ensemble" techniques — each
+ * genuinely combines two or more of the building-block agents into a different
+ * decision process, calling straight through to the real
+ * {@code selectAction}/search/forward-pass of the pieces it's built from.
  *
- * <p>Several source a "trained" {@link MlpPolicy} from whatever the matching
- * technique's save slots hold (see {@link ModelSlots}); with nothing saved yet they
- * fall back to a freshly random-initialised net (still real, just untrained) so the
- * ensemble is always usable, not just after someone trains a donor technique first.
+ * <p>What each ensemble uses is declared centrally in
+ * {@link AiTechnique#ensembleMembers()} (shown verbatim in the UI), and each is
+ * customizable from {@link PlaygroundConfig}: the net-blend's donor save + blend
+ * weight, the tiebreak's tie threshold, the bandit's UCB exploration constant, and
+ * the adaptive committee's learning rate.
+ *
+ * <p>The two ensembles that LEARN as they play (adaptive committee, bandit)
+ * implement {@link HasLearnedState} so their learned trust/pull statistics persist
+ * through the SAVES slots alongside every other technique's progress.
  *
  * <p>When called with a live {@link GameCore} (the normal path from
  * {@link AgentRunner#startThink}), every ensemble here uses the EXACT
@@ -41,25 +43,15 @@ final class EnsembleAgents {
     private EnsembleAgents() {}
 
     /**
-     * §10: bounded, shared, daemon thread pool for parallelizing genuinely
-     * independent inner-agent calls within a single ensemble decision. Only used
-     * where a research pass confirmed BOTH conditions hold: (a) the calls don't
-     * feed into each other (no result of one is an input to another — e.g.
-     * {@link McTsGreedyTiebreak} does NOT qualify, its tiebreak set depends on
-     * MCTS's own visit counts) and (b) none of them mutate the shared
-     * {@link GameCore} — every inner agent forks its own snapshot before
-     * simulating (see {@code GreedyOnePlyAgent#evaluateColumns}), so calling
-     * several concurrently against the same live core is safe.
+     * Bounded, shared, daemon thread pool for parallelizing genuinely independent
+     * inner-agent calls within a single ensemble decision. Only used where BOTH
+     * conditions hold: (a) the calls don't feed into each other and (b) none mutates
+     * the shared {@link GameCore} — every inner agent forks its own snapshot before
+     * simulating, so calling several concurrently against the same live core is safe.
      *
-     * <p>Sized well below the core count (capped at 4, floor 2) so it composes
-     * with MCTS's OWN root-parallel search threads and the control center's
-     * multi-board tiling instead of every layer of parallelism fighting the others
-     * for cores — this is about overlapping otherwise-serial WAIT time (each
-     * inner call blocks on real search/simulation work), not about maximizing
-     * raw thread count. None of these techniques are GPU-capable (all
-     * {@code Family.PLANNING}, pure JVM search/heuristics — see
-     * {@link AiTechnique#gpuCapableTraining()}), so there's no GPU work to route
-     * here; that lever only applies to the separate Python-family training path.
+     * <p>Sized well below the core count (capped at 4, floor 2) so it composes with
+     * MCTS's OWN root-parallel search threads and the control center's multi-board
+     * tiling instead of every layer of parallelism fighting for cores.
      */
     private static final java.util.concurrent.ExecutorService ENSEMBLE_POOL =
             java.util.concurrent.Executors.newFixedThreadPool(
@@ -78,10 +70,20 @@ final class EnsembleAgents {
     }
 
     /** Implemented by every ensemble whose decision runs through a real inner
-     *  {@link MctsAgent} — lets the control center's search-tree diagram (see
-     *  {@link ControlCenterScreen}) draw the same visualization for these as for
-     *  plain MCTS/AlphaZero, without needing to know which specific ensemble it is. */
+     *  {@link MctsAgent} — lets the control center's search-tree diagram draw the same
+     *  visualization for these as for plain MCTS/AlphaZero. */
     interface HasMctsCore { MctsAgent mctsCore(); }
+
+    /** Ensembles that accumulate learned statistics while playing (trust weights,
+     *  bandit pulls). Export/import round-trips through {@link ModelSlots}'s
+     *  config-save param map so the SAVES slots persist real learning progress,
+     *  not just hyperparameters. */
+    interface HasLearnedState {
+        Map<String, Double> exportLearnedState();
+        void importLearnedState(Map<String, Double> state);
+        /** Short live diagnostics lines for the control-center panel. */
+        String[] learnedStateLines();
+    }
 
     /** Loads the first present slot for {@code sourceTechnique}, or a freshly
      *  random-initialised policy of the same architecture if none exist yet. */
@@ -92,6 +94,15 @@ final class EnsembleAgents {
         }
         p.initRandom(new Random(fallbackSeed));
         return p;
+    }
+
+    /** True when a donor technique actually has trained weights saved (any slot) —
+     *  surfaced in the UI so "which net is this ensemble using" is explicit. */
+    static boolean donorTrained(AiTechnique donor) {
+        for (int slot = 1; slot <= ModelSlots.SLOT_COUNT; slot++) {
+            if (ModelSlots.info(donor.id, slot).present()) return true;
+        }
+        return false;
     }
 
     private static double normalize(double[] v, int i) {
@@ -112,21 +123,28 @@ final class EnsembleAgents {
     }
 
     // -------------------------------------------------------------------------
-    // 1. MCTS + Policy Net — search narrows, an untrained-by-default (or BC-slot-
-    //    sourced) net's logits nudge the final pick among visited columns.
+    // 1. MCTS + Policy Net — search narrows, a donor net's logits weigh in on the
+    //    final pick among visited columns. Donor save (Neuroevo / CMA-ES / DAgger)
+    //    and blend weight are user-selectable.
     // -------------------------------------------------------------------------
     static final class NetGuidedMcts implements AgentPlugin, HasMctsCore {
         private final MctsAgent mcts;
         private final MlpPolicy net;
+        private final double netWeight;
+        final AiTechnique donor;
+        final boolean donorTrained;
         private final StateObservationEncoder encoder = new StateObservationEncoder();
         private volatile int[] lastVisits = new int[0];
 
-        NetGuidedMcts(int rollouts, int actionBins) {
+        NetGuidedMcts(int rollouts, int actionBins, AiTechnique donor, double netWeight) {
             this.mcts = new MctsAgent(rollouts, Math.sqrt(2), 6, actionBins);
-            this.net = loadOrFreshPolicy(AiTechnique.BC, 101L);
+            this.donor = donor;
+            this.donorTrained = donorTrained(donor);
+            this.net = loadOrFreshPolicy(donor, 101L);
+            this.netWeight = netWeight;
         }
         @Override public String id()          { return "ens-mcts-net"; }
-        @Override public String displayName() { return "MCTS + Policy Net"; }
+        @Override public String displayName() { return "MCTS + Policy Net (" + donor.display + ")"; }
         @Override public MctsAgent mctsCore()  { return mcts; }
 
         @Override public Object selectAction(GameState state, ActionSpec spec) {
@@ -147,7 +165,8 @@ final class EnsembleAgents {
             double bestScore = Double.NEGATIVE_INFINITY;
             for (int b = 0; b < spec.bins() && b < visits.length; b++) {
                 if (visits[b] == 0) continue;
-                double score = (visits[b] / (double) maxVisit) * 0.7 + normalize(logits, b) * 0.3;
+                double score = (visits[b] / (double) maxVisit) * (1.0 - netWeight)
+                        + normalize(logits, b) * netWeight;
                 if (score > bestScore) { bestScore = score; best = b; }
             }
             return best;
@@ -155,46 +174,19 @@ final class EnsembleAgents {
     }
 
     // -------------------------------------------------------------------------
-    // 2. Policy net normally; GreedyOnePly overrides it when the current fruit has
-    //    an immediate same-tier merge available anywhere on the board.
-    // -------------------------------------------------------------------------
-    static final class GreedyGuardedPolicy implements AgentPlugin {
-        private final NeuralAgent net;
-        private final GreedyOnePlyAgent greedy;
-
-        GreedyGuardedPolicy(int actionBins) {
-            this.net = new NeuralAgent(loadOrFreshPolicy(AiTechnique.NEUROEVO, 202L));
-            this.greedy = new GreedyOnePlyAgent(actionBins);
-        }
-        @Override public String id()          { return "ens-greedy-guard"; }
-        @Override public String displayName() { return "Policy Net + Greedy Guard"; }
-
-        @Override public Object selectAction(GameState state, ActionSpec spec) {
-            return immediateMergeAvailable(state) ? greedy.selectAction(state, spec) : net.selectAction(state, spec);
-        }
-        @Override public Object selectAction(GameCore core, ActionSpec spec) {
-            return immediateMergeAvailable(core.getState())
-                    ? greedy.selectAction(core, spec) : net.selectAction(core, spec);
-        }
-        private boolean immediateMergeAvailable(GameState state) {
-            var cur = state.currentFruitTier();
-            for (var f : state.fruits()) if (f.tier() == cur) return true;
-            return false;
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // 3. MCTS narrows to the columns it was genuinely torn between (within 85% of
-    //    the top visit count); GreedyOnePly's EXACT one-ply evaluation breaks the
-    //    tie instead of MCTS's noisier rollout-based estimate.
+    // 2. MCTS narrows to the columns it was genuinely torn between (within the
+    //    configured share of the top visit count); GreedyOnePly's EXACT one-ply
+    //    evaluation breaks the tie instead of MCTS's noisier rollout estimate.
     // -------------------------------------------------------------------------
     static final class McTsGreedyTiebreak implements AgentPlugin, HasMctsCore {
         private final MctsAgent mcts;
         private final int actionBins;
+        private final double tieThreshold;
 
-        McTsGreedyTiebreak(int rollouts, int actionBins) {
+        McTsGreedyTiebreak(int rollouts, int actionBins, double tieThreshold) {
             this.mcts = new MctsAgent(rollouts, Math.sqrt(2), 6, actionBins);
             this.actionBins = actionBins;
+            this.tieThreshold = tieThreshold;
         }
         @Override public String id()          { return "ens-mcts-greedy-tiebreak"; }
         @Override public String displayName() { return "MCTS + Greedy Tiebreak"; }
@@ -210,134 +202,27 @@ final class EnsembleAgents {
             int maxVisit = 0; for (int v : visits) maxVisit = Math.max(maxVisit, v);
             if (maxVisit == 0) return mctsAction;
             java.util.List<Integer> tied = new java.util.ArrayList<>();
-            for (int b = 0; b < visits.length; b++) if (visits[b] >= maxVisit * 0.85) tied.add(b);
+            for (int b = 0; b < visits.length; b++) if (visits[b] >= maxVisit * tieThreshold) tied.add(b);
             if (tied.size() <= 1) return mctsAction;
+            // The tied candidates' exact evaluations are independent full settles —
+            // run them concurrently on the shared pool (each forks its own snapshot).
+            java.util.List<java.util.concurrent.Future<double[]>> evals = new java.util.ArrayList<>(tied.size());
+            for (int b : tied) {
+                final int bin = b;
+                evals.add(ENSEMBLE_POOL.submit(() -> new double[]{bin, quickEval(core, actionBins, bin)}));
+            }
             int best = tied.get(0);
             double bestValue = Double.NEGATIVE_INFINITY;
-            for (int b : tied) {
-                double v = quickEval(core, actionBins, b);
-                if (v > bestValue) { bestValue = v; best = b; }
+            for (var f : evals) {
+                double[] r = await(f);
+                if (r[1] > bestValue) { bestValue = r[1]; best = (int) r[0]; }
             }
             return best;
         }
     }
 
     // -------------------------------------------------------------------------
-    // 4. Voting committee: MCTS + Greedy + Heuristic each propose a column; majority
-    //    wins, MCTS breaks a full three-way disagreement.
-    // -------------------------------------------------------------------------
-    static final class VotingCommittee implements AgentPlugin {
-        private final MctsAgent mcts;
-        private final GreedyOnePlyAgent greedy;
-        private final HeuristicAgent heuristic = new HeuristicAgent();
-
-        VotingCommittee(int rollouts, int actionBins) {
-            this.mcts = new MctsAgent(rollouts, Math.sqrt(2), 5, actionBins);
-            this.greedy = new GreedyOnePlyAgent(actionBins);
-        }
-        @Override public String id()          { return "ens-voting-committee"; }
-        @Override public String displayName() { return "Voting Committee"; }
-
-        @Override public Object selectAction(GameState state, ActionSpec spec) {
-            return vote(mcts.selectAction(state, spec), greedy.selectAction(state, spec), heuristic.selectAction(state, spec));
-        }
-        @Override public Object selectAction(GameCore core, ActionSpec spec) {
-            // §10: all three votes are independent (none reads another's result) and
-            // none mutates the shared core (each forks its own snapshot) — see
-            // ENSEMBLE_POOL's doc. MCTS is the expensive one; running Greedy's real
-            // one-ply simulation alongside it (instead of after it) is the actual win.
-            var mctsF = ENSEMBLE_POOL.submit(() -> mcts.selectAction(core, spec));
-            var greedyF = ENSEMBLE_POOL.submit(() -> greedy.selectAction(core, spec));
-            Object heuristicResult = heuristic.selectAction(core.getState(), spec); // cheap — run inline
-            return vote(await(mctsF), await(greedyF), heuristicResult);
-        }
-        private Object vote(Object a, Object b, Object c) {
-            int ai = ((Number) a).intValue(), bi = ((Number) b).intValue(), ci = ((Number) c).intValue();
-            if (ai == bi || ai == ci) return a; // MCTS agrees with at least one other
-            if (bi == ci) return b;             // Greedy + Heuristic agree, MCTS is the outlier
-            return a;                            // three-way split — defer to the strongest single agent
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // 5. MCTS + a CMA-ES-evolved value net (heavier net weight than #1, since this
-    //    is a fitness-selected policy when a slot exists, not a default net).
-    // -------------------------------------------------------------------------
-    static final class EvolvedNetMcts implements AgentPlugin, HasMctsCore {
-        private final MctsAgent mcts;
-        private final MlpPolicy evolvedNet;
-        private final StateObservationEncoder encoder = new StateObservationEncoder();
-        private volatile int[] lastVisits = new int[0];
-
-        EvolvedNetMcts(int rollouts, int actionBins) {
-            this.mcts = new MctsAgent(rollouts, Math.sqrt(2), 6, actionBins);
-            this.evolvedNet = loadOrFreshPolicy(AiTechnique.CMA_ES, 303L);
-        }
-        @Override public String id()          { return "ens-evolved-mcts"; }
-        @Override public String displayName() { return "MCTS + Evolved Value Net"; }
-        @Override public MctsAgent mctsCore()  { return mcts; }
-
-        @Override public Object selectAction(GameState state, ActionSpec spec) {
-            return blend(mcts.selectAction(state, spec), state, spec);
-        }
-        @Override public Object selectAction(GameCore core, ActionSpec spec) {
-            Object mctsAction = mcts.selectAction(core, spec);
-            lastVisits = mcts.lastVisits();
-            return blend(mctsAction, core.getState(), spec);
-        }
-        private Object blend(Object mctsAction, GameState state, ActionSpec spec) {
-            int[] visits = lastVisits;
-            if (!spec.discrete() || visits.length == 0) return mctsAction;
-            int maxVisit = 0; for (int v : visits) maxVisit = Math.max(maxVisit, v);
-            if (maxVisit == 0) return mctsAction;
-            double[] logits = evolvedNet.forward(encoder.encode(state));
-            int best = ((Number) mctsAction).intValue();
-            double bestScore = Double.NEGATIVE_INFINITY;
-            for (int b = 0; b < spec.bins() && b < visits.length; b++) {
-                if (visits[b] == 0) continue;
-                double score = (visits[b] / (double) maxVisit) * 0.4 + normalize(logits, b) * 0.6;
-                if (score > bestScore) { bestScore = score; best = b; }
-            }
-            return best;
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // 6. MCTS defers to a DAgger-slot-sourced imitation policy whenever the search
-    //    didn't strongly reject that column (still holds >=50% of the top visit
-    //    share) — "don't override trained human/expert style unless search really
-    //    disagrees", a different mechanism from the additive blends above.
-    // -------------------------------------------------------------------------
-    static final class ImitationBlendedMcts implements AgentPlugin, HasMctsCore {
-        private final MctsAgent mcts;
-        private final NeuralAgent imitation;
-
-        ImitationBlendedMcts(int rollouts, int actionBins) {
-            this.mcts = new MctsAgent(rollouts, Math.sqrt(2), 6, actionBins);
-            this.imitation = new NeuralAgent(loadOrFreshPolicy(AiTechnique.DAGGER, 404L));
-        }
-        @Override public String id()          { return "ens-imitation-mcts"; }
-        @Override public String displayName() { return "MCTS + Imitation Blend"; }
-        @Override public MctsAgent mctsCore()  { return mcts; }
-
-        @Override public Object selectAction(GameState state, ActionSpec spec) {
-            return defer(mcts.selectAction(state, spec), imitation.selectAction(state, spec), new int[0]);
-        }
-        @Override public Object selectAction(GameCore core, ActionSpec spec) {
-            Object mctsAction = mcts.selectAction(core, spec);
-            return defer(mctsAction, imitation.selectAction(core.getState(), spec), mcts.lastVisits());
-        }
-        private Object defer(Object mctsAction, Object imitationAction, int[] visits) {
-            if (visits.length == 0) return mctsAction;
-            int imBin = ((Number) imitationAction).intValue();
-            int maxVisit = 0; for (int v : visits) maxVisit = Math.max(maxVisit, v);
-            if (maxVisit > 0 && imBin >= 0 && imBin < visits.length && visits[imBin] >= maxVisit * 0.5) return imBin;
-            return mctsAction;
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // 7. A Decision-Transformer-style return-conditioned agent proposes an
+    // 3. A Decision-Transformer-style return-conditioned agent proposes an
     //    (ambitious) column; a shallow MCTS sanity-checks it against its own top
     //    pick via an exact one-ply evaluation of both, keeping whichever is better.
     // -------------------------------------------------------------------------
@@ -356,9 +241,8 @@ final class EnsembleAgents {
         @Override public Object selectAction(GameState state, ActionSpec spec) { return rtg.selectAction(state, spec); }
 
         @Override public Object selectAction(GameCore core, ActionSpec spec) {
-            // §10: the return-conditioned proposal and the verifier's shallow MCTS
-            // search don't depend on each other's result — only the two quickEval
-            // calls below (which pick between them) need both bins already known.
+            // The return-conditioned proposal and the verifier's shallow MCTS search
+            // don't depend on each other's result — run both concurrently.
             var pF = ENSEMBLE_POOL.submit(() -> ((Number) rtg.selectAction(core.getState(), spec)).intValue());
             var mF = ENSEMBLE_POOL.submit(() -> {
                 MctsAgent verifier = new MctsAgent(VERIFY_ROLLOUTS, Math.sqrt(2), 4, actionBins);
@@ -366,69 +250,31 @@ final class EnsembleAgents {
             });
             int pBin = await(pF), mBin = await(mF);
             if (pBin == mBin) return pBin;
-            double pValue = quickEval(core, actionBins, pBin);
+            var pvF = ENSEMBLE_POOL.submit(() -> quickEval(core, actionBins, pBin));
             double mValue = quickEval(core, actionBins, mBin);
-            return pValue >= mValue ? pBin : mBin;
+            return await(pvF) >= mValue ? pBin : mBin;
         }
     }
 
     // -------------------------------------------------------------------------
-    // 8. A generative (diffusion-style) sampler proposes several candidate columns;
-    //    an exact one-ply evaluation filters them down to the single best, instead
-    //    of just taking the sampler's raw pick.
+    // 4. Adaptive voting committee: MCTS + Greedy + Heuristic vote, and each
+    //    member's trust weight is a genuine multiplicative-weights update driven by
+    //    the score actually gained since its last winning pick — the committee
+    //    LEARNS which member to trust over the course of a session.
     // -------------------------------------------------------------------------
-    static final class GenerativeGreedyFilter implements AgentPlugin {
-        private final GenerativeModelBridge bridge;
-        private final int actionBins;
-        private static final int CANDIDATES = 6;
-
-        GenerativeGreedyFilter(int actionBins) {
-            this.bridge = new GenerativeModelBridge(GenerativeModelBridge.ModelType.DIFFUSION_POLICY, 606L);
-            this.actionBins = actionBins;
-        }
-        @Override public String id()          { return "ens-generative-greedy"; }
-        @Override public String displayName() { return "Generative Proposals + Greedy Filter"; }
-
-        @Override public Object selectAction(GameState state, ActionSpec spec) {
-            return sampleCandidates(state).iterator().next();
-        }
-        @Override public Object selectAction(GameCore core, ActionSpec spec) {
-            LinkedHashSet<Integer> candidates = sampleCandidates(core.getState());
-            int best = candidates.iterator().next();
-            double bestValue = Double.NEGATIVE_INFINITY;
-            for (int bin : candidates) {
-                double v = quickEval(core, actionBins, bin);
-                if (v > bestValue) { bestValue = v; best = bin; }
-            }
-            return best;
-        }
-        private LinkedHashSet<Integer> sampleCandidates(GameState state) {
-            LinkedHashSet<Integer> candidates = new LinkedHashSet<>();
-            for (int i = 0; i < CANDIDATES * 3 && candidates.size() < CANDIDATES; i++) {
-                candidates.add(bridge.sampleAction(state, actionBins));
-            }
-            return candidates;
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // 9. Adaptive voting committee: like #4, but each member's trust weight is a
-    //    genuine multiplicative-weights update driven by the score actually gained
-    //    since its last winning pick — the committee LEARNS which member to trust
-    //    over the course of a session instead of voting with fixed weights.
-    // -------------------------------------------------------------------------
-    static final class AdaptiveVotingCommittee implements AgentPlugin {
+    static final class AdaptiveVotingCommittee implements AgentPlugin, HasLearnedState {
         private final MctsAgent mcts;
         private final GreedyOnePlyAgent greedy;
         private final HeuristicAgent heuristic = new HeuristicAgent();
         private final double[] weight = {1.0, 1.0, 1.0}; // MCTS, Greedy, Heuristic
         private int lastWinner = -1;
         private long scoreAtLastPick = 0;
-        private static final double LEARNING_RATE = 0.08;
+        private final double learningRate;
 
-        AdaptiveVotingCommittee(int rollouts, int actionBins) {
+        AdaptiveVotingCommittee(int rollouts, int actionBins, double learningRate) {
             this.mcts = new MctsAgent(rollouts, Math.sqrt(2), 5, actionBins);
             this.greedy = new GreedyOnePlyAgent(actionBins);
+            this.learningRate = learningRate;
         }
         @Override public String id()          { return "ens-adaptive-vote"; }
         @Override public String displayName() { return "Adaptive Voting Committee"; }
@@ -439,17 +285,17 @@ final class EnsembleAgents {
                     ((Number) heuristic.selectAction(state, spec)).intValue());
         }
         @Override public Object selectAction(GameCore core, ActionSpec spec) {
-            // §10: same independence/no-mutation guarantee as VotingCommittee above.
+            // All three votes are independent and none mutates the shared core.
             var mctsF = ENSEMBLE_POOL.submit(() -> mcts.selectAction(core, spec));
             var greedyF = ENSEMBLE_POOL.submit(() -> greedy.selectAction(core, spec));
             int heuristicBin = ((Number) heuristic.selectAction(core.getState(), spec)).intValue();
             return decide(core.getScore(), ((Number) await(mctsF)).intValue(),
                     ((Number) await(greedyF)).intValue(), heuristicBin);
         }
-        private Object decide(long currentScore, int mctsBin, int greedyBin, int heuristicBin) {
+        private synchronized Object decide(long currentScore, int mctsBin, int greedyBin, int heuristicBin) {
             if (lastWinner >= 0) {
                 double reward = currentScore - scoreAtLastPick;
-                weight[lastWinner] *= Math.exp(LEARNING_RATE * Math.signum(reward) * Math.min(1.0, Math.abs(reward) / 10.0));
+                weight[lastWinner] *= Math.exp(learningRate * Math.signum(reward) * Math.min(1.0, Math.abs(reward) / 10.0));
                 double sum = weight[0] + weight[1] + weight[2];
                 for (int i = 0; i < 3; i++) weight[i] = Math.max(0.05, weight[i] / sum * 3.0);
             }
@@ -465,18 +311,35 @@ final class EnsembleAgents {
             return winnerBin;
         }
         /** Current trust weights [MCTS, Greedy, Heuristic] — for a diagnostics readout. */
-        double[] trustWeights() { return weight.clone(); }
+        synchronized double[] trustWeights() { return weight.clone(); }
+
+        @Override public synchronized Map<String, Double> exportLearnedState() {
+            Map<String, Double> m = new java.util.LinkedHashMap<>();
+            m.put("ens.weight.mcts", weight[0]);
+            m.put("ens.weight.greedy", weight[1]);
+            m.put("ens.weight.heuristic", weight[2]);
+            return m;
+        }
+        @Override public synchronized void importLearnedState(Map<String, Double> state) {
+            weight[0] = state.getOrDefault("ens.weight.mcts", weight[0]);
+            weight[1] = state.getOrDefault("ens.weight.greedy", weight[1]);
+            weight[2] = state.getOrDefault("ens.weight.heuristic", weight[2]);
+            lastWinner = -1;
+        }
+        @Override public String[] learnedStateLines() {
+            double[] w = trustWeights();
+            return new String[]{ String.format("trust        MCTS %.2f · Greedy %.2f · Heur %.2f", w[0], w[1], w[2]) };
+        }
     }
 
     // -------------------------------------------------------------------------
-    // 10. UCB1 bandit meta-controller: picks WHICH agent (MCTS/Greedy/Heuristic)
-    //     makes each move, learning from the score actually gained after each pick
-    //     which one performs best given how the board looks lately. Directly
-    //     "learns a tendency" rather than just having one baked in.
+    // 5. UCB1 bandit meta-controller: picks WHICH agent (MCTS/Greedy/Heuristic)
+    //    makes each move, learning from the score actually gained after each pick
+    //    which one performs best given how the board looks lately.
     // -------------------------------------------------------------------------
-    static final class BanditMetaController implements AgentPlugin {
+    static final class BanditMetaController implements AgentPlugin, HasLearnedState {
         private static final int ARMS = 3; // 0=MCTS, 1=Greedy, 2=Heuristic
-        private static final double C = 1.4; // UCB1 exploration constant
+        private final double c;   // UCB1 exploration constant
 
         private final MctsAgent mcts;
         private final GreedyOnePlyAgent greedy;
@@ -486,9 +349,10 @@ final class EnsembleAgents {
         private int lastArm = -1;
         private long scoreAtLastPick = 0;
 
-        BanditMetaController(int rollouts, int actionBins) {
+        BanditMetaController(int rollouts, int actionBins, double ucbC) {
             this.mcts = new MctsAgent(rollouts, Math.sqrt(2), 5, actionBins);
             this.greedy = new GreedyOnePlyAgent(actionBins);
+            this.c = ucbC;
         }
         @Override public String id()          { return "ens-bandit-meta"; }
         @Override public String displayName() { return "Bandit Meta-Controller"; }
@@ -509,7 +373,7 @@ final class EnsembleAgents {
                 default -> heuristic.selectAction(core.getState(), spec);
             };
         }
-        private int pick(long currentScore) {
+        private synchronized int pick(long currentScore) {
             if (lastArm >= 0) rewardSum[lastArm] += (currentScore - scoreAtLastPick);
             long totalPulls = 0; for (long p : pulls) totalPulls += p;
             int chosen = 0;
@@ -517,7 +381,7 @@ final class EnsembleAgents {
             for (int a = 0; a < ARMS; a++) {
                 if (pulls[a] == 0) { chosen = a; break; }
                 double mean = rewardSum[a] / pulls[a];
-                double ucb = mean + C * Math.sqrt(Math.log(Math.max(2, totalPulls)) / pulls[a]);
+                double ucb = mean + c * Math.sqrt(Math.log(Math.max(2, totalPulls)) / pulls[a]);
                 if (ucb > bestUcb) { bestUcb = ucb; chosen = a; }
             }
             pulls[chosen]++;
@@ -527,6 +391,32 @@ final class EnsembleAgents {
         }
         /** Pull counts [MCTS, Greedy, Heuristic] — how the bandit has actually been
          *  splitting its trust, for a diagnostics readout. */
-        long[] pullCounts() { return pulls.clone(); }
+        synchronized long[] pullCounts() { return pulls.clone(); }
+
+        @Override public synchronized Map<String, Double> exportLearnedState() {
+            Map<String, Double> m = new java.util.LinkedHashMap<>();
+            String[] names = {"mcts", "greedy", "heuristic"};
+            for (int a = 0; a < ARMS; a++) {
+                m.put("ens.pulls." + names[a], (double) pulls[a]);
+                m.put("ens.reward." + names[a], rewardSum[a]);
+            }
+            return m;
+        }
+        @Override public synchronized void importLearnedState(Map<String, Double> state) {
+            String[] names = {"mcts", "greedy", "heuristic"};
+            for (int a = 0; a < ARMS; a++) {
+                pulls[a] = state.getOrDefault("ens.pulls." + names[a], (double) pulls[a]).longValue();
+                rewardSum[a] = state.getOrDefault("ens.reward." + names[a], rewardSum[a]);
+            }
+            lastArm = -1;
+        }
+        @Override public String[] learnedStateLines() {
+            long[] p = pullCounts();
+            long total = Math.max(1, p[0] + p[1] + p[2]);
+            return new String[]{
+                String.format("arm picks    MCTS %d%% · Greedy %d%% · Heur %d%%",
+                        100 * p[0] / total, 100 * p[1] / total, 100 * p[2] / total)
+            };
+        }
     }
 }

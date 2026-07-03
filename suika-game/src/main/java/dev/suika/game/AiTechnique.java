@@ -1,17 +1,40 @@
 package dev.suika.game;
 
 /**
- * The full AI capability matrix (ROADMAP §IV.13) surfaced in the AI Playground.
+ * The curated AI capability matrix surfaced in the AI Playground.
  *
- * <p>Ordered from strongest expected performance (top) to weakest (bottom) so the
- * capability list reads like a leaderboard at a glance.
+ * <p>v0.12 cull: the old 21-entry list is trimmed to the 10 most important
+ * techniques plus the 5 strongest, mechanically-distinct ensembles. Selection
+ * rationale (per family, strongest representatives kept):
+ * <ul>
+ *   <li><b>Planning</b>: MCTS (canonical search), AlphaZero (search + learned
+ *       guidance), Greedy One-Ply (exact one-step evaluation — strong AND the
+ *       building block several ensembles verify with).</li>
+ *   <li><b>Deep RL</b>: PPO — the field's default policy-gradient baseline and the
+ *       one technique here with a real GPU training path. DQN/SAC dropped: same
+ *       niche, weaker fit for this discrete drop-column game.</li>
+ *   <li><b>Model-based</b>: MuZero (subsumes Dreamer for a game with cheap exact
+ *       simulation; keeps the pixels-perception panel).</li>
+ *   <li><b>Evolution</b>: Neuroevolution GA (transparent, teachable, now with
+ *       selectable selection mathematics) and CMA-ES (the strongest practical
+ *       gradient-free optimizer). PBT dropped — a meta-strategy, not a learner.</li>
+ *   <li><b>Imitation</b>: DAgger (strictly dominates plain BC — it fixes BC's
+ *       compounding-error problem).</li>
+ *   <li><b>Offline</b>: Decision Transformer (return-conditioned sequence modeling;
+ *       covers the offline niche with a livelier knob than CQL/IQL).</li>
+ *   <li><b>Baseline</b>: Heuristic — the scripted floor every learner must beat,
+ *       and a real committee member inside two ensembles.</li>
+ * </ul>
+ * Dropped: DQN, SAC, Dreamer, PBT, BC, GAIL, Offline RL, Diffusion, Flow,
+ * Racing Self-Play, Random — plus the 5 weaker/duplicative ensembles (Voting
+ * Committee superseded by Adaptive Voting; Evolved-Net MCTS folded into
+ * MCTS + Policy Net's selectable donor; Greedy Guard, Imitation Blend and
+ * Generative Filter retired).
  */
 public enum AiTechnique {
 
     // id, display, category, dataMode, kind, family, jvmNative, python, parallel, speed, strength, blurb
-    // "strength" (0-100) is an authored, hand-reasoned expected-performance score —
-    // richer than the old "just use enum ordinal position" heuristic (see #strength
-    // and the AI Playground's ensemble dropdown, which sorts by it).
+    // "strength" (0-100) is an authored, hand-reasoned expected-performance score.
     // ---- Planning: strongest single-agent reasoners ----
     MCTS("mcts", "MCTS", "Planning", "either", "planning", Family.PLANNING,
             true, false, true, true, 95,
@@ -23,116 +46,59 @@ public enum AiTechnique {
             true, false, true, true, 78,
             "Simulates every column for real, picks the best immediate score. Fast and solid."),
 
-    // ---- Deep RL: policy-gradient and value-based learners (need Python) ----
+    // ---- Deep RL ----
     PPO("ppo", "PPO", "Deep RL", "either", "learning", Family.PYTHON,
             false, true, true, true, 80,
             "On-policy policy-gradient via Stable-Baselines3. Pairs with the vector env."),
-    DQN("dqn", "DQN / Rainbow", "Deep RL", "either", "learning", Family.PYTHON,
-            false, true, false, true, 68,
-            "Value-based off-policy learning with replay. Discrete drop columns."),
-    SAC("sac", "SAC", "Deep RL", "state", "learning", Family.PYTHON,
-            false, true, false, true, 70,
-            "Off-policy max-entropy actor-critic for continuous drop position."),
 
-    // ---- Model-based: learn and plan inside a world model ----
+    // ---- Model-based ----
     MUZERO("muzero", "MuZero", "Model-Based", "pixels", "both", Family.PYTHON,
             false, true, true, true, 88,
             "Learn a latent dynamics model and plan inside it. Compare vs the true sim."),
-    DREAMER("dreamer", "Dreamer", "Model-Based", "pixels", "model-based", Family.PYTHON,
-            false, true, true, true, 82,
-            "World model trained from pixels; the policy learns inside the dream."),
 
     // ---- Evolution: gradient-free optimisation ----
     NEUROEVO("neuroevo", "Neuroevolution (GA)", "Evolution", "state", "learning", Family.EVOLUTION,
             true, false, true, true, 62,
-            "Evolve MLP weights by tournament selection + Gaussian mutation. No gradients."),
+            "Evolve MLP weights with selectable selection math (tournament / rank / Boltzmann)."),
     CMA_ES("cma-es", "CMA-ES", "Evolution", "state", "learning", Family.EVOLUTION,
             true, false, true, true, 65,
             "Covariance-adaptive evolution strategy. Strong on continuous weight spaces."),
-    PBT("pbt", "Population-Based Training", "Self-Play", "either", "meta", Family.EVOLUTION,
-            true, false, true, true, 60,
-            "A population trains in parallel, copying winners and perturbing hyperparams."),
 
-    // ---- Imitation: clone or distil human / expert play ----
+    // ---- Imitation ----
     DAGGER("dagger", "DAgger", "Imitation", "state", "imitation", Family.IMITATION,
             true, false, false, true, 58,
             "Iterative imitation: relabel the states the agent actually visits."),
-    BC("bc", "Behavioral Cloning", "Imitation", "state", "imitation", Family.IMITATION,
-            true, false, false, true, 48,
-            "Learn to copy YOUR drops from your recorded games. Train-on-my-playstyle."),
-    GAIL("gail", "Inverse RL / GAIL", "Imitation", "state", "imitation+RL", Family.PYTHON,
-            false, true, false, true, 64,
-            "Recover the reward behind demos, then optimise it. Learns the why."),
 
-    // ---- Offline: learn from logged data without live interaction ----
+    // ---- Offline ----
     DECISION_TRANSFORMER("dt", "Decision Transformer", "Offline", "state", "offline", Family.PYTHON,
             true, true, false, true, 59,
             "Return-conditioned sequence modeling. 'Play to reach score X.'"),
-    OFFLINE_RL("offline", "Offline RL (CQL/IQL)", "Offline", "either", "offline", Family.PYTHON,
-            false, true, false, true, 52,
-            "Learn from logged games with no live interaction. Conservative value learning."),
 
-    // ---- Generative: denoising / flow-based action generation ----
-    DIFFUSION("diffusion", "Diffusion Policy", "Generative", "state", "generative", Family.PYTHON,
-            true, true, false, true, 55,
-            "Denoise an action from noise. Captures multimodal 'many good drops'."),
-    FLOW("flow", "Flow Matching", "Generative", "state", "generative", Family.PYTHON,
-            true, true, false, true, 54,
-            "Continuous-flow cousin of diffusion. Fewer inference steps, real-time."),
-
-    // ---- Self-play / adversarial ----
-    SELF_PLAY("self-play", "Racing Self-Play", "Self-Play", "either", "learning", Family.PYTHON,
-            true, true, true, true, 67,
-            "Two agents race the same fruit sequence; reward is relative score."),
-
-    // ---- Baselines (weakest) ----
+    // ---- Baseline ----
     HEURISTIC("heuristic", "Heuristic", "Baseline", "state", "scripted", Family.PLANNING,
             true, false, false, true, 35,
             "Seek same-tier merges, else keep the surface flat. Scripted, no learning."),
-    RANDOM("random", "Random", "Baseline", "either", "—", Family.PLANNING,
-            true, false, false, true, 5,
-            "Uniformly random drops. The floor every learner must beat."),
 
-    // ---- Ensemble: composed agents combining two or more of the techniques above.
+    // ---- Ensembles: composed agents combining the techniques above.
     // Family.PLANNING so they run through PlanningRunner (live board, no separate
     // trainer loop needed) — each genuinely calls through to the real agents it
-    // combines; see EnsembleAgents.java for the actual composition logic.
-    //
-    // Strength ranking rationale (best to worst — drives the Playground's ensemble
-    // dropdown sort order): online-adapting composites (learn which member to trust
-    // as they play) rank above static blends; blends with an exact-evaluation
-    // fallback (real drop-and-settle, not a net's guess) rank above pure net-nudge
-    // blends, since nets here start untrained. ----
+    // combines; see EnsembleAgents.java. Each declares its members via
+    // ensembleMembers() so the UI is explicit about exactly what is inside. ----
     ENS_ADAPTIVE_VOTE("ens-adaptive-vote", "Adaptive Voting Committee", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true, 92,
-            "Like Voting Committee, but each member's trust weight adapts to its recent results."),
+            true, false, true, true, 92,
+            "MCTS, Greedy and Heuristic vote; each member's trust weight adapts to its recent results."),
     ENS_BANDIT("ens-bandit-meta", "Bandit Meta-Controller", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true, 90,
+            true, false, true, true, 90,
             "A UCB1 bandit learns, move by move, which single agent to trust right now."),
-    ENS_EVOLVED_MCTS("ens-evolved-mcts", "MCTS + Evolved Value Net", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true, 88,
-            "MCTS blended with a CMA-ES-evolved value net (heavily trusted when a slot is saved)."),
-    ENS_RTG_VERIFIED("ens-rtg-verified", "Return-Conditioned + MCTS Verify", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true, 86,
-            "A return-conditioned proposal gets sanity-checked against a shallow MCTS search."),
-    ENS_MCTS_TIEBREAK("ens-mcts-greedy-tiebreak", "MCTS + Greedy Tiebreak", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true, 84,
-            "MCTS's genuinely-tied top columns get an exact one-ply evaluation to break the tie."),
-    ENS_GENERATIVE_GREEDY("ens-generative-greedy", "Generative + Greedy Filter", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true, 80,
-            "Samples several diffusion-style proposals, keeps whichever scores best exactly."),
-    ENS_IMITATION_MCTS("ens-imitation-mcts", "MCTS + Imitation Blend", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true, 74,
-            "Defers to a DAgger-trained policy's pick unless MCTS's search strongly disagrees."),
-    ENS_VOTING("ens-voting-committee", "Voting Committee", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true, 72,
-            "MCTS, Greedy, and Heuristic each propose a column; majority wins."),
     ENS_MCTS_NET("ens-mcts-net", "MCTS + Policy Net", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true, 70,
-            "MCTS search narrows the choice; a policy net's logits nudge the final pick."),
-    ENS_GREEDY_GUARD("ens-greedy-guard", "Policy Net + Greedy Guard", "Ensemble", "state", "ensemble", Family.PLANNING,
-            true, false, false, true, 65,
-            "Plays a policy net normally, but Greedy One-Ply overrides it on an immediate merge.");
+            true, false, true, true, 86,
+            "MCTS search narrows the choice; a trained donor net's logits weigh in on the final pick."),
+    ENS_MCTS_TIEBREAK("ens-mcts-greedy-tiebreak", "MCTS + Greedy Tiebreak", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, true, true, 84,
+            "MCTS's genuinely-tied top columns get an exact one-ply evaluation to break the tie."),
+    ENS_RTG_VERIFIED("ens-rtg-verified", "Return-Conditioned + MCTS Verify", "Ensemble", "state", "ensemble", Family.PLANNING,
+            true, false, true, true, 82,
+            "A return-conditioned proposal gets sanity-checked against a shallow MCTS search.");
 
     /** Which specialised control-center drives this technique. */
     public enum Family { PLANNING, EVOLUTION, IMITATION, PYTHON }
@@ -142,15 +108,14 @@ public enum AiTechnique {
     /**
      * {@code parallel}: true only when the "Parallelism" control in the AI Playground
      * drawer has a real, wired effect for this technique — root-parallel search
-     * (MCTS/AlphaZero/MuZero/Dreamer/SelfPlay), column-parallel evaluation (Greedy),
-     * the evolution eval pool (Neuroevo/CMA-ES/PBT), or PPO's {@code --n-envs}/
-     * {@code --device} training flags. Everywhere else it's {@code false} so the drawer
-     * honestly shows "n/a" instead of a knob that silently does nothing.
+     * (MCTS/AlphaZero/MuZero), column-parallel evaluation (Greedy), the evolution
+     * eval pool (Neuroevo/CMA-ES), PPO's {@code --n-envs}/{@code --device} training
+     * flags, or the ensembles' shared inner-agent pool (member calls genuinely run
+     * concurrently — see EnsembleAgents.ENSEMBLE_POOL).
      */
     public final boolean jvmNative, python, parallel, speed;
-    /** Authored expected-performance score, 0-100 — see the field-list comment above
-     *  the enum constants for how it's reasoned out. Drives the infocard's Performance
-     *  bar and the AI Playground's ensemble dropdown sort order. */
+    /** Authored expected-performance score, 0-100. Drives the infocard's Performance
+     *  bar and the ensemble dropdown sort order. */
     public final int strength;
 
     AiTechnique(String id, String display, String category, String dataMode, String kind,
@@ -164,6 +129,25 @@ public enum AiTechnique {
     }
 
     public boolean imitationBased() { return family == Family.IMITATION; }
+
+    public boolean isEnsemble() { return kind.equals("ensemble"); }
+
+    /**
+     * Exactly which building-block agents an ensemble is composed of, in the role
+     * order the composition uses them — empty for non-ensembles. This is the single
+     * source the UI (playground drawer, infocard) shows, so what an ensemble "uses"
+     * is explicit rather than buried in EnsembleAgents' implementation.
+     */
+    public String[] ensembleMembers() {
+        return switch (this) {
+            case ENS_ADAPTIVE_VOTE -> new String[]{"MCTS (voter)", "Greedy One-Ply (voter)", "Heuristic (voter)"};
+            case ENS_BANDIT        -> new String[]{"MCTS (arm)", "Greedy One-Ply (arm)", "Heuristic (arm)"};
+            case ENS_MCTS_NET      -> new String[]{"MCTS (search)", "Donor policy net (advisor)"};
+            case ENS_MCTS_TIEBREAK -> new String[]{"MCTS (search)", "Greedy One-Ply (exact tiebreak)"};
+            case ENS_RTG_VERIFIED  -> new String[]{"Return-Conditioned (proposer)", "MCTS (verifier)"};
+            default -> new String[0];
+        };
+    }
 
     /**
      * True only for the one technique whose shown training command has a real,
@@ -195,12 +179,12 @@ public enum AiTechnique {
                 "and checks the immediate score, then keeps the best.",
                 "Fast and surprisingly solid — but it never looks more",
                 "than one move ahead." };
-            case PPO, DQN, SAC -> new String[]{
+            case PPO -> new String[]{
                 "A neural network learns by trial and error, like a",
                 "player slowly getting good. It nudges its behaviour",
                 "toward moves that earned more points over millions of",
                 "practice drops. Training runs in Python." };
-            case MUZERO, DREAMER -> new String[]{
+            case MUZERO -> new String[]{
                 "It learns its own mental 'model' of how the game works,",
                 "then practises inside that imagination instead of the",
                 "real game — so it can plan ahead without a built-in",
@@ -208,144 +192,71 @@ public enum AiTechnique {
             case NEUROEVO -> new String[]{
                 "Keeps a population of AI brains, lets them all play,",
                 "breeds the best ones together and randomly tweaks the",
-                "offspring — evolution, not gradients. Repeat for many",
-                "generations and watch the scores climb." };
+                "offspring — evolution, not gradients. You choose the",
+                "selection math: tournament, rank, or Boltzmann." };
             case CMA_ES -> new String[]{
                 "A smarter evolution strategy: instead of random tweaks",
                 "it learns which directions of change tend to help and",
                 "samples new candidates from that adapting cloud. Strong",
                 "on fine-tuning many numbers at once." };
-            case PBT -> new String[]{
-                "A whole population trains at the same time. Losers copy",
-                "the winners' brains and settings, then shake them up a",
-                "little — so good ideas spread while the search keeps",
-                "exploring." };
             case DAGGER -> new String[]{
                 "You play, the AI copies you — but it also asks an expert",
                 "what to do in the tricky spots it ends up in, so it",
                 "doesn't just inherit your mistakes. Imitation that fixes",
                 "its own blind spots." };
-            case BC -> new String[]{
-                "Pure copy-cat learning: it watches the drops YOU make",
-                "and trains a network to do the same thing in the same",
-                "situations. Play your way and it learns your style.",
-                "No reward signal needed — just your example." };
-            case GAIL -> new String[]{
-                "Instead of copying moves directly, it tries to figure",
-                "out WHY you play the way you do — the hidden goal — then",
-                "optimises for that. Learns the intent behind the demos,",
-                "not just the actions." };
             case DECISION_TRANSFORMER -> new String[]{
                 "You tell it a target score and it treats playing like",
                 "finishing a sentence: given 'I want to reach X', predict",
                 "the next drop. Learned entirely from logged games, no",
                 "live trial-and-error." };
-            case OFFLINE_RL -> new String[]{
-                "Learns a good policy purely from a fixed pile of recorded",
-                "games — never touching the live game while training. Plays",
-                "it safe by staying close to moves it has actually seen",
-                "work." };
-            case DIFFUSION -> new String[]{
-                "Borrows the trick behind AI image generators: start from",
-                "random noise and repeatedly 'denoise' it into a sensible",
-                "drop. Great at capturing that many different drops can",
-                "all be good." };
-            case FLOW -> new String[]{
-                "A faster cousin of the diffusion approach — it learns a",
-                "smooth 'flow' that turns noise into a good drop in just a",
-                "few steps, so it can decide in real time." };
-            case SELF_PLAY -> new String[]{
-                "Two agents race on the exact same fruits; whoever scores",
-                "more wins. By constantly trying to beat a copy of itself,",
-                "it keeps pushing its own skill upward." };
             case HEURISTIC -> new String[]{
                 "A hand-written rulebook: look for two equal fruits to",
                 "merge, otherwise keep the pile flat and low. No learning",
                 "at all — just common-sense instructions." };
-            case RANDOM -> new String[]{
-                "Drops in a completely random column every time. It exists",
-                "as the bottom of the leaderboard — the score every real",
-                "AI has to beat." };
-            case ENS_MCTS_NET -> new String[]{
-                "MCTS searches like usual, then a neural network's own",
-                "opinion nudges the final choice among the columns the",
-                "search actually visited — search narrows it down, the",
-                "net helps pick the winner." };
-            case ENS_GREEDY_GUARD -> new String[]{
-                "Normally plays whatever a policy network suggests, but",
-                "the instant an easy same-tier merge appears anywhere on",
-                "the board, Greedy One-Ply steps in and takes it — a",
-                "safety net against a distracted policy." };
-            case ENS_MCTS_TIEBREAK -> new String[]{
-                "When MCTS's search genuinely can't decide between a",
-                "few columns (they're all nearly equally visited), it",
-                "actually drops-and-settles each one for real to see",
-                "which truly scores best, instead of guessing." };
-            case ENS_VOTING -> new String[]{
-                "Three different agents — a searcher, a one-ply",
-                "evaluator, and a scripted rulebook — each vote for a",
-                "column. Whichever column two or more agree on wins;",
-                "true three-way ties default to the searcher." };
-            case ENS_EVOLVED_MCTS -> new String[]{
-                "Same idea as MCTS + Policy Net, but the net comes from",
-                "an evolved (CMA-ES) population instead of a blank",
-                "slate — once you've trained one, this ensemble leans",
-                "on it heavily rather than lightly." };
-            case ENS_IMITATION_MCTS -> new String[]{
-                "Trusts a DAgger-trained clone of expert play by",
-                "default, but only if MCTS's own search doesn't",
-                "strongly object — the search acts as a check on the",
-                "clone, not a replacement for it." };
-            case ENS_RTG_VERIFIED -> new String[]{
-                "A return-conditioned agent proposes an ambitious drop",
-                "aimed at a target score, then a quick MCTS search",
-                "double-checks it against its own best idea and keeps",
-                "whichever one actually scores higher." };
-            case ENS_GENERATIVE_GREEDY -> new String[]{
-                "Samples several different candidate drops the way a",
-                "diffusion model would, then drops-and-settles each",
-                "one for real and keeps the best — proposal by",
-                "generation, selection by exact evaluation." };
             case ENS_ADAPTIVE_VOTE -> new String[]{
-                "Same three-agent vote as Voting Committee, but each",
-                "member's influence rises or falls based on the score",
-                "it's actually been earning recently — the committee",
-                "learns who to listen to as it plays." };
+                "Uses: MCTS + Greedy + Heuristic, each voting for a",
+                "column. Each member's influence rises or falls with the",
+                "score it's actually been earning (multiplicative-weights",
+                "update) — the committee learns who to listen to." };
             case ENS_BANDIT -> new String[]{
-                "Instead of blending opinions, it picks ONE agent to",
-                "make each individual move, tracking which one has",
-                "been paying off best lately (classic explore/exploit)",
-                "— a meta-agent that learns who should drive." };
+                "Uses: MCTS + Greedy + Heuristic as three 'arms'. A UCB1",
+                "bandit picks ONE agent to make each move, tracking which",
+                "has been paying off best lately (explore/exploit) — a",
+                "meta-agent that learns who should drive." };
+            case ENS_MCTS_NET -> new String[]{
+                "Uses: MCTS + a donor policy net (your choice of trained",
+                "Neuroevo, CMA-ES or DAgger save). Search narrows the",
+                "options; the net's opinion weighs in on the final pick,",
+                "with an adjustable blend weight." };
+            case ENS_MCTS_TIEBREAK -> new String[]{
+                "Uses: MCTS + Greedy One-Ply. When the search genuinely",
+                "can't decide between a few columns (all nearly equally",
+                "visited), it drops-and-settles each one FOR REAL to see",
+                "which truly scores best, instead of guessing." };
+            case ENS_RTG_VERIFIED -> new String[]{
+                "Uses: a Return-Conditioned proposer + a shallow MCTS",
+                "verifier. The proposer aims a drop at your target score;",
+                "the verifier double-checks it against its own best idea",
+                "and keeps whichever one actually scores higher." };
         };
     }
 
     /** One short line describing what this technique is doing moment-to-moment, live. */
     public String liveHint() {
-        return switch (family) {
-            case PLANNING -> switch (this) {
-                case MCTS, ALPHAZERO   -> "simulating many futures, then dropping the best";
-                case GREEDY            -> "trying every column, keeping the highest score";
-                case HEURISTIC         -> "following hand-written merge rules";
-                case RANDOM            -> "dropping in a random column";
-                case ENS_MCTS_NET, ENS_EVOLVED_MCTS -> "search + net blend, choosing the top pick";
-                case ENS_GREEDY_GUARD  -> "playing the policy net, watching for easy merges";
-                case ENS_MCTS_TIEBREAK -> "settling MCTS's closest calls for real";
-                case ENS_VOTING, ENS_ADAPTIVE_VOTE -> "three agents voting on the next drop";
-                case ENS_IMITATION_MCTS -> "leaning on imitation, checked by search";
-                case ENS_RTG_VERIFIED  -> "proposing boldly, verifying with a quick search";
-                case ENS_GENERATIVE_GREEDY -> "sampling proposals, keeping the best one";
-                case ENS_BANDIT        -> "picking which single agent drives this move";
-                default                -> "planning the next drop";
-            };
-            case EVOLUTION -> "breeding & mutating a population of AI brains";
-            case IMITATION -> "learning to copy your drops in real time";
-            case PYTHON    -> switch (this) {
-                case DIFFUSION, FLOW                  -> "denoising random noise into a drop";
-                case DECISION_TRANSFORMER, OFFLINE_RL -> "predicting drops from logged games";
-                case MUZERO, DREAMER                  -> "planning inside a learned world model";
-                case SELF_PLAY                        -> "racing a copy of itself for a better score";
-                default                               -> "running a learned policy (Python-trained)";
-            };
+        return switch (this) {
+            case MCTS, ALPHAZERO    -> "simulating many futures, then dropping the best";
+            case GREEDY             -> "trying every column, keeping the highest score";
+            case HEURISTIC          -> "following hand-written merge rules";
+            case ENS_MCTS_NET       -> "search + donor net blend, choosing the top pick";
+            case ENS_MCTS_TIEBREAK  -> "settling MCTS's closest calls for real";
+            case ENS_ADAPTIVE_VOTE  -> "three agents voting, trust weights adapting";
+            case ENS_RTG_VERIFIED   -> "proposing boldly, verifying with a quick search";
+            case ENS_BANDIT         -> "picking which single agent drives this move";
+            case NEUROEVO, CMA_ES   -> "breeding & mutating a population of AI brains";
+            case DAGGER             -> "learning to copy your drops in real time";
+            case DECISION_TRANSFORMER -> "predicting drops from logged games";
+            case MUZERO             -> "planning inside a learned world model";
+            case PPO                -> "running a learned policy (Python-trained)";
         };
     }
 

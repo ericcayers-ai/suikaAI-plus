@@ -303,12 +303,11 @@ public final class CaptureHarness implements ApplicationListener {
         List<Object[]> out = new ArrayList<>();
         if (usesRollouts(t)) {
             for (int v : ROLLOUTS) out.add(new Object[]{"rollouts", (double) v, v + "r"});
-        } else if (t == AiTechnique.NEUROEVO || t == AiTechnique.PBT) {
+        } else if (t == AiTechnique.NEUROEVO || t == AiTechnique.CMA_ES) {
             for (int v : POP) out.add(new Object[]{"population", (double) v, v + "pop"});
-        } else if (t == AiTechnique.DECISION_TRANSFORMER || t == AiTechnique.OFFLINE_RL
-                || t == AiTechnique.ENS_RTG_VERIFIED) {
+        } else if (t == AiTechnique.DECISION_TRANSFORMER || t == AiTechnique.ENS_RTG_VERIFIED) {
             for (int v : RETURNS) out.add(new Object[]{"return", (double) v, v + "ret"});
-        } else if (t == AiTechnique.BC || t == AiTechnique.DAGGER) {
+        } else if (t == AiTechnique.DAGGER) {
             for (double v : LRS) out.add(new Object[]{"lr", v, String.format(Locale.ROOT, "lr%.0e", v)});
         }
         if (out.isEmpty()) out.add(new Object[]{null, 0.0, ""});
@@ -317,8 +316,8 @@ public final class CaptureHarness implements ApplicationListener {
 
     private static boolean usesRollouts(AiTechnique t) {
         return switch (t) {
-            case MCTS, ALPHAZERO, ENS_MCTS_NET, ENS_MCTS_TIEBREAK, ENS_VOTING,
-                 ENS_EVOLVED_MCTS, ENS_IMITATION_MCTS, ENS_ADAPTIVE_VOTE, ENS_BANDIT -> true;
+            case MCTS, ALPHAZERO, ENS_MCTS_NET, ENS_MCTS_TIEBREAK,
+                 ENS_ADAPTIVE_VOTE, ENS_BANDIT -> true;
             default -> false;
         };
     }
@@ -361,7 +360,7 @@ public final class CaptureHarness implements ApplicationListener {
             case "evolution"  -> addFamily(out, AiTechnique.Family.EVOLUTION);
             case "imitation"  -> addFamily(out, AiTechnique.Family.IMITATION);
             case "python"     -> addFamily(out, AiTechnique.Family.PYTHON);
-            case "baselines"  -> { out.add(AiTechnique.HEURISTIC); out.add(AiTechnique.RANDOM); }
+            case "baselines"  -> out.add(AiTechnique.HEURISTIC);
             default -> {
                 for (String id : s.split(",")) {
                     String trimmed = id.trim();
@@ -467,8 +466,8 @@ public final class CaptureHarness implements ApplicationListener {
             }
 
             // ---- extra curated views the default sweep doesn't cover ----
-            case 14-> { if (stageT > 0.2f) { launchControlCenter(AiTechnique.SELF_PLAY, false); nextStage(); } }
-            case 15-> { if (stageT > 5.0f) { shoot("90-selfplay-2view.png"); launchControlCenter(AiTechnique.NEUROEVO, true); nextStage(); } }
+            case 14-> { if (stageT > 0.2f) { launchControlCenter(AiTechnique.ENS_ADAPTIVE_VOTE, false); nextStage(); } }
+            case 15-> { if (stageT > 5.0f) { shoot("90-adaptive-vote.png"); launchControlCenter(AiTechnique.NEUROEVO, true); nextStage(); } }
             case 16-> { if (stageT > 9.0f) { shoot("91-neuroevo-ghost.png"); nextStage(); } }
 
             case 17-> { if (stageT > 0.2f) { humanPlay = new SuikaScreen(game, SuikaScreen.Mode.HUMAN); game.setScreen(humanPlay); nextStage(); } }

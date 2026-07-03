@@ -160,7 +160,7 @@ final class RtHud implements AutoCloseable {
      * rewritten while an in-flight copy still reads it.
      */
     void draw(long score, FruitTier next, String modeName, String aiName, boolean gameOver, boolean use3d,
-              boolean paused, boolean bloomOn, boolean trayExpanded) {
+              boolean paused, RtGraphicsSettings gfx, boolean trayExpanded) {
         Graphics2D g = canvas.createGraphics();
         g.setComposite(java.awt.AlphaComposite.Clear);
         g.fillRect(0, 0, width, height);
@@ -225,7 +225,7 @@ final class RtHud implements AutoCloseable {
             drawTrayArrow(g, false);
         }
 
-        if (paused) drawPauseOverlay(g, bloomOn);
+        if (paused) drawPauseOverlay(g, gfx);
 
         // ---- game-over banner ----
         if (gameOver) {
@@ -258,16 +258,23 @@ final class RtHud implements AutoCloseable {
     // RtLabLauncher's mouse-click hit-testing, so both sides always agree on where
     // these controls actually are. ----
     private static final int TRAY_ARROW_SIZE = 34;
-    int trayArrowX() { return width / 2 + 210; }
+    // Fixed bottom-right corner. The old width/2 + 210 position sat INSIDE the hint
+    // panel whenever the hint string ran long (the human-3D hint panel is ~560px wide,
+    // its right edge past width/2 + 280) — the arrow rendered underneath the tray it
+    // was supposed to control, which is the "RT mode arrow" bug. Out here it can
+    // never collide with the centered panel at any hint length.
+    int trayArrowX() { return width - 16 - TRAY_ARROW_SIZE; }
     int trayArrowY() { return height - 54; }
+    int trayArrowSize() { return TRAY_ARROW_SIZE; }
 
-    private static final int PAUSE_BTN_W = 260, PAUSE_BTN_H = 58, PAUSE_BTN_GAP = 16;
-    int pauseResumeX() { return width / 2 - PAUSE_BTN_W / 2; }
-    int pauseResumeY() { return height / 2 - PAUSE_BTN_H / 2 - PAUSE_BTN_H - PAUSE_BTN_GAP; }
-    int pauseBloomX()  { return width / 2 - PAUSE_BTN_W / 2; }
-    int pauseBloomY()  { return height / 2 - PAUSE_BTN_H / 2; }
-    int pauseQuitX()   { return width / 2 - PAUSE_BTN_W / 2; }
-    int pauseQuitY()   { return height / 2 - PAUSE_BTN_H / 2 + PAUSE_BTN_H + PAUSE_BTN_GAP; }
+    /** Pause menu: RESUME, four graphics settings, QUIT — one column, top to bottom. */
+    static final int PAUSE_BTN_COUNT = 6;
+    private static final int PAUSE_BTN_W = 300, PAUSE_BTN_H = 54, PAUSE_BTN_GAP = 14;
+    int pauseBtnX() { return width / 2 - PAUSE_BTN_W / 2; }
+    int pauseBtnY(int i) {
+        int totalH = PAUSE_BTN_COUNT * PAUSE_BTN_H + (PAUSE_BTN_COUNT - 1) * PAUSE_BTN_GAP;
+        return height / 2 - totalH / 2 + i * (PAUSE_BTN_H + PAUSE_BTN_GAP);
+    }
     int pauseBtnW() { return PAUSE_BTN_W; }
     int pauseBtnH() { return PAUSE_BTN_H; }
 
@@ -277,23 +284,23 @@ final class RtHud implements AutoCloseable {
         g.setColor(FAINT);
         g.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
         int cx = ax + TRAY_ARROW_SIZE / 2, cy = ay + TRAY_ARROW_SIZE / 2;
-        // A simple chevron — up when the tray is out (tap to collapse it away),
-        // down when it's collapsed (tap to bring the hints back).
+        // Chevron direction matches the motion it triggers (Java2D y grows DOWN the
+        // screen — the old version had these swapped, pointing the wrong way): the
+        // tray lives at the bottom edge, so collapsing slides it down/away (v while
+        // expanded) and expanding brings it back up (^ while collapsed).
         if (expanded) {
-            g.drawLine(cx - 6, cy + 2, cx, cy - 4);
-            g.drawLine(cx, cy - 4, cx + 6, cy + 2);
-        } else {
             g.drawLine(cx - 6, cy - 2, cx, cy + 4);
             g.drawLine(cx, cy + 4, cx + 6, cy - 2);
+        } else {
+            g.drawLine(cx - 6, cy + 2, cx, cy - 4);
+            g.drawLine(cx, cy - 4, cx + 6, cy + 2);
         }
     }
 
-    /** Live-updating graphics settings reachable from the pause menu — deliberately
-     *  scoped to knobs that don't need a swapchain rebuild (resolution/fullscreen
-     *  changes belong in the main app's Settings screen and take effect on RT Lab's
-     *  next launch, not mid-session) so every control here really does apply live,
-     *  no restart, the moment it's clicked. */
-    private void drawPauseOverlay(Graphics2D g, boolean bloomOn) {
+    /** The pause menu, now a proper graphics panel — every row applies live (see
+     *  {@link RtGraphicsSettings}); RtLabLauncher hit-tests the same pauseBtnY(i)
+     *  rows this draws. */
+    private void drawPauseOverlay(Graphics2D g, RtGraphicsSettings gfx) {
         g.setColor(new Color(6, 5, 12, 210));
         g.fillRect(0, 0, width, height);
 
@@ -301,11 +308,20 @@ final class RtHud implements AutoCloseable {
         g.setFont(fontMed);
         var fmT = g.getFontMetrics();
         String title = "PAUSED";
-        g.drawString(title, width / 2 - fmT.stringWidth(title) / 2, pauseResumeY() - 46);
+        g.drawString(title, width / 2 - fmT.stringWidth(title) / 2, pauseBtnY(0) - 42);
 
-        drawPauseButton(g, pauseResumeX(), pauseResumeY(), "RESUME", VIOLET);
-        drawPauseButton(g, pauseBloomX(), pauseBloomY(), "BLOOM: " + (bloomOn ? "ON" : "OFF"), GOLD_DEEP);
-        drawPauseButton(g, pauseQuitX(), pauseQuitY(), "QUIT", DANGER);
+        drawPauseButton(g, pauseBtnX(), pauseBtnY(0), "RESUME", VIOLET);
+        drawPauseButton(g, pauseBtnX(), pauseBtnY(1), "BLOOM: " + (gfx.bloom ? "ON" : "OFF"), GOLD_DEEP);
+        drawPauseButton(g, pauseBtnX(), pauseBtnY(2), "DENOISE: " + (gfx.denoise ? "ON" : "OFF"), GOLD_DEEP);
+        drawPauseButton(g, pauseBtnX(), pauseBtnY(3), "DEPTH OF FIELD: " + gfx.dofLabel(), GOLD_DEEP);
+        drawPauseButton(g, pauseBtnX(), pauseBtnY(4), "ACCUMULATION: " + gfx.accumLabel(), GOLD_DEEP);
+        drawPauseButton(g, pauseBtnX(), pauseBtnY(5), "QUIT", DANGER);
+
+        g.setColor(FAINT);
+        g.setFont(fontTiny);
+        String note = "graphics settings apply instantly · ESC resumes";
+        var fmN = g.getFontMetrics();
+        g.drawString(note, width / 2 - fmN.stringWidth(note) / 2, pauseBtnY(5) + PAUSE_BTN_H + 34);
     }
 
     private void drawPauseButton(Graphics2D g, int x, int y, String label, Color accent) {

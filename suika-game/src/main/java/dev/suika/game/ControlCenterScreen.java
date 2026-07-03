@@ -75,6 +75,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
     // per-technique launch knob (including evolution's sims/gen + ghost lineage) is
     // reachable mid-run, not just before LAUNCH.
     private boolean hotswapOpen = false;
+    private final Rectangle swapPresetCtrl    = new Rectangle();
     private final Rectangle swapSpeedCtrl     = new Rectangle();
     private final Rectangle swapParaCtrl      = new Rectangle();
     private final Rectangle swapParamCtrl     = new Rectangle();
@@ -82,7 +83,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private final Rectangle swapGhostCullCtrl = new Rectangle();
     private final Rectangle swapEliteViewCtrl = new Rectangle();
     private final Rectangle swapCloseBtn      = new Rectangle();
-    private static final float SWAP_MW = 480f, SWAP_MH = 500f;
+    private static final float SWAP_MW = 480f, SWAP_MH = 560f;
 
     // Hotswap param tables (mirror AiPlaygroundScreen)
     private static final int[]    ROLLOUTS = {40, 80, 150, 300, 600, 1200, 2400};
@@ -225,6 +226,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
         }
         if (hotswapOpen) {
             boolean evo = ghostApplicable();
+            if (swapPresetCtrl.contains(x, y)) {
+                var presets = HardwarePresets.values();
+                int d = x < swapPresetCtrl.x + swapPresetCtrl.width / 2f ? -1 : +1;
+                presets[Math.floorMod(cfg.preset.ordinal() + d, presets.length)].applyTo(cfg);
+                return;
+            }
             if (swapSpeedCtrl.contains(x, y)) { changeSpeed(x < swapSpeedCtrl.x + swapSpeedCtrl.width / 2f ? -1 : +1); return; }
             if (swapParaCtrl.contains(x, y) && cfg.technique.parallel) {
                 int cores = Runtime.getRuntime().availableProcessors();
@@ -300,7 +307,6 @@ public final class ControlCenterScreen extends ScreenAdapter {
         // per-frame physics + rendering on top of the RT workload.
         if (dev.suika.game.rtlab.RtLabLauncher.isRunning()) return 1;
         if (runner instanceof EvolutionRunner && !cfg.ghostView) return cfg.eliteViewCount();
-        if (cfg.technique == AiTechnique.SELF_PLAY)              return 2;
         if (cfg.technique.family == AiTechnique.Family.IMITATION) return 2; // YOU | AI clone
         return 1;
     }
@@ -330,7 +336,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
         if (runner instanceof EvolutionRunner er) ok = er.saveToSlot(slot);
         else if (runner instanceof ImitationRunner ir) ok = ir.saveToSlot(slot);
         else {
-            AiSlotPlayer.save(cfg.technique, slot, null, cfg, runner.board().score());
+            // Learning ensembles (adaptive committee, bandit) persist their live trust
+            // statistics alongside the hyperparameters — real progress, not just knobs.
+            java.util.Map<String, Double> learned =
+                    runner instanceof AgentRunner ar && ar.agent() instanceof EnsembleAgents.HasLearnedState h
+                            ? h.exportLearnedState() : java.util.Map.of();
+            AiSlotPlayer.save(cfg.technique, slot, null, cfg, runner.board().score(), learned);
             ok = true;
         }
         slotsMessage = ok ? "Saved to slot " + slot : "Nothing to save yet";
@@ -351,6 +362,10 @@ public final class ControlCenterScreen extends ScreenAdapter {
         ModelSlots.ConfigSlot saved = ModelSlots.loadConfig(cfg.technique.id, slot);
         if (saved == null) { slotsMessage = "Slot " + slot + " is empty"; return; }
         AiSlotPlayer.applyHyperparams(cfg, saved.params());
+        // Restore a learning ensemble's saved trust statistics into the LIVE agent.
+        if (runner instanceof AgentRunner ar && ar.agent() instanceof EnsembleAgents.HasLearnedState h) {
+            h.importLearnedState(saved.params());
+        }
         slotsMessage = "Loaded slot " + slot;
     }
 
@@ -403,12 +418,13 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private void openHotswap() {
         hotswapOpen = true;
         float m0x = swapModalX(), m0y = swapModalY();
-        swapSpeedCtrl.set(    m0x + 230, m0y + SWAP_MH - 96,  220, 38);
-        swapParaCtrl.set(     m0x + 230, m0y + SWAP_MH - 150, 220, 38);
-        swapParamCtrl.set(    m0x + 230, m0y + SWAP_MH - 204, 220, 38);
-        swapSimsCtrl.set(     m0x + 230, m0y + SWAP_MH - 258, 220, 38);
-        swapGhostCullCtrl.set(m0x + 230, m0y + SWAP_MH - 312, 220, 38);
-        swapEliteViewCtrl.set(m0x + 230, m0y + SWAP_MH - 366, 220, 38);
+        swapPresetCtrl.set(   m0x + 230, m0y + SWAP_MH - 96,  220, 38);
+        swapSpeedCtrl.set(    m0x + 230, m0y + SWAP_MH - 150, 220, 38);
+        swapParaCtrl.set(     m0x + 230, m0y + SWAP_MH - 204, 220, 38);
+        swapParamCtrl.set(    m0x + 230, m0y + SWAP_MH - 258, 220, 38);
+        swapSimsCtrl.set(     m0x + 230, m0y + SWAP_MH - 312, 220, 38);
+        swapGhostCullCtrl.set(m0x + 230, m0y + SWAP_MH - 366, 220, 38);
+        swapEliteViewCtrl.set(m0x + 230, m0y + SWAP_MH - 420, 220, 38);
         swapCloseBtn.set( m0x + SWAP_MW / 2f - 90, m0y + 22, 180, 44);
     }
 
@@ -417,44 +433,42 @@ public final class ControlCenterScreen extends ScreenAdapter {
     }
 
     // Ensembles built on MCTS search share its Rollouts knob; ENS_RTG_VERIFIED shares
-    // Decision Transformer's Return knob. ENS_GREEDY_GUARD/ENS_GENERATIVE_GREEDY have
-    // no adjustable launch parameter (they only take the fixed action-bin count).
+    // Decision Transformer's Return knob.
     private static final java.util.Set<AiTechnique> ROLLOUT_PARAM_TECHS = java.util.Set.of(
             AiTechnique.MCTS, AiTechnique.ALPHAZERO, AiTechnique.ENS_MCTS_NET,
-            AiTechnique.ENS_MCTS_TIEBREAK, AiTechnique.ENS_VOTING, AiTechnique.ENS_EVOLVED_MCTS,
-            AiTechnique.ENS_IMITATION_MCTS, AiTechnique.ENS_ADAPTIVE_VOTE, AiTechnique.ENS_BANDIT);
+            AiTechnique.ENS_MCTS_TIEBREAK, AiTechnique.ENS_ADAPTIVE_VOTE, AiTechnique.ENS_BANDIT);
 
     private boolean paramApplicable() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return true;
         return switch (cfg.technique) {
-            case NEUROEVO, PBT, DECISION_TRANSFORMER, OFFLINE_RL, BC, DAGGER, ENS_RTG_VERIFIED -> true;
+            case NEUROEVO, CMA_ES, DECISION_TRANSFORMER, DAGGER, ENS_RTG_VERIFIED -> true;
             default -> false;
         };
     }
     private String paramLabel() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return "Rollouts";
         return switch (cfg.technique) {
-            case NEUROEVO, PBT                                -> "Population";
-            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> "Return";
-            case BC, DAGGER                                   -> "LR";
-            default                                           -> "—";
+            case NEUROEVO, CMA_ES                        -> "Population";
+            case DECISION_TRANSFORMER, ENS_RTG_VERIFIED  -> "Return";
+            case DAGGER                                  -> "LR";
+            default                                      -> "—";
         };
     }
     private String paramValue() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return Integer.toString(cfg.rollouts);
         return switch (cfg.technique) {
-            case NEUROEVO, PBT                                -> Integer.toString(cfg.populationSize);
-            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> Integer.toString((int) cfg.targetReturn);
-            case BC, DAGGER                                   -> String.format("%.0e", cfg.learningRate);
-            default                                           -> "—";
+            case NEUROEVO, CMA_ES                        -> Integer.toString(cfg.populationSize);
+            case DECISION_TRANSFORMER, ENS_RTG_VERIFIED  -> Integer.toString((int) cfg.targetReturn);
+            case DAGGER                                  -> String.format("%.0e", cfg.learningRate);
+            default                                      -> "—";
         };
     }
     private void cycleParam(int d) {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) { cfg.rollouts = cycleInt(ROLLOUTS, cfg.rollouts, d); return; }
         switch (cfg.technique) {
-            case NEUROEVO, PBT                                -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
-            case DECISION_TRANSFORMER, OFFLINE_RL, ENS_RTG_VERIFIED -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
-            case BC, DAGGER                                   -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
+            case NEUROEVO, CMA_ES                        -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
+            case DECISION_TRANSFORMER, ENS_RTG_VERIFIED  -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
+            case DAGGER                                  -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
             default -> { }
         }
     }
@@ -721,7 +735,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
      *  re-derivation of that same look for the Control Center, not a shared
      *  dependency on the training-side encoder. */
     private boolean perceptionApplicable() {
-        return cfg.technique == AiTechnique.MUZERO || cfg.technique == AiTechnique.DREAMER;
+        return cfg.technique == AiTechnique.MUZERO;
     }
 
     private static final int PERCEPTION_GRID = 18;
@@ -1075,6 +1089,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
         Ui.fillRoundRect(s, m0x, m0y + SWAP_MH - 4f, SWAP_MW, 4f, 3f);
 
         boolean evo = ghostApplicable();
+        drawHotswapCycler(s, swapPresetCtrl,    true);
         drawHotswapCycler(s, swapSpeedCtrl,     true);
         drawHotswapCycler(s, swapParaCtrl,      cfg.technique.parallel);
         drawHotswapCycler(s, swapParamCtrl,     paramApplicable());
@@ -1092,6 +1107,9 @@ public final class ControlCenterScreen extends ScreenAdapter {
         game.batch.begin();
         Ui.textCenter(game.batch, game.fontMed, "QUICK SETTINGS",
                 m0x + SWAP_MW / 2f, m0y + SWAP_MH - 32, Theme.TEXT);
+
+        Ui.text(game.batch, game.font, "Preset", m0x + 24, swapPresetCtrl.y + 25, Theme.TEXT);
+        cyclerGlyphs(swapPresetCtrl, cfg.preset.label, true);
 
         Ui.text(game.batch, game.font, "Speed", m0x + 24, swapSpeedCtrl.y + 25, Theme.TEXT);
         cyclerGlyphs(swapSpeedCtrl, cfg.speedLabel(), true);
