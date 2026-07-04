@@ -1,8 +1,7 @@
 package dev.suika.ai;
 
 import dev.suika.core.GameCore;
-import dev.suika.core.StepResult;
-import dev.suika.env.ActionSpace;
+import dev.suika.core.PhysicsConfig;
 
 /**
  * Evaluates an agent's fitness by running it for multiple seeded episodes.
@@ -42,10 +41,11 @@ public final class FitnessEvaluator {
     private long runEpisode(AgentPlugin agent, long seed) {
         GameCore core = new GameCore(seed);
         for (int step = 0; step < maxStepsPerEpisode && !core.isGameOver(); step++) {
-            Object action = agent.selectAction(core.getState(), actionSpec);
+            // FIX: Pass the live GameCore directly
+            Object action = agent.selectAction(core, actionSpec);
             double dropX = actionSpec.toDropX(action,
-                    dev.suika.core.PhysicsConfig.DROP_X_MIN,
-                    dev.suika.core.PhysicsConfig.DROP_X_MAX);
+                    PhysicsConfig.DROP_X_MIN,
+                    PhysicsConfig.DROP_X_MAX);
             core.dropAndSettle(dropX);
         }
         agent.onEpisodeEnd(core.getScore(), core.getState().stepCount());

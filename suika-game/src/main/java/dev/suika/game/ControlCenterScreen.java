@@ -91,8 +91,15 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private final Rectangle swapSimsCtrl      = new Rectangle();
     private final Rectangle swapGhostCullCtrl = new Rectangle();
     private final Rectangle swapEliteViewCtrl = new Rectangle();
+    // TensorBoard row — only meaningful for techniques with a real training script (see
+    // AiTechnique#supportsTensorboard()); a toggle for detailed logging plus a button
+    // that starts/reuses a local TensorBoard server and opens it in the browser.
+    private final Rectangle swapTbToggle  = new Rectangle();
+    private final Rectangle swapTbOpenBtn = new Rectangle();
+    private String tbMessage = "";
+    private float  tbMessageTimer = 0f;
     private final Rectangle swapCloseBtn      = new Rectangle();
-    private static final float SWAP_MW = 480f, SWAP_MH = 560f;
+    private static final float SWAP_MW = 480f, SWAP_MH = 614f;
 
     // Hotswap param tables (mirror AiPlaygroundScreen)
     private static final int[]    ROLLOUTS = {40, 80, 150, 300, 600, 1200, 2400};
@@ -268,6 +275,13 @@ public final class ControlCenterScreen extends ScreenAdapter {
             if (swapEliteViewCtrl.contains(x, y) && evo) {
                 int d = x < swapEliteViewCtrl.x + swapEliteViewCtrl.width / 2f ? -1 : +1;
                 cfg.eliteViewIndex = Math.floorMod(cfg.eliteViewIndex + d, PlaygroundConfig.ELITE_VIEW_OPTIONS.length);
+                return;
+            }
+            boolean tb = cfg.technique.supportsTensorboard();
+            if (swapTbToggle.contains(x, y) && tb) { cfg.tensorboardDetailed = !cfg.tensorboardDetailed; return; }
+            if (swapTbOpenBtn.contains(x, y) && tb) {
+                tbMessage = TensorboardLauncher.launch(cfg.technique.id);
+                tbMessageTimer = 4f;
                 return;
             }
             if (swapCloseBtn.contains(x, y)) { hotswapOpen = false; return; }
@@ -452,6 +466,8 @@ public final class ControlCenterScreen extends ScreenAdapter {
         swapSimsCtrl.set(     m0x + 230, m0y + SWAP_MH - 312, 220, 38);
         swapGhostCullCtrl.set(m0x + 230, m0y + SWAP_MH - 366, 220, 38);
         swapEliteViewCtrl.set(m0x + 230, m0y + SWAP_MH - 420, 220, 38);
+        swapTbToggle.set(     m0x + 230, m0y + SWAP_MH - 474, 70, 38);
+        swapTbOpenBtn.set(    m0x + 308, m0y + SWAP_MH - 474, 142, 38);
         swapCloseBtn.set( m0x + SWAP_MW / 2f - 90, m0y + 22, 180, 44);
     }
 
@@ -573,6 +589,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
         delta = Math.min(delta, 0.05f);
         BoardRenderer.tickFlash(delta);
         tickAutosave(delta);
+        if (tbMessageTimer > 0f) tbMessageTimer -= delta;
         int views = viewCount();
         if (views == 1 && runner.acceptsHumanInput()) runner.setHover(hoverGameX);
         else if (imitationDual()) runner.setHover(hoverGameX);
@@ -1142,6 +1159,16 @@ public final class ControlCenterScreen extends ScreenAdapter {
         drawHotswapCycler(s, swapSimsCtrl,      evo);
         drawHotswapCycler(s, swapGhostCullCtrl, evo);
         drawHotswapCycler(s, swapEliteViewCtrl, evo);
+
+        boolean tb = cfg.technique.supportsTensorboard();
+        s.setColor(tb ? Theme.PANEL : new Color(0.10f, 0.11f, 0.16f, 0.8f));
+        Ui.fillRoundRect(s, swapTbToggle.x, swapTbToggle.y, swapTbToggle.width, swapTbToggle.height, 8);
+        if (tb) Ui.toggle(s, swapTbToggle.x + 4, swapTbToggle.y + 4,
+                swapTbToggle.width - 8, swapTbToggle.height - 8, cfg.tensorboardDetailed);
+        s.setColor(tb ? (swapTbOpenBtn.contains(mx, my) ? Theme.GOLD : Theme.PANEL_EDGE)
+                      : new Color(0.10f, 0.11f, 0.16f, 0.8f));
+        Ui.fillRoundRect(s, swapTbOpenBtn.x, swapTbOpenBtn.y, swapTbOpenBtn.width, swapTbOpenBtn.height, 8);
+
         // Flat CLOSE button (no glossy sheen, so the label stays crisp).
         boolean ch = swapCloseBtn.contains(mx, my);
         s.setColor(0f, 0f, 0f, 0.35f);
@@ -1181,12 +1208,24 @@ public final class ControlCenterScreen extends ScreenAdapter {
                 m0x + 24, swapEliteViewCtrl.y + 25, evo ? Theme.TEXT : Theme.TEXT_FAINT);
         cyclerGlyphs(swapEliteViewCtrl, evo ? cfg.eliteViewCount() + "x" : "n/a", evo);
 
+        Ui.text(game.batch, game.font, "TensorBoard", m0x + 24, swapTbToggle.y + 25,
+                tb ? Theme.TEXT : Theme.TEXT_FAINT);
+        Ui.textCenter(game.batch, game.fontSmall, tb ? "OPEN" : "n/a",
+                swapTbOpenBtn.x + swapTbOpenBtn.width / 2f, swapTbOpenBtn.y + swapTbOpenBtn.height / 2f - 5f,
+                tb ? Theme.TEXT : Theme.TEXT_FAINT);
+
         // Imitation's trainer deliberately persists across RESTART (so accumulated
-        // learning isn't thrown away) — its knobs don't get a "rebuild" note.
-        boolean restartRebuilds = cfg.technique.family != AiTechnique.Family.IMITATION
-                && (evo || paramApplicable() || cfg.technique.parallel);
-        if (restartRebuilds) Ui.textCenter(game.batch, game.fontSmall,
-                "changes apply on RESTART", m0x + SWAP_MW / 2f, m0y + 96, Theme.TEXT_FAINT);
+        // learning isn't thrown away) — its knobs don't get a "rebuild" note. The
+        // TensorBoard launch status (if any) takes priority over that note — they're
+        // both transient, single-line hints and rarely relevant at the same moment.
+        if (tbMessageTimer > 0f) {
+            Ui.textCenter(game.batch, game.fontSmall, tbMessage, m0x + SWAP_MW / 2f, m0y + 96, Theme.GOLD);
+        } else {
+            boolean restartRebuilds = cfg.technique.family != AiTechnique.Family.IMITATION
+                    && (evo || paramApplicable() || cfg.technique.parallel);
+            if (restartRebuilds) Ui.textCenter(game.batch, game.fontSmall,
+                    "changes apply on RESTART", m0x + SWAP_MW / 2f, m0y + 96, Theme.TEXT_FAINT);
+        }
 
         Ui.textCenter(game.batch, game.fontSmall, "CLOSE",
                 swapCloseBtn.x + swapCloseBtn.width / 2f, swapCloseBtn.y + 25, Theme.TEXT);

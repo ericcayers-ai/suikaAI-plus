@@ -89,12 +89,12 @@ final class GpuProbe {
             if (python == null) { available = false; return; }
             Process p = new ProcessBuilder(python, "-c",
                     "import torch;" +
-                    "print('cuda:'+str(torch.cuda.is_available())+':'+" +
-                    "(torch.cuda.get_device_name(0) if torch.cuda.is_available() else ''))")
+                            "print('cuda:'+str(torch.cuda.is_available())+':'+" +
+                            "(torch.cuda.get_device_name(0) if torch.cuda.is_available() else ''))")
                     .redirectErrorStream(true).start();
             String out = new String(p.getInputStream().readAllBytes()).trim();
-            int code = p.waitFor();
-            if (code != 0) { available = false; return; }
+            p.waitFor(); // FIX: Wait for execution but bypass strict non-zero exit code check to handle initialisation warnings
+
             for (String line : out.split("\\R")) {
                 if (!line.startsWith("cuda:")) continue;
                 String[] parts = line.split(":", 3);

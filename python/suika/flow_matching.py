@@ -73,11 +73,11 @@ class FlowMatchingPolicy:
     """
 
     def __init__(
-        self,
-        obs_dim:    int   = 584,
-        action_dim: int   = 1,
-        hidden:     int   = 256,
-        sigma:      float = 0.01,
+            self,
+            obs_dim:    int   = 584,
+            action_dim: int   = 1,
+            hidden:     int   = 256,
+            sigma:      float = 0.01,
     ) -> None:
         if not HAS_TORCH:
             raise ImportError("PyTorch is required: pip install torch")
@@ -134,7 +134,9 @@ class FlowMatchingPolicy:
 
     def predict_action(self, obs: list[float] | np.ndarray, n_steps: int = 20) -> float:
         """Single-observation inference; returns a continuous action in ~[-1, 1]."""
-        arr = torch.from_numpy(np.asarray(obs, dtype=np.float32)).unsqueeze(0)
+        # FIX: Ensure observation is cast to the active device to prevent CPU↔GPU mismatch
+        device = next(self.velocity.parameters()).device
+        arr = torch.from_numpy(np.asarray(obs, dtype=np.float32)).unsqueeze(0).to(device)
         act = self.sample(arr, n_steps=n_steps)
         return float(act[0, 0].item())
 
@@ -168,12 +170,12 @@ class FlowMatchingPolicy:
 # ---------------------------------------------------------------------------
 
 def train_flow(
-    policy:     FlowMatchingPolicy,
-    dataset:    "DemoDataset",
-    epochs:     int   = 50,
-    batch_size: int   = 256,
-    lr:         float = 1e-4,
-    device:     str   = "cpu",
+        policy:     FlowMatchingPolicy,
+        dataset:    "DemoDataset",
+        epochs:     int   = 50,
+        batch_size: int   = 256,
+        lr:         float = 1e-4,
+        device:     str   = "cpu",
 ) -> list[float]:
     """Train a FlowMatchingPolicy on demonstration data. Returns per-epoch losses."""
     if not HAS_TORCH:
@@ -195,7 +197,7 @@ def train_flow(
             batch = idxs[start : start + batch_size]
             obs_np = np.stack([dataset._obs[i] for i in batch])
             act_np = np.array([dataset._actions[i] / 31.0 * 2 - 1.0
-                                for i in batch], dtype=np.float32).reshape(-1, 1)
+                               for i in batch], dtype=np.float32).reshape(-1, 1)
             obs_t  = torch.from_numpy(obs_np).to(device)
             act_t  = torch.from_numpy(act_np).to(device)
 

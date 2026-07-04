@@ -95,16 +95,16 @@ public final class SettingsScreen extends ScreenAdapter {
         // ---- Display (§VI: resolution/fullscreen/UI scale, persisted across launches) ----
         cycle("DISPLAY", "Window height", () -> cfg.windowHeight() + "p",
                 () -> { cfg.resHeightIndex = wrap(cfg.resHeightIndex - 1, GameSettings.RES_HEIGHTS.length);
-                        cfg.applyWindowMode(); SettingsPersistence.save(cfg); },
+                    cfg.applyWindowMode(); SettingsPersistence.save(cfg); },
                 () -> { cfg.resHeightIndex = wrap(cfg.resHeightIndex + 1, GameSettings.RES_HEIGHTS.length);
-                        cfg.applyWindowMode(); SettingsPersistence.save(cfg); });
+                    cfg.applyWindowMode(); SettingsPersistence.save(cfg); });
         toggle(null, "Fullscreen", () -> cfg.fullscreen,
                 () -> { cfg.fullscreen = !cfg.fullscreen; cfg.applyWindowMode(); SettingsPersistence.save(cfg); });
         cycle(null, "UI scale", cfg::uiScaleLabel,
                 () -> { cfg.uiScaleIndex = wrap(cfg.uiScaleIndex - 1, GameSettings.UI_SCALE_OPTIONS.length);
-                        game.regenerateFonts(); SettingsPersistence.save(cfg); },
+                    game.regenerateFonts(); SettingsPersistence.save(cfg); },
                 () -> { cfg.uiScaleIndex = wrap(cfg.uiScaleIndex + 1, GameSettings.UI_SCALE_OPTIONS.length);
-                        game.regenerateFonts(); SettingsPersistence.save(cfg); });
+                    game.regenerateFonts(); SettingsPersistence.save(cfg); });
 
         // ---- Graphics ----
         cycle("GRAPHICS", "Frame rate", () -> cfg.fpsLabel(),
@@ -121,24 +121,15 @@ public final class SettingsScreen extends ScreenAdapter {
         cycle("SIMULATION", "Drop columns", () -> Integer.toString(cfg.actionBins()),
                 () -> cfg.binIndex = wrap(cfg.binIndex - 1, GameSettings.BIN_OPTIONS.length),
                 () -> cfg.binIndex = wrap(cfg.binIndex + 1, GameSettings.BIN_OPTIONS.length));
-        toggle(null, "Seed", () -> cfg.randomSeed, () -> cfg.randomSeed = !cfg.randomSeed) // label shows mode via value
+        toggle(null, "Seed", () -> cfg.randomSeed, () -> cfg.randomSeed = !cfg.randomSeed)
                 .value = () -> cfg.randomSeed ? "Random" : "Fixed " + cfg.fixedSeed;
 
         // ---- Gameplay ----
-        // Not gated behind any master toggle — RT Lab itself needs no experimental
-        // flag to unlock (see MainMenuScreen); this is just its own physics choice.
         cycle("GAMEPLAY", "RT Lab physics", () -> cfg.rt3dPhysics ? "3D (true 3D)" : "2D (classic)",
                 () -> cfg.rt3dPhysics = !cfg.rt3dPhysics,
                 () -> cfg.rt3dPhysics = !cfg.rt3dPhysics);
 
-        // AI training knobs (eval parallelism, sims/generation, ghost lineage) and AI
-        // Watch configuration both live inside the AI game itself (per-technique drawer
-        // in the AI Playground / quick-settings in the control center), not here —
-        // they only apply to specific techniques, not the app globally.
-
         // ---- Experimental gameplay variants ----
-        // Genuinely optional rule changes — no master gate; each is its own toggle,
-        // same as every other setting on this screen.
         toggle("EXPERIMENTAL", "Instant fail (no safety delay)",
                 () -> cfg.immediateDeadline, () -> { cfg.immediateDeadline = !cfg.immediateDeadline; cfg.applyPhysics(); });
         toggle(null, "Bouncy fruit (no instant settle)",
@@ -149,13 +140,12 @@ public final class SettingsScreen extends ScreenAdapter {
         button(null, "Download AI GPU deps",
                 () -> PythonSetup.isReady() ? "REINSTALL" : installing ? "WORKING…" : "SETUP",
                 this::startInstall);
-        // Honest GPU toggle: routes every PYTHON-backed technique to CUDA (not just PPO).
-        // JVM-native techniques have no CUDA path here, so the value readout says so.
-        toggle(null, "Prefer GPU acceleration (Python techniques)",
+
+        // FIX: Shortened the label slightly to guarantee aesthetic spacing
+        toggle(null, "Prefer GPU (Python techniques)",
                 () -> cfg.preferGpu, () -> { cfg.preferGpu = !cfg.preferGpu; cfg.applyGpuPreference(); SettingsPersistence.save(cfg); })
                 .value = () -> gpuToggleHint();
-        // When GPU deps are ready, the default is GPU inference for net-based techniques
-        // (no CPU thread fan-out); flip this on to force the fast JVM CPU-only path.
+
         toggle(null, "Force JVM CPU-only implementations",
                 () -> cfg.jvmCpuOnly, () -> { cfg.jvmCpuOnly = !cfg.jvmCpuOnly; cfg.applyGpuPreference(); SettingsPersistence.save(cfg); });
         slider(null, "Max GPU utilization (Python training)",
@@ -163,13 +153,13 @@ public final class SettingsScreen extends ScreenAdapter {
                 f -> cfg.gpuUtilPercent = (int) (Math.round((10 + clamp01(f) * 90) / 5.0) * 5))
                 .value = () -> cfg.gpuUtilPercent + "%";
 
-        // ---- Presets (must be calibrated before the quality presets are usable) ----
+        // ---- Presets ----
         Row calib = button("PRESETS", "Calibrate presets for this machine",
                 () -> PresetCalibration.running() ? PresetCalibration.progressPct() + "%"
                         : PresetCalibration.calibrated() ? "RECALIBRATE" : "CALIBRATE",
                 () -> { if (!PresetCalibration.running()) PresetCalibration.calibrateAsync(); });
         calib.value2 = PresetCalibration::statusLabel;
-        calib.heightOverride = ROW_H + 26f;   // room for the status line under the label
+        calib.heightOverride = ROW_H + 26f;
 
         // ---- Saves ----
         cycle("SAVES", "Autosave (AI progress -> slot 1)", cfg::autosaveLabel,
@@ -177,15 +167,13 @@ public final class SettingsScreen extends ScreenAdapter {
                 () -> { cfg.autosaveIndex = wrap(cfg.autosaveIndex + 1, GameSettings.AUTOSAVE_MINUTES.length); SettingsPersistence.save(cfg); });
     }
 
-    /** Honest one-word status for the GPU toggle's value readout. */
     private String gpuToggleHint() {
         if (!cfg.preferGpu) return "Off";
         Boolean gpu = GpuProbe.available();
         if (gpu == null) return "On (probing…)";
-        return gpu ? "On (CUDA)" : "On (no GPU found)";
+        return gpu ? "On (GPU found)" : "On (no GPU found)";
     }
 
-    /** Shorten a progress line so it fits the ~250 px status cycler box. */
     private static String fit(String msg) {
         return msg.length() > 24 ? msg.substring(0, 23) + "…" : msg;
     }
@@ -195,29 +183,24 @@ public final class SettingsScreen extends ScreenAdapter {
         installing = true;
         installStatus = "Starting… 0%";
         PythonSetup.installAsync(
-            msg -> {
-                boolean done = msg.startsWith("Error")
-                        || msg.startsWith("Warning") || msg.startsWith("Python not found");
-                // Prefix every in-progress line with the stage percentage.
-                installStatus = done ? fit(msg) : "[" + PythonSetup.installPct() + "%] " + fit(msg);
-                if (done) installing = false;
-            },
-            () -> {
-                // Success: re-probe the GPU live, switch on GPU inference, persist, then
-                // restart so the whole stack comes up with CUDA available.
-                GpuProbe.forceReprobe();
-                cfg.preferGpu = true;
-                cfg.jvmCpuOnly = false;
-                cfg.applyGpuPreference();
-                SettingsPersistence.save(cfg);
-                installing = false;
-                // Give the probe a moment and the user a beat to read "restarting…".
-                try { Thread.sleep(1500); } catch (InterruptedException ignored) { }
-                AppRestart.restart();
-            });
+                msg -> {
+                    boolean done = msg.startsWith("Error")
+                            || msg.startsWith("Warning") || msg.startsWith("Python not found");
+                    installStatus = done ? fit(msg) : "[" + PythonSetup.installPct() + "%] " + fit(msg);
+                    if (done) installing = false;
+                },
+                () -> {
+                    GpuProbe.forceReprobe();
+                    cfg.preferGpu = true;
+                    cfg.jvmCpuOnly = false;
+                    cfg.applyGpuPreference();
+                    SettingsPersistence.save(cfg);
+                    installing = false;
+                    try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+                    AppRestart.restart();
+                });
     }
 
-    // --- row builders ---
     private Row add(String section, String label, Kind kind) {
         Row r = new Row(); r.section = section; r.label = label; r.kind = kind; rows.add(r); return r;
     }
@@ -229,9 +212,6 @@ public final class SettingsScreen extends ScreenAdapter {
     }
     private Row slider(String section, String label, DoubleSupplier frac, DoubleConsumer set) {
         Row r = add(section, label, Kind.SLIDER); r.frac = frac; r.setFrac = set;
-        // Three lines stacked in one tall row (label / value readout / bar) need more
-        // headroom than the old +24 gave — the value readout was landing right on top
-        // of the label baseline (confirmed via the capture harness).
         r.heightOverride = ROW_H + 40f;
         return r;
     }
@@ -251,7 +231,6 @@ public final class SettingsScreen extends ScreenAdapter {
                 camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight()); mx = touch.x; my = touch.y; return false;
             }
             @Override public boolean scrolled(float ax, float ay) {
-                // Wheel-down reveals lower rows — see AiPlaygroundScreen's identical fix.
                 scroll = Math.max(0f, Math.min(scroll + ay * 46f, maxScroll()));
                 return true;
             }
@@ -262,7 +241,6 @@ public final class SettingsScreen extends ScreenAdapter {
         });
     }
 
-    /** Total vertical space every row + section header takes up, stacked top to bottom. */
     private float contentHeight() {
         float y = 0f;
         for (Row r : rows) {
@@ -277,16 +255,12 @@ public final class SettingsScreen extends ScreenAdapter {
         return Math.max(0f, contentHeight() - (LIST_TOP - LIST_BOT));
     }
 
-    /** Test/QA hook: jump the list to the bottom (used by the capture harness to
-     *  photograph the late sections — EXPERIMENTAL, AI ENVIRONMENT). */
     public void scrollToBottomForCapture() { scroll = maxScroll(); }
 
     private void handleClick(float x, float y) {
         if (backBtn.contains(x, y)) { game.setScreen(back.apply(game)); return; }
         for (Row r : rows) {
             if (!r.area.contains(x, y)) continue;
-            // Rows scrolled outside the visible list band are masked but their
-            // Rectangle still exists — don't let an off-screen row eat the click.
             if (r.area.y + r.area.height > LIST_TOP || r.area.y < LIST_BOT) continue;
             switch (r.kind) {
                 case TOGGLE -> r.next.run();
@@ -299,6 +273,20 @@ public final class SettingsScreen extends ScreenAdapter {
     }
 
     private static double clamp01(double v) { return Math.max(0, Math.min(1, v)); }
+
+    private String ellipsize(String text, com.badlogic.gdx.graphics.g2d.BitmapFont font, float maxW) {
+        if (Ui.textWidth(font, text) <= maxW) return text;
+        String ell = "…";
+        if (Ui.textWidth(font, ell) > maxW) return ell;
+        int lo = 0, hi = text.length();
+        String best = ell;
+        while (lo < hi) {
+            int mid = (lo + hi + 1) / 2;
+            String candidate = text.substring(0, mid).stripTrailing() + ell;
+            if (Ui.textWidth(font, candidate) <= maxW) { best = candidate; lo = mid; } else hi = mid - 1;
+        }
+        return best;
+    }
 
     @Override
     public void render(float delta) {
@@ -314,105 +302,122 @@ public final class SettingsScreen extends ScreenAdapter {
 
         s.begin(ShapeRenderer.ShapeType.Filled);
         s.rect(0, 0, Theme.VW, Theme.VH, Theme.BG_BOTTOM, Theme.BG_BOTTOM, Theme.BG_TOP, Theme.BG_TOP);
+        s.end();
+
+        s.begin(ShapeRenderer.ShapeType.Filled);
+        Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
+        float scX = viewport.getScreenX();
+        float scY = viewport.getScreenY();
+        float scW = viewport.getScreenWidth();
+        float scH = viewport.getScreenHeight();
+        Gdx.gl.glScissor(
+                (int) scX,
+                (int) (scY + (LIST_BOT / Theme.VH) * scH),
+                (int) scW,
+                (int) (((LIST_TOP - LIST_BOT) / Theme.VH) * scH)
+        );
 
         float y = LIST_TOP + scroll;
         for (Row r : rows) {
-            if (r.section != null) y -= SECTION_GAP;     // reserve a band for the header
+            if (r.section != null) y -= SECTION_GAP;
             float rh = rowHeight(r);
             float rowTop = y;
             float rowBot = y - rh;
             r.area.set(ctrlX, rowBot + 9f, CTRL_W, rh - 18f);
 
-            // Rows scrolled outside the visible list band ([LIST_BOT, LIST_TOP]) are
-            // simply not drawn — the fixed-position title and BACK button live outside
-            // that band, so nothing else may render there either.
-            if (rowTop > LIST_BOT && rowBot < LIST_TOP) {
-                // row background
-                s.setColor(Theme.PANEL.r, Theme.PANEL.g, Theme.PANEL.b, 0.55f);
-                Ui.fillRoundRect(s, MARGIN_X, rowBot + 4f, Theme.VW - 2 * MARGIN_X, rh - 8f, 10f);
+            s.setColor(Theme.PANEL.r, Theme.PANEL.g, Theme.PANEL.b, 0.55f);
+            Ui.fillRoundRect(s, MARGIN_X, rowBot + 4f, Theme.VW - 2 * MARGIN_X, rh - 8f, 10f);
 
-                switch (r.kind) {
-                    case TOGGLE -> Ui.toggle(s, r.area.x + r.area.width - 70f, r.area.y + 3f, 60f, r.area.height - 6f, r.on.getAsBoolean());
-                    case CYCLE  -> {
-                        boolean hov = r.area.contains(mx, my);
-                        s.setColor(Theme.PANEL_DEEP);
-                        Ui.fillRoundRect(s, r.area.x, r.area.y, r.area.width, r.area.height, 8f);
-                        s.setColor(hov && mx < r.area.x + r.area.width / 2f ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
-                        Ui.fillRoundRect(s, r.area.x + 4f, r.area.y + 4f, 32f, r.area.height - 8f, 6f);
-                        s.setColor(hov && mx >= r.area.x + r.area.width / 2f ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
-                        Ui.fillRoundRect(s, r.area.x + r.area.width - 36f, r.area.y + 4f, 32f, r.area.height - 8f, 6f);
-                    }
-                    case SLIDER -> {
-                        // The bar sits at the very bottom of this row's (taller) area;
-                        // the value readout and label stack above it in the text pass,
-                        // each with its own clear vertical band (see labelY/valueY there).
-                        float barY = r.area.y + 8f;
-                        s.setColor(Theme.PANEL_DEEP);
-                        Ui.fillRoundRect(s, r.area.x, barY - 5f, r.area.width, 10f, 5f);
-                        float f = (float) r.frac.getAsDouble();
-                        s.setColor(Theme.ACCENT_2);
-                        Ui.fillRoundRect(s, r.area.x, barY - 5f, r.area.width * f, 10f, 5f);
-                        s.setColor(0.97f, 0.98f, 1f, 1f);
-                        s.circle(r.area.x + r.area.width * f, barY, 11f, 18);
-                    }
-                    case BUTTON -> {
-                        boolean hov = r.area.contains(mx, my);
-                        s.setColor(hov ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
-                        Ui.fillRoundRect(s, r.area.x, r.area.y, r.area.width, r.area.height, 8f);
-                    }
+            switch (r.kind) {
+                case TOGGLE -> Ui.toggle(s, r.area.x + r.area.width - 70f, r.area.y + 3f, 60f, r.area.height - 6f, r.on.getAsBoolean());
+                case CYCLE  -> {
+                    boolean hov = r.area.contains(mx, my);
+                    s.setColor(Theme.PANEL_DEEP);
+                    Ui.fillRoundRect(s, r.area.x, r.area.y, r.area.width, r.area.height, 8f);
+                    s.setColor(hov && mx < r.area.x + r.area.width / 2f ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
+                    Ui.fillRoundRect(s, r.area.x + 4f, r.area.y + 4f, 32f, r.area.height - 8f, 6f);
+                    s.setColor(hov && mx >= r.area.x + r.area.width / 2f ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
+                    Ui.fillRoundRect(s, r.area.x + r.area.width - 36f, r.area.y + 4f, 32f, r.area.height - 8f, 6f);
+                }
+                case SLIDER -> {
+                    float barY = r.area.y + 8f;
+                    s.setColor(Theme.PANEL_DEEP);
+                    Ui.fillRoundRect(s, r.area.x, barY - 5f, r.area.width, 10f, 5f);
+                    float f = (float) r.frac.getAsDouble();
+                    s.setColor(Theme.ACCENT_2);
+                    Ui.fillRoundRect(s, r.area.x, barY - 5f, r.area.width * f, 10f, 5f);
+                    s.setColor(0.97f, 0.98f, 1f, 1f);
+                    s.circle(r.area.x + r.area.width * f, barY, 11f, 18);
+                }
+                case BUTTON -> {
+                    boolean hov = r.area.contains(mx, my);
+                    s.setColor(hov ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
+                    Ui.fillRoundRect(s, r.area.x, r.area.y, r.area.width, r.area.height, 8f);
                 }
             }
             y = rowBot - ROW_GAP;
         }
+        s.end();
+        Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
 
+        s.begin(ShapeRenderer.ShapeType.Filled);
         Ui.button(s, backBtn, Theme.ACCENT, backBtn.contains(mx, my), true);
         s.end();
 
-        // ---- text pass (identical layout maths) ----
+        // ---- text pass ----
         game.batch.begin();
         Ui.textCenter(game.batch, game.fontBig, "SETTINGS", Theme.VW / 2f, Theme.VH - 120f, Theme.TEXT);
+
+        game.batch.flush();
+        Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
+        Gdx.gl.glScissor(
+                (int) scX,
+                (int) (scY + (LIST_BOT / Theme.VH) * scH),
+                (int) scW,
+                (int) (((LIST_TOP - LIST_BOT) / Theme.VH) * scH)
+        );
 
         y = LIST_TOP + scroll;
         for (Row r : rows) {
             if (r.section != null) {
-                if (y > LIST_BOT && y < LIST_TOP + SECTION_GAP) // mirrors the row visibility check below
-                    Ui.text(game.batch, game.fontMed, r.section, MARGIN_X, y - 14f, Theme.GOLD);
+                Ui.text(game.batch, game.fontMed, r.section, MARGIN_X, y - 14f, Theme.GOLD);
                 y -= SECTION_GAP;
             }
             float rh = rowHeight(r);
             float rowTop = y;
             float rowBot = y - rh;
-            if (rowTop > LIST_BOT && rowBot < LIST_TOP) {   // same band as the shape pass
-                // Sliders stack three elements in their taller row — label, value
-                // readout, bar — top to bottom, each in its own clear vertical band
-                // (see the matching valueY/barY below) so none of them overlap.
-                float labelY = r.kind == Kind.SLIDER ? r.area.y + r.area.height - 10f : rowBot + rh / 2f + 8f;
-                Ui.text(game.batch, game.font, r.label, MARGIN_X + 16f, labelY, Theme.TEXT);
-                if (r.kind == Kind.CYCLE) {
-                    Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
-                            r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);
-                    if (r.prev != null) Ui.textCenter(game.batch, game.fontMed, "<", r.area.x + 20f, r.area.y + r.area.height / 2f + 1f, Theme.TEXT);
-                    if (r.next != null) Ui.textCenter(game.batch, game.fontMed, ">", r.area.x + r.area.width - 20f, r.area.y + r.area.height / 2f + 1f, Theme.TEXT);
-                } else if (r.kind == Kind.TOGGLE && r.value != null) {
-                    Ui.textRight(game.batch, game.fontSmall, r.value.get(),
-                            r.area.x + r.area.width - 80f, labelY - 2f, Theme.TEXT_DIM);
-                } else if (r.kind == Kind.SLIDER && r.value != null) {
-                    // Value readout sits in the middle band, clear of both the label
-                    // above and the bar below (see barY in the shapes pass / labelY above).
-                    float barY = r.area.y + 8f;
-                    Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
-                            r.area.x + r.area.width / 2f, barY + 22f, Theme.TEXT);
-                } else if (r.kind == Kind.BUTTON) {
-                    Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
-                            r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);
-                    // Optional status line under the label (e.g. calibration result).
-                    if (r.value2 != null)
-                        Ui.text(game.batch, game.fontSmall, r.value2.get(),
-                                MARGIN_X + 16f, labelY - 22f, Theme.TEXT_DIM);
-                }
+
+            float labelY = r.kind == Kind.SLIDER ? r.area.y + r.area.height - 10f : rowBot + rh / 2f + 8f;
+
+            // FIX: Prevent text overlap occlusion bug by dynamically truncating long labels
+            float maxLabelW = r.area.x - (MARGIN_X + 16f) - 10f;
+            String displayedLabel = ellipsize(r.label, game.font, maxLabelW);
+
+            Ui.text(game.batch, game.font, displayedLabel, MARGIN_X + 16f, labelY, Theme.TEXT);
+            if (r.kind == Kind.CYCLE) {
+                Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
+                        r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);
+                if (r.prev != null) Ui.textCenter(game.batch, game.fontMed, "<", r.area.x + 20f, r.area.y + r.area.height / 2f + 1f, Theme.TEXT);
+                if (r.next != null) Ui.textCenter(game.batch, game.fontMed, ">", r.area.x + r.area.width - 20f, r.area.y + r.area.height / 2f + 1f, Theme.TEXT);
+            } else if (r.kind == Kind.TOGGLE && r.value != null) {
+                Ui.textRight(game.batch, game.fontSmall, r.value.get(),
+                        r.area.x + r.area.width - 80f, labelY - 2f, Theme.TEXT_DIM);
+            } else if (r.kind == Kind.SLIDER && r.value != null) {
+                float barY = r.area.y + 8f;
+                Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
+                        r.area.x + r.area.width / 2f, barY + 22f, Theme.TEXT);
+            } else if (r.kind == Kind.BUTTON) {
+                Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
+                        r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);
+                if (r.value2 != null)
+                    Ui.text(game.batch, game.fontSmall, r.value2.get(),
+                            MARGIN_X + 16f, labelY - 22f, Theme.TEXT_DIM);
             }
             y = rowBot - ROW_GAP;
         }
+
+        game.batch.flush();
+        Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
 
         Ui.textCenter(game.batch, game.fontMed, "BACK", Theme.VW / 2f, backBtn.y + 35f, Theme.TEXT);
         game.batch.end();

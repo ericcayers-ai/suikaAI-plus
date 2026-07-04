@@ -10,7 +10,7 @@ import java.nio.charset.StandardCharsets;
 /**
  * Minimal Radiance (.hdr / RGBE) decoder for the RT Lab's HDRI environment map.
  * ImageIO cannot read Radiance files and pulling in a whole imaging library for
- * one bundled asset is overkill — the format is a short text header followed by
+ * one bundled asset is overkill — the format is a text header followed by
  * scanlines of 4-byte RGBE pixels (shared-exponent), either flat or RLE-packed
  * per component ("new-style" RLE, which is what Poly Haven exports use).
  *
@@ -48,7 +48,8 @@ final class HdrLoader {
         while (true) {
             String line = readLine(data, pos);
             pos += line.length() + 1;
-            if (line.isEmpty()) break;
+            // Trim carriage returns to support cross-platform line endings (CRLF)
+            if (line.trim().isEmpty()) break;
             if (line.startsWith("FORMAT=")) rgbeFormat = line.contains("32-bit_rle_rgbe");
         }
         if (!rgbeFormat) throw new IllegalStateException("Unsupported HDR pixel format (want 32-bit_rle_rgbe): " + resourcePath);
@@ -68,7 +69,7 @@ final class HdrLoader {
             pos = readScanline(data, pos, scan, width, resourcePath);
             for (int x = 0; x < width; x++) {
                 int r = scan[x * 4] & 0xFF, g = scan[x * 4 + 1] & 0xFF,
-                    b = scan[x * 4 + 2] & 0xFF, e = scan[x * 4 + 3] & 0xFF;
+                        b = scan[x * 4 + 2] & 0xFF, e = scan[x * 4 + 3] & 0xFF;
                 if (e == 0) {
                     out.putFloat(0f).putFloat(0f).putFloat(0f).putFloat(1f);
                 } else {
@@ -86,7 +87,7 @@ final class HdrLoader {
      *  returns the new read position. */
     private static int readScanline(byte[] data, int pos, byte[] scan, int width, String name) {
         int b0 = data[pos] & 0xFF, b1 = data[pos + 1] & 0xFF,
-            b2 = data[pos + 2] & 0xFF, b3 = data[pos + 3] & 0xFF;
+                b2 = data[pos + 2] & 0xFF, b3 = data[pos + 3] & 0xFF;
 
         // New-style RLE scanline marker: 0x02 0x02 then 16-bit width.
         if (b0 == 2 && b1 == 2 && ((b2 << 8) | b3) == width) {

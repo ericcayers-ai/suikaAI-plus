@@ -40,8 +40,6 @@ public final class ImitationRunner extends LiveBoardRunner {
     private float hoverX = (float) ((PhysicsConfig.DROP_X_MIN + PhysicsConfig.DROP_X_MAX) / 2.0);
     private float predictedX = Float.NaN;
 
-    // The AI clone: a second live board (shown on the RIGHT) that the cloned policy plays
-    // in real time, so you watch it copy your style on its own game while you play (LEFT).
     private GameCore aiClone;
     private double   cloneAccum;
     private float    cloneTimer = 0.3f;
@@ -49,8 +47,6 @@ public final class ImitationRunner extends LiveBoardRunner {
 
     private final LiveChart lossChart = new LiveChart(200);
     private final LiveChart accChart  = new LiveChart(200);
-    // chart3: how far ahead of (or behind) the clone you are, sampled once per drop of
-    // yours so a 260-sample buffer covers a real chunk of playing history.
     private final LiveChart leadChart = new LiveChart(260);
     private int lastLeadSampleDrops = -1;
     private volatile double loss = 0, accuracy = 0;
@@ -74,10 +70,7 @@ public final class ImitationRunner extends LiveBoardRunner {
 
     @Override
     protected void onNewGame() {
-        // dataset + trainer persist across games; only the board resets.
         if (bc == null) bc = new BehavioralCloningTrainer(dataset, cfg.learningRate, 4);
-        // The AI clone is independent of the human board — created once, then it keeps
-        // playing its own games (auto-restarting) so it never resets when YOU restart.
         if (aiClone == null) aiClone = new GameCore(seed + 4242L);
     }
 
@@ -88,7 +81,6 @@ public final class ImitationRunner extends LiveBoardRunner {
     @Override
     public void humanDrop(float gx) {
         if (core.isGameOver()) return;
-        // capture demonstration: board state -> the column the human chose
         float[] obs = encoder.encode(core.getState());
         dataset.add(new Demonstration(obs, xToBin(gx), 0.0, false));
         firstDropDone = true;
@@ -97,14 +89,12 @@ public final class ImitationRunner extends LiveBoardRunner {
 
     @Override
     protected void onUpdate(float dt) {
-        // predicted drop marker (cheap single forward pass) once we have a policy
         if (phase == Phase.TRAIN && bc != null && !core.isGameOver()) {
             NeuralAgent a = bc.trainedAgent();
             Object act = a.selectAction(core.getState(), spec);
             predictedX = (float) spec.toDropX(act, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
         }
 
-        // Drive the AI clone's own live board (right) once a policy exists.
         stepClone(dt);
 
         if (drops != lastLeadSampleDrops) {
@@ -112,7 +102,6 @@ public final class ImitationRunner extends LiveBoardRunner {
             leadChart.add((float) (core.getScore() - (aiClone != null ? aiClone.getScore() : 0)));
         }
 
-        // periodic action-match accuracy on the captured demos
         accTimer -= dt;
         if (accTimer <= 0f && phase == Phase.TRAIN && dataset.size() > 0) {
             accuracy = measureAccuracy();
@@ -128,7 +117,6 @@ public final class ImitationRunner extends LiveBoardRunner {
         }
     }
 
-    /** Advance the AI clone's independent game: real-time physics + cloned-policy drops. */
     private void stepClone(float dt) {
         if (aiClone == null || phase != Phase.TRAIN || bc == null) return;
         cloneAccum += Math.min(dt * speed, 4.0);
@@ -138,13 +126,12 @@ public final class ImitationRunner extends LiveBoardRunner {
             cloneAccum -= PhysicsConfig.FIXED_DT;
             st++;
         }
-        if (aiClone.isGameOver()) {                 // keep going immediately, no delay
+        if (aiClone.isGameOver()) {
             cloneGames++;
             aiClone = new GameCore(seed + 4242L + cloneGames);
             cloneTimer = 0.2f;
             return;
         }
-        // clone drops on a steady cadence once its chute is clear
         cloneTimer -= dt;
         boolean chuteClear = true;
         double thresh = PhysicsConfig.CONTAINER_HEIGHT - 1.0;
@@ -158,7 +145,6 @@ public final class ImitationRunner extends LiveBoardRunner {
         }
     }
 
-    /** Two boards: YOU (left) and the AI clone (right). */
     @Override
     public GameState[] multiStates() {
         return new GameState[]{ core.getState(), aiClone != null ? aiClone.getState() : null };
@@ -167,19 +153,12 @@ public final class ImitationRunner extends LiveBoardRunner {
     @Override
     public String[] multiLabels() {
         return new String[]{
-            "YOU  ·  " + core.getScore(),
-            "AI CLONE  ·  " + (aiClone != null ? aiClone.getScore() : 0)
-                    + (phase == Phase.WATCH_FIRST ? "  (watching)" : ""),
+                "YOU  ·  " + core.getScore(),
+                "AI CLONE  ·  " + (aiClone != null ? aiClone.getScore() : 0)
+                        + (phase == Phase.WATCH_FIRST ? "  (watching)" : ""),
         };
     }
 
-    /**
-     * Test/QA hook: jump straight to the TRAIN phase without waiting for a full live
-     * game to actually end. Real gravity-paced physics makes finishing an entire game
-     * take tens of real-time seconds — far too slow for an automated capture sweep —
-     * so this seeds a few extra synthetic demos on top of whatever was already
-     * captured live and starts training immediately.
-     */
     void forceTrainPhaseForCapture() {
         if (phase == Phase.TRAIN) return;
         for (int i = 0; dataset.size() < 8; i++) {
@@ -199,15 +178,7 @@ public final class ImitationRunner extends LiveBoardRunner {
         worker.start();
     }
 
-    /**
-     * Floor on time between training iterations (~25/s). Before the backprop fix (see
-     * {@link dev.suika.ai.MlpPolicy#backpropCrossEntropyGradient}), one {@code bc.update()}
-     * took several seconds, so this loop was naturally paced by its own cost. Now an
-     * update takes milliseconds, so left unthrottled this would spin at effectively
-     * unlimited updates/sec, pegging a full CPU core for no real benefit — the loss
-     * chart doesn't need more than a few dozen fresh points a second to read as "live".
-     */
-    private static final long MIN_ITERATION_NANOS = 40_000_000L; // 25/s
+    private static final long MIN_ITERATION_NANOS = 40_000_000L;
 
     private void trainLoop() {
         MctsAgent expert = isDagger ? new MctsAgent(40, Math.sqrt(2), 5, cfg.actionBins) : null;
@@ -215,7 +186,6 @@ public final class ImitationRunner extends LiveBoardRunner {
         while (running) {
             long t0 = System.nanoTime();
             try {
-                // DAgger: aggregate MCTS-expert labels from fresh states.
                 if (isDagger) {
                     GameCore c = new GameCore(expertSeed++);
                     int steps = 4 + (int) (Math.random() * 8);
@@ -247,7 +217,6 @@ public final class ImitationRunner extends LiveBoardRunner {
     private double currentLoss() {
         List<Demonstration> batch = dataset.sample(Math.min(16, dataset.size()));
         if (batch.isEmpty()) return 0;
-        NeuralAgent a = bc.trainedAgent();
         double l = 0; int n = 0;
         for (Demonstration d : batch) {
             double[] logits = bc.policy().forward(d.observation());
@@ -283,21 +252,21 @@ public final class ImitationRunner extends LiveBoardRunner {
     @Override public String modalTitle() { return "Train the AI on your playstyle"; }
     @Override public String[] modalBody() {
         return new String[]{
-            (isDagger ? "DAgger" : "Behavioral Cloning") + " — imitation learning",
-            "",
-            "YOU play on the LEFT board. The AI watches and records",
-            "every drop you make. When your first game ends it starts",
-            "training live and plays its OWN game on the RIGHT,",
-            "copying your style as it learns.",
-            "",
-            "Click in the left well to drop and begin.",
+                (isDagger ? "DAgger" : "Behavioral Cloning") + " — imitation learning",
+                "",
+                "YOU play on the LEFT board. The AI watches and records",
+                "every drop you make. When your first game ends it starts",
+                "training live and plays its OWN game on the RIGHT,",
+                "copying your style as it learns.",
+                "",
+                "Click in the left well to drop and begin.",
         };
     }
 
     @Override public String title()    { return cfg.technique.display; }
     @Override public String subtitle() {
         return phase == Phase.WATCH_FIRST ? "Imitation  ·  watching you (game 1)"
-                                          : "Imitation  ·  training live  ·  " + updates + " updates";
+                : "Imitation  ·  training live  ·  " + updates + " updates";
     }
 
     @Override
@@ -306,21 +275,18 @@ public final class ImitationRunner extends LiveBoardRunner {
         long clone = aiClone != null ? aiClone.getScore() : 0;
         long delta = clone - you;
         return new String[]{
-            "phase        " + (phase == Phase.WATCH_FIRST ? "capture (game 1)" : "train + play"),
-            "demos        " + dataset.size(),
-            "bc updates   " + updates + "  (" + String.format("%.1f", updatesPerSec()) + "/s)",
-            "loss         " + String.format("%.3f", loss),
-            "match acc.   " + String.format("%.0f%%", accuracy),
-            "scores       you " + you + "  ·  clone " + clone
-                    + "  (" + (delta >= 0 ? "+" : "") + delta + ")",
-            "clone games  " + cloneGames,
-            isDagger ? "expert       MCTS relabeling" : "method       supervised cloning",
+                "phase        " + (phase == Phase.WATCH_FIRST ? "capture (game 1)" : "train + play"),
+                "demos        " + dataset.size(),
+                "bc updates   " + updates + "  (" + String.format("%.1f", updatesPerSec()) + "/s)",
+                "loss         " + String.format("%.3f", loss),
+                "match acc.   " + String.format("%.0f%%", accuracy),
+                "scores       you " + you + "  ·  clone " + clone
+                        + "  (" + (delta >= 0 ? "+" : "") + delta + ")",
+                "clone games  " + cloneGames,
+                isDagger ? "expert       MCTS relabeling" : "method       supervised cloning",
         };
     }
 
-    /** Plain-language read on where the current loss sits, since a bare number means
-     *  little without context (cross-entropy over 32 columns starts around ln(32)≈3.47
-     *  for a random guess and trends toward 0 as it learns your pattern). */
     private String lossReading() {
         if (updates == 0) return "not trained yet";
         if (loss > 3.0)   return "still near random — early days";
@@ -329,9 +295,6 @@ public final class ImitationRunner extends LiveBoardRunner {
         return "confident — closely tracking your pattern";
     }
 
-    // The landscape panel scrolls with the mouse wheel once stats() + extendedStats()
-    // exceed its visible height, so there's no hard line cap — see ControlCenterScreen's
-    // drawPanelText()/maxStatsScroll().
     @Override
     public String[] extendedStats() {
         java.util.List<String> s = new java.util.ArrayList<>();
@@ -372,18 +335,31 @@ public final class ImitationRunner extends LiveBoardRunner {
     /** Persists the current cloned policy's weights + match accuracy into a slot. */
     public boolean saveToSlot(int slot) {
         if (bc == null) return false;
-        ModelSlots.save(cfg.technique.id, slot, bc.policy(), accuracy);
+
+        // FIX: Export imitation chart data as well
+        java.util.Map<String, float[]> graphs = new java.util.LinkedHashMap<>();
+        graphs.put("loss",      lossChart.export());
+        graphs.put("accuracy",  accChart.export());
+        graphs.put("lead",      leadChart.export());
+        ModelSlots.save(cfg.technique.id, slot, bc.policy(), accuracy,
+                new ModelSlots.SaveExtras(graphs));
         return true;
     }
 
     /**
      * Loads a slot's weights directly into the live policy. Unlike evolution, no pause
-     * is needed — BC/DAgger keep fine-tuning whatever policy is currently loaded with
-     * ordinary SGD steps, so this just resumes training from the saved point.
+     * is needed — BC/DAgger keep fine-tuning whatever is loaded in.
      */
     public boolean loadFromSlot(int slot) {
         if (bc == null) bc = new dev.suika.ai.BehavioralCloningTrainer(dataset, cfg.learningRate, 4);
-        return ModelSlots.load(cfg.technique.id, slot, bc.policy());
+        if (!ModelSlots.load(cfg.technique.id, slot, bc.policy())) return false;
+
+        // FIX: Restore imitation chart data histories
+        var graphs = ModelSlots.loadGraphs(cfg.technique.id, slot);
+        if (graphs.containsKey("loss"))     lossChart.importSeries(graphs.get("loss"));
+        if (graphs.containsKey("accuracy")) accChart.importSeries(graphs.get("accuracy"));
+        if (graphs.containsKey("lead"))     leadChart.importSeries(graphs.get("lead"));
+        return true;
     }
 
     public ModelSlots.SlotInfo slotInfo(int slot) { return ModelSlots.info(cfg.technique.id, slot); }

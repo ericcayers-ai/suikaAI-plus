@@ -69,7 +69,8 @@ public final class PopulationBasedTraining {
         int replaceCount = Math.max(1, (int) (populationSize * REPLACE_FRACTION));
         for (int i = 0; i < replaceCount; i++) {
             Member top    = evaluated.get(i);
-            Member bottom = evaluated.get(populationSize - 1 - i);
+            int bottomIdx = populationSize - 1 - i;
+            Member bottom = evaluated.get(bottomIdx);
 
             // Copy weights
             double[] w = top.policy().getWeights();
@@ -80,7 +81,11 @@ public final class PopulationBasedTraining {
             double oldLr = ((Number) newHp.getOrDefault("learning_rate", 3e-4)).doubleValue();
             double factor = 1.0 + (rng.nextDouble() * 2 - 1.0) * PERTURB_FACTOR;
             newHp.put("learning_rate", oldLr * factor);
-            // (in production, update bottom member's trainer with the new LR)
+
+            // Re-create the config and member to apply the changes
+            AgentConfig newCfg = new AgentConfig(bottom.config().agentId(), newHp);
+            Member perturbedBottom = new Member(bottom.id(), bottom.policy(), newCfg, bottom.fitness());
+            evaluated.set(bottomIdx, perturbedBottom);
         }
 
         population.clear();

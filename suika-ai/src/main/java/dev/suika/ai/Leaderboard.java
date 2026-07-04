@@ -15,11 +15,15 @@ public final class Leaderboard {
 
     /** Add or replace an entry (same agentId → replace with higher mean score). */
     public synchronized void submit(LeaderboardEntry entry) {
-        entries.removeIf(e -> e.agentId().equals(entry.agentId()) && e.meanScore() < entry.meanScore());
-        boolean replaced = entries.removeIf(e -> e.agentId().equals(entry.agentId()));
-        if (!replaced || true) {
-            entries.add(entry);
+        // Find if there is already an equal or better entry for this agent
+        boolean alreadyBetter = entries.stream()
+                .anyMatch(e -> e.agentId().equals(entry.agentId()) && e.meanScore() >= entry.meanScore());
+        if (alreadyBetter) {
+            return;
         }
+        // Remove older/weaker entries for this agent
+        entries.removeIf(e -> e.agentId().equals(entry.agentId()));
+        entries.add(entry);
         entries.sort(Comparator.naturalOrder());
     }
 

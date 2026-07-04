@@ -117,10 +117,10 @@ public final class PythonSetup {
                 );
 
                 installPct = 82;
-                status.accept("Installing gym, stable-baselines3, numpy…");
+                status.accept("Installing gym, stable-baselines3, numpy, tensorboard…");
                 run(status,
                     venvPip().toString(), "install",
-                    "gymnasium", "stable-baselines3", "numpy",
+                    "gymnasium", "stable-baselines3", "numpy", "tensorboard", "tqdm", "rich",
                     "--quiet"
                 );
 

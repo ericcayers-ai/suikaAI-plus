@@ -49,7 +49,8 @@ public final class BenchmarkSuite {
                 GameCore game = new GameCore(seed + ep);
                 int steps = 0;
                 while (!game.isGameOver() && steps < maxSteps) {
-                    Object action = agent.selectAction(game.getState(), spec);
+                    // FIX: Pass live GameCore directly
+                    Object action = agent.selectAction(game, spec);
                     double x = spec.toDropX(action,
                             PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
                     game.dropAndSettle(x);

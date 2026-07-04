@@ -65,12 +65,12 @@ public final class DAggerTrainer {
             GameState state = core.getState();
             float[] obs = encoder.encode(state);
 
-            // Expert labels this state regardless of which action we take
-            Object expertAction = expert.selectAction(state, spec);
+            // FIX: Query the expert directly with the live GameCore
+            Object expertAction = expert.selectAction(core, spec);
             int expertA = ((Number) expertAction).intValue();
 
-            // Roll out using the current learner policy (to collect on-policy states)
-            Object learnerAction = currentPolicy.selectAction(state, spec);
+            // FIX: Query the learner with the live GameCore
+            Object learnerAction = currentPolicy.selectAction(core, spec);
             double x = spec.toDropX(learnerAction,
                     dev.suika.core.PhysicsConfig.DROP_X_MIN,
                     dev.suika.core.PhysicsConfig.DROP_X_MAX);

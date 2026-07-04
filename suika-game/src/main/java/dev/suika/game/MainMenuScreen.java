@@ -30,22 +30,13 @@ public final class MainMenuScreen extends ScreenAdapter {
     private final Rectangle watchBtn    = new Rectangle(CX - 170, 566, 340, 78);
     private final Rectangle settingsBtn = new Rectangle(CX - 170, 472, 340, 78);
     private final Rectangle quitBtn     = new Rectangle(CX - 170, 378, 340, 78);
-    // Smaller and visually distinct (violet) — this launches a genuinely experimental
-    // feature (raw Vulkan hardware ray tracing in a separate window/GPU context, not
-    // the game's own OpenGL rendering) that may not work on every GPU/driver.
     private final Rectangle rtLabBtn    = new Rectangle(CX - 130, 296, 260, 56);
-    // Opens the AI-save picker so any technique's saved slot (see AiSlotPlayer) can
-    // play RT Lab by itself instead of a human — sits beside RT LAB in the margin
-    // between it and the screen edge, same violet family, no layout shuffling needed.
     private final Rectangle rtAiBtn     = new Rectangle(CX + 140, 296, 150, 56);
 
     private float time = 0f;
     private float mx, my;
-    /** Seconds left to show an RT-launch-failure hint under the RT button. */
     private float rtHintTimer = 0f;
     private String rtHintText = "";
-    /** True right after clicking RT LAB / AI PLAYS while its background launch
-     *  thread is still starting up — cleared once it either goes running or fails. */
     private boolean awaitingRtLaunch = false;
 
     // ---- AI-save picker modal (RT Lab autoplay) ----
@@ -55,14 +46,16 @@ public final class MainMenuScreen extends ScreenAdapter {
     private int aiScrollIndex = 0;
     private String aiPickerMessage = "";
     private static final int AI_ROWS_VISIBLE = 6;
-    private static final float AI_MW = 600f, AI_MH = 500f;
+
+    // FIX: Heightened the panel geometry to accommodate the browse button
+    private static final float AI_MW = 600f, AI_MH = 560f;
     private final Rectangle[] aiRowBtn = new Rectangle[AI_ROWS_VISIBLE];
     private final Rectangle aiCloseBtn = new Rectangle();
     private final Rectangle aiScrollUpBtn = new Rectangle();
     private final Rectangle aiScrollDownBtn = new Rectangle();
+    private final Rectangle aiBrowseBtn = new Rectangle();
     { for (int i = 0; i < AI_ROWS_VISIBLE; i++) aiRowBtn[i] = new Rectangle(); }
 
-    // ambient floating fruit (x, baseY, speed, tier)
     private final float[][] motes = new float[9][];
 
     public MainMenuScreen(SuikaGame game) {
@@ -73,10 +66,10 @@ public final class MainMenuScreen extends ScreenAdapter {
         java.util.Random r = new java.util.Random(7);
         for (int i = 0; i < motes.length; i++) {
             motes[i] = new float[]{
-                40 + r.nextFloat() * (Theme.VW - 80),
-                r.nextFloat() * Theme.VH,
-                14 + r.nextFloat() * 26,
-                r.nextInt(FruitTier.values().length)
+                    40 + r.nextFloat() * (Theme.VW - 80),
+                    r.nextFloat() * Theme.VH,
+                    14 + r.nextFloat() * 26,
+                    r.nextInt(FruitTier.values().length)
             };
         }
     }
@@ -114,10 +107,6 @@ public final class MainMenuScreen extends ScreenAdapter {
     @Override
     public void render(float delta) {
         time += delta;
-        // RT Lab launches on a background thread; while we're waiting to find out if
-        // it took, poll for either it going live or a friendly failure reason (bad
-        // GPU/driver) — cleared as soon as either happens, so this doesn't re-arm
-        // the hint on every subsequent frame.
         if (awaitingRtLaunch) {
             if (dev.suika.game.rtlab.RtLabLauncher.isRunning()) {
                 awaitingRtLaunch = false;
@@ -141,11 +130,9 @@ public final class MainMenuScreen extends ScreenAdapter {
         ShapeRenderer s = game.shapes;
         s.begin(ShapeRenderer.ShapeType.Filled);
 
-        // backdrop gradient
         s.rect(0, 0, Theme.VW, Theme.VH,
                 Theme.BG_BOTTOM, Theme.BG_BOTTOM, Theme.BG_TOP, Theme.BG_TOP);
 
-        // ambient rising fruit
         for (float[] m : motes) {
             float y = (m[1] + time * m[2]) % (Theme.VH + 120) - 60;
             FruitTier t = FruitTier.values()[(int) m[3]];
@@ -155,27 +142,22 @@ public final class MainMenuScreen extends ScreenAdapter {
             s.circle(m[0], y, rr, 24);
         }
 
-        // buttons
         Ui.button(s, playBtn,     Theme.ACCENT_2,    playBtn.contains(mx, my),     true);
         Ui.button(s, watchBtn,    Theme.ACCENT_BLUE, watchBtn.contains(mx, my),    true);
         Ui.button(s, settingsBtn, Theme.PANEL_EDGE,  settingsBtn.contains(mx, my), true);
         Ui.button(s, quitBtn,     Theme.ACCENT,      quitBtn.contains(mx, my),     true);
-        // RT LAB / AI PLAYS are always live — a missing/incapable GPU is reported
-        // per-launch via the rtHintText message below, not gated up front.
         Ui.button(s, rtLabBtn, RT_LAB_VIOLET, rtLabBtn.contains(mx, my), true);
         Ui.button(s, rtAiBtn, Theme.ACCENT_2, rtAiBtn.contains(mx, my), true);
 
         s.end();
 
         game.batch.begin();
-        // Title
         Ui.textCenter(game.batch, game.fontHuge, "SUIKA", CX, 1010, Theme.GOLD);
         Ui.textCenter(game.batch, game.fontHuge, "AI SANDBOX", CX, 920, Theme.TEXT);
         Ui.textCenter(game.batch, game.font,
                 "A faithful merge-puzzle clone fused with an AI laboratory",
                 CX, 838, Theme.TEXT_DIM);
 
-        // Button labels
         Ui.textCenter(game.batch, game.fontMed, "PLAY",     CX, playBtn.y + 39,     Theme.TEXT);
         Ui.textCenter(game.batch, game.fontMed, "WATCH AI", CX, watchBtn.y + 39,    Theme.TEXT);
         Ui.textCenter(game.batch, game.fontMed, "SETTINGS", CX, settingsBtn.y + 39, Theme.TEXT);
@@ -191,7 +173,6 @@ public final class MainMenuScreen extends ScreenAdapter {
                     CX, rtLabBtn.y - 12, Theme.GOLD);
         }
 
-        // Footer
         Ui.textCenter(game.batch, game.fontSmall,
                 "Click / drag to aim · ESC pauses · R restarts", CX, 250, Theme.TEXT_FAINT);
         Ui.text(game.batch, game.fontSmall, "v" + Theme.VERSION, 14, 30, Theme.TEXT_FAINT);
@@ -237,7 +218,10 @@ public final class MainMenuScreen extends ScreenAdapter {
         }
         aiScrollUpBtn.set(m0x + AI_MW - 84, m0y + AI_MH - 44, 30, 30);
         aiScrollDownBtn.set(m0x + AI_MW - 48, m0y + AI_MH - 44, 30, 30);
-        aiCloseBtn.set(m0x + AI_MW / 2f - 90, m0y + 20, 180, 44);
+
+        // FIX: Realigned browse and close buttons to fit the new height constraints
+        aiBrowseBtn.set(m0x + 24, m0y + 74, AI_MW - 48, 44);
+        aiCloseBtn.set(m0x + AI_MW / 2f - 90, m0y + 16, 180, 44);
     }
 
     private void handleAiPickerClick(float x, float y) {
@@ -247,6 +231,13 @@ public final class MainMenuScreen extends ScreenAdapter {
             if (aiScrollIndex + AI_ROWS_VISIBLE < aiSaves.size()) aiScrollIndex += AI_ROWS_VISIBLE;
             return;
         }
+
+        // FIX: Trigger standard system open dialog on browse click
+        if (aiBrowseBtn.contains(x, y)) {
+            triggerFileBrowse();
+            return;
+        }
+
         for (int i = 0; i < AI_ROWS_VISIBLE; i++) {
             int idx = aiScrollIndex + i;
             if (idx >= aiSaves.size()) break;
@@ -262,6 +253,37 @@ public final class MainMenuScreen extends ScreenAdapter {
         }
         float m0x = aiModalX(), m0y = aiModalY();
         if (x < m0x || x > m0x + AI_MW || y < m0y || y > m0y + AI_MH) aiPickerOpen = false;
+    }
+
+    /**
+     * FIX: Triggers a native system file explorer dialog using LWJGL's bundled TinyFileDialogs implementation.
+     */
+    private void triggerFileBrowse() {
+        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+            org.lwjgl.PointerBuffer filters = stack.mallocPointer(1);
+            filters.put(stack.UTF8("*.sav"));
+            filters.flip();
+            String path = org.lwjgl.util.tinyfd.TinyFileDialogs.tinyfd_openFileDialog(
+                    "Load Suika AI Save (.sav)",
+                    System.getProperty("user.home") + "/.suikai/saves",
+                    filters,
+                    "Suika AI Saves (*.sav)",
+                    false
+            );
+            if (path != null) {
+                java.nio.file.Path p = java.nio.file.Paths.get(path);
+                dev.suika.ai.AgentPlugin driver = ModelSlots.loadFromFile(p);
+                if (driver == null) {
+                    aiPickerMessage = "Couldn't load: invalid or corrupt .sav / model files";
+                } else {
+                    dev.suika.game.rtlab.RtLabLauncher.launch(game.settings.rt3dPhysics, driver);
+                    awaitingRtLaunch = true;
+                    aiPickerOpen = false;
+                }
+            }
+        } catch (Exception e) {
+            aiPickerMessage = "Error opening file browser: " + e.getMessage();
+        }
     }
 
     private void drawAiPicker() {
@@ -289,6 +311,13 @@ public final class MainMenuScreen extends ScreenAdapter {
         Ui.fillRoundRect(s, aiScrollUpBtn.x, aiScrollUpBtn.y, aiScrollUpBtn.width, aiScrollUpBtn.height, 6);
         s.setColor(hasMore ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
         Ui.fillRoundRect(s, aiScrollDownBtn.x, aiScrollDownBtn.y, aiScrollDownBtn.width, aiScrollDownBtn.height, 6);
+
+        // FIX: Render browse local file button
+        s.setColor(aiBrowseBtn.contains(mx, my) ? Theme.ACCENT_BLUE : Theme.PANEL);
+        Ui.fillRoundRect(s, aiBrowseBtn.x, aiBrowseBtn.y, aiBrowseBtn.width, aiBrowseBtn.height, 8);
+        s.setColor(aiBrowseBtn.contains(mx, my) ? Theme.TEXT : Theme.PANEL_EDGE);
+        Ui.fillRoundRect(s, aiBrowseBtn.x + 3, aiBrowseBtn.y + 3, aiBrowseBtn.width - 6, aiBrowseBtn.height - 6, 6);
+
         boolean ch = aiCloseBtn.contains(mx, my);
         s.setColor(0f, 0f, 0f, 0.35f);
         Ui.fillRoundRect(s, aiCloseBtn.x + 3, aiCloseBtn.y - 4, aiCloseBtn.width, aiCloseBtn.height, 14);
@@ -319,8 +348,14 @@ public final class MainMenuScreen extends ScreenAdapter {
                 Ui.text(game.batch, game.fontSmall, detail, aiRowBtn[i].x + 16, ty - 20f, Theme.TEXT_DIM);
             }
         }
+
+        // FIX: Draw label on the browser button
+        Ui.textCenter(game.batch, game.fontSmall, "BROWSE LOCAL FILE (.sav)...",
+                aiBrowseBtn.x + aiBrowseBtn.width / 2f, aiBrowseBtn.y + aiBrowseBtn.height / 2f - 5f, Theme.TEXT);
+
+        // FIX: Shifted the y position to clear the browse button bounds
         if (!aiPickerMessage.isEmpty()) Ui.textCenter(game.batch, game.fontSmall, aiPickerMessage,
-                m0x + AI_MW / 2f, m0y + 78, Theme.GOLD);
+                m0x + AI_MW / 2f, m0y + 128, Theme.GOLD);
         Ui.textCenter(game.batch, game.fontSmall, "CLOSE",
                 aiCloseBtn.x + aiCloseBtn.width / 2f, aiCloseBtn.y + 25, Theme.TEXT);
         game.batch.end();

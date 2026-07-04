@@ -164,6 +164,16 @@ public enum AiTechnique {
      */
     public boolean gpuCapableTraining() { return this == PPO; }
 
+    /**
+     * True only for techniques with a REAL, runnable Python training script that now
+     * writes TensorBoard event files ({@code train_ppo.py}, {@code decision_transformer.py}
+     * — both accept {@code --tensorboard}/{@code --tb-detailed}/{@code --tb-logdir}).
+     * MuZero has no training script in this project yet ({@link PythonRunner}'s shown
+     * command is illustrative only), so claiming TensorBoard support there would be
+     * fabricated — same honesty rule as {@link #gpuCapableTraining()}.
+     */
+    public boolean supportsTensorboard() { return this == PPO || this == DECISION_TRANSFORMER; }
+
     /** True for techniques that run a neural network (so GPU inference is meaningful):
      *  the Python-backed ones, the evolved/imitation nets, and the net-blend ensemble. The
      *  pure search/rule techniques (MCTS/Greedy/Heuristic and the search-only ensembles)
@@ -291,13 +301,19 @@ public enum AiTechnique {
                 h.add("   trains in Python (presets don't change the Python trainer itself).");
                 h.add("Parallelism — parallel training envs (--n-envs) for the Python trainer.");
                 h.add("Prefer GPU (Settings) — trains/infers on CUDA when a GPU is present.");
+                h.add("TensorBoard — Detailed adds per-episode score + weight histograms;");
+                h.add("   OPEN starts a local dashboard once you've run the command below.");
             }
             case MUZERO -> {
                 h.add("Preset here — scales the live MCTS surrogate's search depth (rollouts");
                 h.add("   + think budget); the learned world-model itself trains in Python.");
                 h.add("Prefer GPU (Settings) — the Python trainer/inference uses CUDA.");
             }
-            case DECISION_TRANSFORMER -> h.add("Target return — the score you ask it to aim for; higher = bolder play.");
+            case DECISION_TRANSFORMER -> {
+                h.add("Target return — the score you ask it to aim for; higher = bolder play.");
+                h.add("TensorBoard — Detailed adds per-batch loss, gradient norm, and weight");
+                h.add("   histograms; OPEN starts a local dashboard once you've trained.");
+            }
             case NEUROEVO -> {
                 h.add("Population — genomes per generation: bigger = better search, more compute.");
                 h.add("Selection — Tournament / Rank / Boltzmann: how parents are chosen.");

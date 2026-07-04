@@ -5,16 +5,18 @@ Train::
 
     python -m suika.train_ppo --timesteps 500000 --seed 42 --out models/ppo_suika
 
-Requires: pip install stable-baselines3 torch
-
-The resulting policy is saved as both an SB3 checkpoint (.zip) and an ONNX
-model (policy.onnx) that OnnxPolicyRunner.java loads for in-game inference.
+Requires: pip install stable-baselines3 torch tensorboard
 """
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Optional
+
+
+def default_tb_logdir() -> str:
+    return str(Path.home() / ".suikai" / "tb_logs" / "ppo")
 
 
 def make_env(seed: int = 0, action_bins: int = 32):
@@ -27,15 +29,59 @@ def make_env(seed: int = 0, action_bins: int = 32):
     return _init
 
 
+def _make_detailed_callback():
+    from stable_baselines3.common.callbacks import BaseCallback
+    from stable_baselines3.common.logger import TensorBoardOutputFormat
+
+    class DetailedLoggingCallback(BaseCallback):
+        def __init__(self):
+            super().__init__()
+            self._rollouts_seen = 0
+
+        def _tb_writer(self):
+            for fmt in self.logger.output_formats:
+                if isinstance(fmt, TensorBoardOutputFormat):
+                    return fmt.writer
+            return None
+
+        def _on_step(self) -> bool:
+            for info in self.locals.get("infos", ()):
+                score = info.get("score")
+                if score is not None and info.get("terminal_observation") is not None:
+                    self.logger.record("custom/episode_score", float(score))
+            return True
+
+        def _on_rollout_end(self) -> None:
+            self._rollouts_seen += 1
+            if self._rollouts_seen % 20 != 0:
+                return
+            writer = self._tb_writer()
+            if writer is None:
+                return
+            for name, param in self.model.policy.named_parameters():
+                if param.dim() < 2:
+                    continue
+                try:
+                    writer.add_histogram(f"weights/{name}",
+                                         param.detach().cpu().numpy().flatten(),
+                                         self.num_timesteps)
+                except Exception:
+                    pass
+
+    return DetailedLoggingCallback()
+
+
 def train(
-    timesteps:        int   = 500_000,
-    action_bins:      int   = 32,
-    n_envs:           int   = 8,
-    lr:               float = 3e-4,
-    seed:             int   = 0,
-    out_dir:          str   = "models/ppo_suika",
-    device:           str   = "auto",
-    gpu_mem_fraction: float = 1.0,
+        timesteps:        int   = 500_000,
+        action_bins:      int   = 32,
+        n_envs:           int   = 8,
+        lr:               float = 3e-4,
+        seed:             int   = 0,
+        out_dir:          str   = "models/ppo_suika",
+        device:           str   = "auto",
+        gpu_mem_fraction: float = 1.0,
+        tb_logdir:        Optional[str] = None,
+        tb_detailed:      bool  = False,
 ) -> None:
     try:
         from stable_baselines3 import PPO
@@ -45,19 +91,22 @@ def train(
             "stable-baselines3 is required: pip install stable-baselines3 torch"
         ) from e
 
+    # FIX: Explicitly resolve 'auto' device mapping inside python environment to guarantee CUDA is selected
+    if device == "auto":
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
     if 0.0 < gpu_mem_fraction < 1.0:
         import torch
         if torch.cuda.is_available():
-            # This caps the fraction of GPU memory this process is allowed to allocate —
-            # the closest honest, real lever torch exposes to a "max GPU utilization"
-            # setting; there's no first-class hard compute-throughput limiter in
-            # stock PyTorch/CUDA, only memory-fraction (which in practice constrains
-            # batch/model size and so indirectly limits how much of the card gets used).
             torch.cuda.set_per_process_memory_fraction(gpu_mem_fraction)
             print(f"GPU memory fraction capped at {gpu_mem_fraction:.0%}")
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+
+    tb_dir = tb_logdir or default_tb_logdir()
+    Path(tb_dir).mkdir(parents=True, exist_ok=True)
 
     vec_env = make_vec_env(make_env(seed=seed, action_bins=action_bins),
                            n_envs=n_envs, seed=seed)
@@ -74,14 +123,18 @@ def train(
         clip_range=0.2,
         ent_coef=0.01,
         verbose=1,
-        tensorboard_log=str(out / "tb_logs"),
+        tensorboard_log=tb_dir,
         seed=seed,
         device=device,
     )
+    print(f"Device: {model.device}  |  TensorBoard: {tb_dir}"
+          + ("  |  detailed logging on" if tb_detailed else ""))
 
+    callback = _make_detailed_callback() if tb_detailed else None
     model.learn(total_timesteps=timesteps,
                 progress_bar=True,
-                reset_num_timesteps=True)
+                reset_num_timesteps=True,
+                callback=callback)
 
     checkpoint = str(out / "ppo_suika_final")
     model.save(checkpoint)
@@ -103,11 +156,11 @@ def _export_onnx(model, path: Path, obs_dim: int) -> None:
             self.policy = policy
 
         def forward(self, obs):
-            return self.policy.mlp_extractor.policy_net(
-                self.policy.features_extractor(obs)
-            )
+            features = self.policy.features_extractor(obs)
+            latent_pi, _ = self.policy.mlp_extractor(features)
+            return self.policy.action_net(latent_pi)
 
-    wrapper = PolicyWrapper(model.policy).eval()
+    wrapper = PolicyWrapper(model.policy).eval().to("cpu")
     dummy = torch.zeros(1, obs_dim)
     torch.onnx.export(
         wrapper, dummy, str(path),
@@ -127,8 +180,9 @@ def main() -> None:
     parser.add_argument("--seed",        type=int,   default=0)
     parser.add_argument("--out",         type=str,   default="models/ppo_suika")
     parser.add_argument("--device",      type=str,   default="auto")
-    parser.add_argument("--gpu-mem-fraction", type=float, default=1.0,
-                         help="Cap this process's CUDA memory fraction (0-1); see train()'s docstring.")
+    parser.add_argument("--gpu-mem-fraction", type=float, default=1.0)
+    parser.add_argument("--tb-logdir", type=str, default=None)
+    parser.add_argument("--tb-detailed", action="store_true")
     args = parser.parse_args()
 
     train(
@@ -140,6 +194,8 @@ def main() -> None:
         out_dir=args.out,
         device=args.device,
         gpu_mem_fraction=args.gpu_mem_fraction,
+        tb_logdir=args.tb_logdir,
+        tb_detailed=args.tb_detailed,
     )
 
 

@@ -95,7 +95,7 @@ final class GpuInferenceBridge implements AutoCloseable {
         }
     }
 
-    private String readLineTimed(long timeout, TimeUnit unit) {
+    private String readLineTimed(long timeout, java.util.concurrent.TimeUnit unit) {
         Future<String> f = io.submit(() -> stdout.readLine());
         try {
             return f.get(timeout, unit);
@@ -106,38 +106,58 @@ final class GpuInferenceBridge implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         alive = false;
-        try { if (stdin != null) { stdin.write("QUIT\n"); stdin.flush(); } } catch (Exception ignored) { }
-        try { if (process != null) process.destroy(); } catch (Exception ignored) { }
+        try {
+            if (stdin != null) {
+                stdin.write("QUIT\n");
+                stdin.flush();
+                stdin.close();
+                stdin = null;
+            }
+        } catch (Exception ignored) { }
+        try {
+            if (process != null) {
+                process.destroy();
+                process = null;
+            }
+        } catch (Exception ignored) { }
+
+        // FIX: Removed the redundant 'io != null' nullability check
         io.shutdownNow();
-        try { if (weightsFile != null) Files.deleteIfExists(weightsFile); } catch (Exception ignored) { }
+
+        try {
+            if (weightsFile != null) {
+                Files.deleteIfExists(weightsFile);
+                weightsFile = null;
+            }
+        } catch (Exception ignored) { }
     }
 
     // Inline worker. argv: inputSize hiddenSize outputSize weightsPath device
     private static final String WORKER_SCRIPT =
-        "import sys\n" +
-        "inp,hid,out=int(sys.argv[1]),int(sys.argv[2]),int(sys.argv[3])\n" +
-        "wpath,dev=sys.argv[4],sys.argv[5]\n" +
-        "import torch\n" +
-        "vals=[]\n" +
-        "for ln in open(wpath):\n" +
-        "    ln=ln.strip()\n" +
-        "    if ln and '=' not in ln and not ln.startswith('#'): vals.append(float(ln))\n" +
-        "w=torch.tensor(vals,dtype=torch.float32)\n" +
-        "device='cuda' if (dev=='cuda' and torch.cuda.is_available()) else 'cpu'\n" +
-        "W1=w[0:hid*inp].reshape(hid,inp).to(device)\n" +
-        "b1=w[hid*inp:hid*inp+hid].to(device)\n" +
-        "o=hid*inp+hid\n" +
-        "W2=w[o:o+out*hid].reshape(out,hid).to(device)\n" +
-        "b2=w[o+out*hid:o+out*hid+out].to(device)\n" +
-        "sys.stdout.write('READY\\n'); sys.stdout.flush()\n" +
-        "for line in sys.stdin:\n" +
-        "    line=line.strip()\n" +
-        "    if not line: continue\n" +
-        "    if line=='QUIT': break\n" +
-        "    x=torch.tensor([float(v) for v in line.split()],dtype=torch.float32,device=device)\n" +
-        "    h=torch.tanh(W1@x + b1)\n" +
-        "    y=W2@h + b2\n" +
-        "    sys.stdout.write(str(int(torch.argmax(y).item()))+'\\n'); sys.stdout.flush()\n";
+            "import sys\n" +
+                    "inp,hid,out=int(sys.argv[1]),int(sys.argv[2]),int(sys.argv[3])\n" +
+                    "wpath,dev=sys.argv[4],sys.argv[5]\n" +
+                    "import torch\n" +
+                    "vals=[]\n" +
+                    "for ln in open(wpath):\n" +
+                    "    ln=ln.strip()\n" +
+                    "    if ln and '=' not in ln and not ln.startswith('#'): vals.append(float(ln))\n" +
+                    "w=torch.tensor(vals,dtype=torch.float32)\n" +
+                    "device='cuda' if (dev=='cuda' and torch.cuda.is_available()) else 'cpu'\n" +
+                    "W1=w[0:hid*inp].reshape(hid,inp).to(device)\n" +
+                    "b1=w[hid*inp:hid*inp+hid].to(device)\n" +
+                    "o=hid*inp+hid\n" +
+                    "W2=w[o:o+out*hid].reshape(out,hid).to(device)\n" +
+                    "b2=w[o+out*hid:o+out*hid+out].to(device)\n" +
+                    "sys.stdout.write('READY\\n'); sys.stdout.flush()\n" +
+                    "for line in sys.stdin:\n" +
+                    "    line=line.strip()\n" +
+                    "    if not line: continue\n" +
+                    "    if line=='QUIT': break\n" +
+                    "    x=torch.tensor([float(v) for v in line.split()],dtype=torch.float32,device=device)\n" +
+                    "    h=torch.tanh(W1@x + b1)\n" +
+                    "    y=W2@h + b2\n" +
+                    "    sys.stdout.write(str(int(torch.argmax(y).item()))+'\\n'); sys.stdout.flush()\n";
 }

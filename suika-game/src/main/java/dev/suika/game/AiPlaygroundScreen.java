@@ -33,9 +33,6 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private final Vector3 touch = new Vector3();
     private float mx, my;
 
-    // Ensembles get their own sorted (best -> worst, by AiTechnique#strength),
-    // collapsible section at the top of the list; the rest of the matrix keeps its
-    // curated order.
     private final AiTechnique[] ensembleTechs;
     private final AiTechnique[] otherTechs;
     private boolean ensemblesExpanded = false;
@@ -52,9 +49,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private static final float INFO_R  = 11f;
     private static final float INFO_CX = CARD_X + CARD_W - INFO_R - 12f;
 
-    // Drawer controls — 11 stacked rows; rows are enabled per technique ("n/a"
-    // elsewhere), with rows 5-10 context-switching between evolution's selection-math
-    // knobs and the ensembles' customization knobs.
+    // Drawer controls
     private static final float CTRL_X = 420, CTRL_W = 260, CTRL_H = 24, CTRL_STEP = 30;
     private final Rectangle presetCtrl    = row(0);
     private final Rectangle speedCtrl     = row(1);
@@ -74,18 +69,12 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         return new Rectangle(CTRL_X, 386 - i * CTRL_STEP, CTRL_W, CTRL_H);
     }
 
-    // Infocard modal (null = closed). Sized to fit the explainer, ensemble members, the
-    // ordered per-setting guide, and the attribute bars without crowding.
     private static final float INFO_MW = 600f, INFO_MH = 640f;
     private AiTechnique infocardTech = null;
 
-    /** Seconds left to show the "calibrate first" hint after a preset click while uncalibrated. */
     private float presetHintTimer = 0f;
 
-    /** Test/QA hook: open the info modal for a technique (used by the capture harness). */
     void openInfocardForCapture(AiTechnique t) { this.infocardTech = t; }
-
-    /** Test/QA hook: expand/collapse the ensemble dropdown (used by the capture harness). */
     void setEnsemblesExpandedForCapture(boolean expanded) { this.ensemblesExpanded = expanded; }
 
     private static final int[]    ROLLOUTS = {40, 80, 150, 300, 600, 1200, 2400};
@@ -112,13 +101,10 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         otherTechs = other.toArray(new AiTechnique[0]);
     }
 
-    /** Row 0 is the collapsible "ENSEMBLES" header; rows after it are the sorted
-     *  ensembles (only while expanded), then every other technique in curated order. */
     private int rowCount() {
         return 1 + (ensemblesExpanded ? ensembleTechs.length : 0) + otherTechs.length;
     }
 
-    /** The technique shown at a given row, or {@code null} for the header row (0). */
     private AiTechnique rowTech(int row) {
         if (row == 0) return null;
         row--;
@@ -147,10 +133,6 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
                 return false;
             }
             @Override public boolean scrolled(float ax, float ay) {
-                // Wheel-down (ay > 0) reveals content further down the list. Increasing
-                // `scroll` lifts lower cards up into the visible band (see cardTop()), so
-                // this ADDS ay — the previous negation scrolled the wrong way (reported
-                // by the user, confirmed across every scrollable view; fixed app-wide).
                 if (infocardTech == null)
                     scroll = MathUtils.clamp(scroll + ay * 46f, 0f, maxScroll());
                 return true;
@@ -172,18 +154,12 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     }
 
     private float cardTop(int i) { return LIST_TOP + scroll - i * CARD_H; }
-
     private float infoCY(int i) { return cardTop(i) - CARD_H / 2f + 2f; }
-
     private boolean hitInfoIcon(int i, float x, float y) {
         float dx = x - INFO_CX, dy = y - infoCY(i);
         return dx * dx + dy * dy <= (INFO_R + 6f) * (INFO_R + 6f);
     }
 
-    /** A row is clickable only while its card centre is inside the visible list band —
-     *  the same rule the text pass uses to decide whether to draw its label. Clicking a
-     *  card that's mostly masked behind the header/drawer used to still select it
-     *  (invisible selection = the "scrolled list clicks the wrong card" bug). */
     private boolean rowClickable(int i) {
         float cy = cardTop(i) - CARD_H / 2f;
         return cy > LIST_BOT && cardTop(i) - CARD_H <= LIST_TOP;
@@ -194,15 +170,11 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
         if (backBtn.contains(x, y))   { game.setScreen(new MainMenuScreen(game)); return; }
         if (launchBtn.contains(x, y)) {
-            // The control center's multi-board / stats layout reads far better in
-            // landscape, so launching from here defaults the window to it — a portrait
-            // window the player deliberately narrowed is left alone.
             if (Gdx.graphics.getWidth() <= Gdx.graphics.getHeight() * 1.3f) goLandscape();
             game.setScreen(new ControlCenterScreen(game, cfg));
             return;
         }
         if (presetCtrl.contains(x, y)) {
-            // Presets are unusable until the machine is calibrated (Settings → PRESETS).
             if (!PresetCalibration.calibrated()) { presetHintTimer = 3f; return; }
             var presets = HardwarePresets.values();
             int idx = Math.floorMod(cfg.preset.ordinal() + dir(x, presetCtrl), presets.length);
@@ -241,10 +213,6 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             boolean inCard = x >= CARD_X && x <= CARD_X + CARD_W && y <= top && y >= top - CARD_H + 6;
             AiTechnique t = rowTech(i);
             if (t == null) {
-                // Header row: toggle only when actually hit — clicks that miss it must
-                // keep falling through to the cards BELOW it. (An unconditional return
-                // here used to swallow every selection click while the header was
-                // visible — the "ensembles selection" bug.)
                 if (inCard) {
                     ensemblesExpanded = !ensemblesExpanded;
                     scroll = MathUtils.clamp(scroll, 0f, maxScroll());
@@ -260,8 +228,6 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private int dir(float x, Rectangle r) { return x < r.x + r.width / 2f ? -1 : +1; }
     private static int wrap(int i, int n)  { return Math.floorMod(i, n); }
 
-    /** Resizes the window to a landscape aspect, capped to fit the current display —
-     *  mirrors {@code DesktopLauncher}'s own portrait sizing logic, just widthwise. */
     private static void goLandscape() {
         var dm = com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration.getDisplayMode();
         int winW = Math.min(1600, (int) (dm.width * 0.88f));
@@ -273,8 +239,6 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         return cfg.technique.family == AiTechnique.Family.EVOLUTION;
     }
 
-    // Ensembles built on MCTS search share its Rollouts knob; ENS_RTG_VERIFIED shares
-    // Decision Transformer's Return knob.
     private static final java.util.Set<AiTechnique> ROLLOUT_PARAM_TECHS = java.util.Set.of(
             AiTechnique.MCTS, AiTechnique.ALPHAZERO, AiTechnique.ENS_MCTS_NET,
             AiTechnique.ENS_MCTS_TIEBREAK, AiTechnique.ENS_ADAPTIVE_VOTE, AiTechnique.ENS_BANDIT);
@@ -322,15 +286,12 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         return opts[wrap(idx + d, opts.length)];
     }
 
-    // ---- context rows 5-7: evolution selection math OR ensemble customization ----
-
-    /** GA-based evolution (Neuroevo + PBT) shares the selection/mutation/breeding knobs. */
     private boolean gaEvolution() {
         return cfg.technique == AiTechnique.NEUROEVO || cfg.technique == AiTechnique.PBT;
     }
 
     private boolean ctx1Applicable() {
-        if (gaEvolution()) return true;                                        // Selection
+        if (gaEvolution()) return true;
         return switch (cfg.technique) {
             case ENS_MCTS_NET, ENS_MCTS_TIEBREAK, ENS_BANDIT, ENS_ADAPTIVE_VOTE -> true;
             default -> false;
@@ -391,7 +352,6 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         }
     }
 
-    /** GA evolution: breeding combo (crossover × σ-anneal). ENS_MCTS_NET: donor save slot. */
     private boolean ctx3Applicable() {
         return gaEvolution() || cfg.technique == AiTechnique.ENS_MCTS_NET;
     }
@@ -430,10 +390,6 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         };
     }
 
-    // -------------------------------------------------------------------------
-    // Render
-    // -------------------------------------------------------------------------
-
     @Override
     public void render(float delta) {
         Gdx.gl.glClearColor(0.05f, 0.06f, 0.10f, 1f);
@@ -446,16 +402,29 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         ShapeRenderer s = game.shapes;
         s.begin(ShapeRenderer.ShapeType.Filled);
         s.rect(0, 0, Theme.VW, Theme.VH, Theme.BG_BOTTOM, Theme.BG_BOTTOM, Theme.BG_TOP, Theme.BG_TOP);
+        s.end();
 
-        // Card shapes + "i" icons
+        // FIX: Enabled precise hardware-clipping glScissor window over the scroll list
+        s.begin(ShapeRenderer.ShapeType.Filled);
+        Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
+        float scX = viewport.getScreenX();
+        float scY = viewport.getScreenY();
+        float scW = viewport.getScreenWidth();
+        float scH = viewport.getScreenHeight();
+        Gdx.gl.glScissor(
+                (int) scX,
+                (int) (scY + (LIST_BOT / Theme.VH) * scH),
+                (int) scW,
+                (int) (((LIST_TOP - LIST_BOT) / Theme.VH) * scH)
+        );
+
         for (int i = 0; i < rowCount(); i++) {
             float top = cardTop(i);
-            if (top < LIST_BOT || top - CARD_H > LIST_TOP) continue;
             AiTechnique t = rowTech(i);
             boolean hov = rowClickable(i)
-                       && mx >= CARD_X && mx <= CARD_X + CARD_W
-                       && my <= top    && my >= top - CARD_H + 6;
-            if (t == null) { // collapsible "ENSEMBLES" header row
+                    && mx >= CARD_X && mx <= CARD_X + CARD_W
+                    && my <= top    && my >= top - CARD_H + 6;
+            if (t == null) {
                 s.setColor(hov ? Theme.GOLD : Theme.PANEL_EDGE);
                 Ui.fillRoundRect(s, CARD_X, top - CARD_H + 6, CARD_W, CARD_H - 8, 10);
                 continue;
@@ -469,19 +438,16 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             Ui.fillRoundRect(s, CARD_X, top - CARD_H + 6, CARD_W, CARD_H - 8, 10);
             s.setColor(familyColor(t));
             s.circle(CARD_X + 24, top - CARD_H / 2f + 2, 9, 16);
-            // "i" icon
+
             boolean iHov = hitInfoIcon(i, mx, my);
             s.setColor(iHov ? familyColor(t) : Theme.PANEL_EDGE);
             s.circle(INFO_CX, infoCY(i), INFO_R, 18);
         }
+        s.end();
+        Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
 
-        // Opaque masks — clip cards that bleed into header / drawer
-        s.setColor(Theme.BG_TOP);
-        s.rect(0, Theme.VH - 150, Theme.VW, 150);
-        s.setColor(Theme.PANEL_DEEP);
-        Ui.fillRoundRect(s, 0, 0, Theme.VW, LIST_BOT, 0);
-
-        // Drawer controls
+        // Fixed drawer controls
+        s.begin(ShapeRenderer.ShapeType.Filled);
         boolean evo = evolutionApplicable();
         drawCycler(s, presetCtrl, true);
         drawCycler(s, speedCtrl, true);
@@ -501,7 +467,6 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         Ui.button(s, backBtn,   Theme.PANEL_EDGE, backBtn.contains(mx, my),   true);
         Ui.button(s, launchBtn, Theme.ACCENT_2,   launchBtn.contains(mx, my), true);
 
-        // Infocard modal overlay — drawn opaque so the busy list behind it is fully hidden.
         if (infocardTech != null) {
             s.setColor(0.03f, 0.04f, 0.07f, 0.94f);
             s.rect(0, 0, Theme.VW, Theme.VH);
@@ -514,7 +479,6 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             Ui.fillRoundRect(s, mX, mY + mH - 4f, mW, 4f, 3f);
             drawInfoBarsShapes(s, infocardTech, mX, mY, mW);
         }
-
         s.end();
 
         // ---- Text pass ----
@@ -527,13 +491,21 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
                             + " ensembles · " + HardwarePresets.hardwareLabel(),
                     Theme.VW / 2f, Theme.VH - 126, Theme.TEXT_DIM);
 
-            // Card labels — only when card centre is above the drawer
+            // FIX: Flush batch buffer and enable scissor for text metrics
+            game.batch.flush();
+            Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
+            Gdx.gl.glScissor(
+                    (int) scX,
+                    (int) (scY + (LIST_BOT / Theme.VH) * scH),
+                    (int) scW,
+                    (int) (((LIST_TOP - LIST_BOT) / Theme.VH) * scH)
+            );
+
             for (int i = 0; i < rowCount(); i++) {
                 float top = cardTop(i);
                 float cy  = top - CARD_H / 2f;
-                if (cy <= LIST_BOT || top - CARD_H > LIST_TOP) continue;
                 AiTechnique t = rowTech(i);
-                if (t == null) { // collapsible "ENSEMBLES" header row
+                if (t == null) {
                     Ui.text(game.batch, game.font,
                             (ensemblesExpanded ? "[-]" : "[+]") + "  ENSEMBLES",
                             CARD_X + 20, cy + 6, Theme.GOLD);
@@ -554,10 +526,12 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
                         INFO_CX, cy + 5, iHov ? Theme.TEXT : Theme.TEXT_DIM);
             }
 
+            game.batch.flush();
+            Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+
             drawDrawerText();
         }
 
-        // Infocard modal text
         if (infocardTech != null) {
             AiTechnique t = infocardTech;
             float mW = INFO_MW, mH = INFO_MH;
@@ -570,10 +544,6 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             Ui.text(game.batch, game.fontSmall,
                     t.category + "  ·  " + t.kind + "  ·  obs: " + t.dataMode,
                     tx, mY + mH - 74, Theme.TEXT_DIM);
-            // Content flows top→bottom with a running cursor: explanation, then (for
-            // ensembles) the member manifest, then the ordered per-setting guide. The
-            // attribute bars are pinned to the bottom region (drawInfoBarsShapes), so the
-            // flow stops just above them.
             float cy = mY + mH - 100;
             for (String line : t.explainerLines()) {
                 Ui.text(game.batch, game.fontSmall, line, tx, cy, Theme.TEXT);
@@ -590,17 +560,14 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             } else {
                 cy -= 10f;
             }
-            // Ordered "what each setting does" guide — the whole point of the infocard's
-            // new lower half, so a player knows which drawer knobs matter for this pick.
             Ui.text(game.batch, game.fontSmall, "SETTINGS — WHAT TO TUNE", tx, cy, Theme.GOLD);
             cy -= 20f;
-            float barsTop = mY + 176f;   // don't overrun the attribute bars pinned below
+            float barsTop = mY + 176f;
             for (String hint : t.settingsHints()) {
                 if (cy < barsTop) break;
                 Ui.text(game.batch, game.fontSmall, hint, tx, cy, Theme.TEXT_DIM);
                 cy -= 19f;
             }
-            // Attribute bars section (pinned bottom)
             Ui.text(game.batch, game.fontSmall, "ATTRIBUTES", tx, mY + 152f, Theme.TEXT_DIM);
             Ui.text(game.batch, game.fontSmall, "Performance", tx, mY + 124f, Theme.TEXT_DIM);
             Ui.text(game.batch, game.fontSmall, "Speed",       tx, mY + 94f,  Theme.TEXT_DIM);
@@ -612,7 +579,6 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         game.batch.end();
     }
 
-    /** Compact "MCTS + Greedy + Heuristic" line for the card subtitle. */
     private static String shortMembers(AiTechnique t) {
         String[] members = t.ensembleMembers();
         StringBuilder sb = new StringBuilder();
@@ -625,14 +591,14 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     }
 
     private void drawInfoBarsShapes(ShapeRenderer s, AiTechnique t, float mX, float mY, float mW) {
-        float bX   = mX + 158f;   // left edge of bar (after 130px label column)
+        float bX   = mX + 158f;
         float bW   = mW - 186f;
         float barH = 14f;
         float[] bY = {mY + 117f, mY + 87f, mY + 57f};
         float[] frac = {
-            t.strength / 100f,
-            techSpeedFrac(t),
-            t.jvmNative && !t.python ? 1.0f : t.jvmNative ? 0.55f : 0.25f
+                t.strength / 100f,
+                techSpeedFrac(t),
+                t.jvmNative && !t.python ? 1.0f : t.jvmNative ? 0.55f : 0.25f
         };
         Color[] cols = {Theme.ACCENT_2, Theme.ACCENT_BLUE, Theme.GOLD};
         for (int i = 0; i < 3; i++) {

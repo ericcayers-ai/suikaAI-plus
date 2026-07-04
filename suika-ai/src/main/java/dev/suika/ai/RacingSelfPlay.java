@@ -1,7 +1,7 @@
 package dev.suika.ai;
 
 import dev.suika.core.GameCore;
-import dev.suika.core.GameState;
+import dev.suika.core.PhysicsConfig;
 
 /**
  * Racing self-play: two agents play the *same* seeded fruit sequence.
@@ -43,18 +43,18 @@ public final class RacingSelfPlay {
             if (aOver && bOver) break;
 
             if (!aOver) {
-                GameState sa = coreA.getState();
-                Object act = agentA.selectAction(sa, spec);
+                // FIX: Pass live GameCore directly
+                Object act = agentA.selectAction(coreA, spec);
                 coreA.dropAndSettle(spec.toDropX(act,
-                        dev.suika.core.PhysicsConfig.DROP_X_MIN,
-                        dev.suika.core.PhysicsConfig.DROP_X_MAX));
+                        PhysicsConfig.DROP_X_MIN,
+                        PhysicsConfig.DROP_X_MAX));
             }
             if (!bOver) {
-                GameState sb = coreB.getState();
-                Object act = agentB.selectAction(sb, spec);
+                // FIX: Pass live GameCore directly
+                Object act = agentB.selectAction(coreB, spec);
                 coreB.dropAndSettle(spec.toDropX(act,
-                        dev.suika.core.PhysicsConfig.DROP_X_MIN,
-                        dev.suika.core.PhysicsConfig.DROP_X_MAX));
+                        PhysicsConfig.DROP_X_MIN,
+                        PhysicsConfig.DROP_X_MAX));
             }
         }
 

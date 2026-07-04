@@ -128,6 +128,16 @@ public final class PlaygroundConfig {
     /** True when the selected technique reads any of the ensemble knobs above. */
     public boolean ensembleKnobsApplicable() { return technique.isEnsemble(); }
 
+    /**
+     * Optional "advanced logging" toggle for techniques with a real Python training
+     * script (see {@link AiTechnique#supportsTensorboard()}) — when on, the shown
+     * training command adds {@code --tb-detailed}, which makes the script also log
+     * per-episode custom scalars and periodic weight histograms, not just the basic
+     * metrics it always writes. Off by default (basic logging is already useful and
+     * cheaper to write).
+     */
+    public boolean tensorboardDetailed = false;
+
     // ---- Evolution selection mathematics (see GeneticTrainer.Selection) ----
 
     /** GA parent-selection strategy: tournament (classic), rank-proportional roulette,

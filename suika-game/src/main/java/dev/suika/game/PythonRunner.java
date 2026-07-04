@@ -115,6 +115,18 @@ public final class PythonRunner extends AgentRunner {
         if (gpu && game.settings.gpuUtilPercent < 100) {
             flags += String.format(" --gpu-mem-fraction %.2f", game.settings.gpuUtilPercent / 100.0);
         }
+        flags += tensorboardFlags();
+        return flags;
+    }
+
+    /** Shared TensorBoard flags for every technique with a real, runnable training
+     *  script — see {@link AiTechnique#supportsTensorboard()}. The log directory is
+     *  fixed (~/.suikai/tb_logs/<id>) so {@link TensorboardLauncher} can always find it
+     *  regardless of what {@code --out} the user chose for the model checkpoint itself. */
+    private String tensorboardFlags() {
+        if (!cfg.technique.supportsTensorboard()) return "";
+        String flags = " --tb-logdir " + TensorboardLauncher.logDir(cfg.technique.id);
+        if (cfg.tensorboardDetailed) flags += " --tb-detailed";
         return flags;
     }
 
@@ -126,10 +138,16 @@ public final class PythonRunner extends AgentRunner {
         java.util.List<String> s = new java.util.ArrayList<>();
         boolean ppo = cfg.technique == AiTechnique.PPO;
         // Every Python technique's train command shows --device cuda when "Prefer GPU" is
-        // on and a CUDA device was detected (PPO also carries its --n-envs/--gpu-mem flags).
-        String deviceFlag = GpuProbe.gpuUsableFor(cfg.technique) ? " --device cuda" : "";
+        // on and a CUDA device was detected (PPO also carries its --n-envs/--gpu-mem flags;
+        // both PPO and Decision Transformer carry --tb-logdir/--tb-detailed — see
+        // tensorboardFlags()).
+        String deviceFlag = (GpuProbe.gpuUsableFor(cfg.technique) ? " --device cuda" : "") + tensorboardFlags();
         s.add("train       python -m " + trainModule() + (ppo ? ppoTrainFlags() : deviceFlag));
         if (!ppo && GpuProbe.gpuUsableFor(cfg.technique)) s.add("accel       GPU (CUDA) — Prefer GPU is on");
+        if (cfg.technique.supportsTensorboard()) {
+            s.add("tb logdir   " + TensorboardLauncher.logDir(cfg.technique.id));
+            s.add("tb button   SETUP -> TensorBoard toggle + OPEN (below)");
+        }
         s.add("deploy      export ONNX -> OnnxPolicyRunner");
         s.add(PythonSetup.isReady()
                 ? "env ready   GPU stack linked"
