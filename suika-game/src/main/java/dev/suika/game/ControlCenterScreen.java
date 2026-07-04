@@ -468,34 +468,34 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private boolean paramApplicable() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return true;
         return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES, DECISION_TRANSFORMER, DAGGER, ENS_RTG_VERIFIED -> true;
+            case NEUROEVO, CMA_ES, PBT, DECISION_TRANSFORMER, DAGGER, BC, ENS_RTG_VERIFIED -> true;
             default -> false;
         };
     }
     private String paramLabel() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return "Rollouts";
         return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES                        -> "Population";
+            case NEUROEVO, CMA_ES, PBT                   -> "Population";
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED  -> "Return";
-            case DAGGER                                  -> "LR";
+            case DAGGER, BC                              -> "LR";
             default                                      -> "—";
         };
     }
     private String paramValue() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return Integer.toString(cfg.rollouts);
         return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES                        -> Integer.toString(cfg.populationSize);
+            case NEUROEVO, CMA_ES, PBT                   -> Integer.toString(cfg.populationSize);
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED  -> Integer.toString((int) cfg.targetReturn);
-            case DAGGER                                  -> String.format("%.0e", cfg.learningRate);
+            case DAGGER, BC                              -> String.format("%.0e", cfg.learningRate);
             default                                      -> "—";
         };
     }
     private void cycleParam(int d) {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) { cfg.rollouts = cycleInt(ROLLOUTS, cfg.rollouts, d); return; }
         switch (cfg.technique) {
-            case NEUROEVO, CMA_ES                        -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
+            case NEUROEVO, CMA_ES, PBT                   -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED  -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
-            case DAGGER                                  -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
+            case DAGGER, BC                              -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
             default -> { }
         }
     }
@@ -571,6 +571,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
     @Override
     public void render(float delta) {
         delta = Math.min(delta, 0.05f);
+        BoardRenderer.tickFlash(delta);
         tickAutosave(delta);
         int views = viewCount();
         if (views == 1 && runner.acceptsHumanInput()) runner.setHover(hoverGameX);
@@ -946,12 +947,20 @@ public final class ControlCenterScreen extends ScreenAdapter {
         // or they visually collide with a chart's box/label. Portrait's charts sit
         // below all text, so no width constraint is needed there.
         float maxTextW = landscape ? (chartSlots()[0][0] - 16f) - (px + 18f) : pw - 36f;
-        float minY = py + 8f;          // never draw below the panel's own background
-        float statsTop = py + ph - 86; // just below the title/subtitle
         float maxScroll = maxStatsScroll();
         statsScroll = MathUtils.clamp(statsScroll, 0f, maxScroll);
+        // Reserve a clear band at the bottom for the scroll hint so wrapped content never
+        // renders on top of it (the text-occlusion bug from the screenshots).
+        float hintReserve = maxScroll > 1f ? 24f : 0f;
+        float minY = py + 8f + hintReserve; // content floor sits above the hint band
+        float statsTop = py + ph - 86;      // just below the title/subtitle
 
-        float ly = statsTop - statsScroll;
+        // Layout sign fix: the content flows DOWN from `ly`, and lines above `statsTop`
+        // are skipped — so to reveal LATER lines, `ly` must move UP as statsScroll grows,
+        // i.e. `statsTop + statsScroll`. The old `statsTop - statsScroll` moved content
+        // down into a shrinking window and never revealed anything (control-panel scroll
+        // "still wrong"). Wheel handler already adds amountY, so wheel-down reveals more.
+        float ly = statsTop + statsScroll;
         ly = drawWrappedLines(runner.stats(), px + 18, ly, maxTextW, minY, statsTop, Theme.TEXT_DIM);
         if (landscape) {   // extended stats fill the extra vertical room
             ly -= 8;
@@ -959,10 +968,9 @@ public final class ControlCenterScreen extends ScreenAdapter {
         }
         if (maxScroll > 1f) {
             // Plain ASCII only — an earlier arrow glyph (▸) silently rendered as a tofu
-            // box on the bundled DroidSans font; "·" and "-" are already proven safe
-            // elsewhere in this UI.
+            // box on the bundled DroidSans font; "·" and "-" are already proven safe here.
             String hint = statsScroll < maxScroll - 1f ? "- scroll down for more -" : "- scroll up for less -";
-            Ui.text(game.batch, game.fontSmall, hint, px + 18, minY + 2, Theme.GOLD);
+            Ui.text(game.batch, game.fontSmall, hint, px + 18, py + 12f, Theme.GOLD);
         }
         MctsAgent treeForLabel = mctsTreeSource();
         // Chart labels can run past the panel's own right edge at larger UI-scale font
@@ -993,8 +1001,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
         int lines = 0;
         for (String line : runner.stats()) lines += wrapForWidth(line, maxTextW).size();
         if (landscape) for (String line : runner.extendedStats()) lines += wrapForWidth(line, maxTextW).size();
-        float visible = (py + ph - 86) - (py + 8f);
-        return Math.max(0f, lines * 24f - visible);
+        float baseVisible = (py + ph - 86) - (py + 8f);
+        float content = lines * 24f;
+        if (content <= baseVisible) return 0f;
+        // Once scrolling, a 24px hint band is reserved at the bottom (see drawPanelText),
+        // so the reachable window is that much shorter.
+        return content - (baseVisible - 24f);
     }
 
     /** Draws each line at fontSmall, wrapping any that would exceed {@code maxW} at word

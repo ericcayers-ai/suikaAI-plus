@@ -12,7 +12,7 @@ public final class PlaygroundConfig {
 
     /** Hardware-aware quality preset last applied (display only — individual knobs
      *  can still be overridden afterwards; see {@link HardwarePresets#applyTo}). */
-    public HardwarePresets preset = HardwarePresets.NORMAL;
+    public HardwarePresets preset = HardwarePresets.BALANCED;
 
     /** Playback / training speed multiplier — 0.5× (slow-mo) up to 1024× (turbo). */
     public static final float[] SPEEDS = {0.5f, 1f, 2f, 4f, 8f, 16f, 32f, 64f, 128f, 256f, 512f, 1024f};
@@ -40,16 +40,27 @@ public final class PlaygroundConfig {
      * thread/core count regardless of GPU presence.
      */
     public String parallelismLabel() {
-        // A technique shows a GPU label when it can actually use one: PPO's real
-        // --device flag, or ANY Python-backed technique once the "Prefer GPU" setting is
-        // on and a CUDA device was detected (see GpuProbe#gpuUsableFor).
-        boolean gpuRoute = technique.gpuCapableTraining() || GpuProbe.gpuUsableFor(technique);
-        if (parallelism > 0) return parallelism + (gpuRoute ? " envs" : " threads");
-        if (gpuRoute) {
+        // Discrete, honest labels distinguishing the three real modes:
+        //  · GPU inference — a net-based technique running on CUDA (deps ready, prefer-GPU
+        //    on, not forced CPU-only). No CPU thread fan-out is used then.
+        //  · N envs — PPO's parallel TRAINING environments (--n-envs), a Python concept.
+        //  · N cores — the JVM CPU thread pool for search / evolution eval.
+        boolean gpuInfer = GpuProbe.gpuInferenceActive() && technique.netBased();
+        if (parallelism > 0) {
+            if (technique.gpuCapableTraining()) return parallelism + " envs";
+            return parallelism + " threads";
+        }
+        if (gpuInfer) {
+            String dev = GpuProbe.deviceName() != null ? ": " + shortDevice() : "";
+            // PPO also fans out training envs on top of GPU inference — note both.
+            return technique.gpuCapableTraining()
+                    ? "GPU" + dev + "  ·  " + evalThreads() + " envs"
+                    : "GPU" + dev;
+        }
+        if (technique.gpuCapableTraining()) {
             Boolean gpu = GpuProbe.available();
             if (gpu == null) return "Auto (probing GPU…)";
-            return gpu ? "Auto (GPU" + (GpuProbe.deviceName() != null ? ": " + shortDevice() : "") + ")"
-                       : "Auto (" + evalThreads() + " cores)";
+            return gpu && !GpuProbe.jvmCpuOnly() ? "GPU envs" : "Auto (" + evalThreads() + " envs)";
         }
         return "Auto (" + evalThreads() + " cores)";
     }
@@ -76,9 +87,15 @@ public final class PlaygroundConfig {
 
     // ---- Ensemble customization (see EnsembleAgents) ----
 
-    /** Which trained save the MCTS + Policy Net ensemble sources its donor net from. */
-    public static final AiTechnique[] ENSEMBLE_DONORS =
-            { AiTechnique.NEUROEVO, AiTechnique.CMA_ES, AiTechnique.DAGGER };
+    /** Which trained save the MCTS + Policy Net ensemble sources its donor net from.
+     *  Evolution (Neuroevo/CMA-ES/PBT) and Imitation (DAgger/BC) all save a compatible
+     *  {@link dev.suika.ai.MlpPolicy}; PPO and MuZero are offered too — when GPU inference
+     *  is active and a real exported model exists they route through the Python/ONNX path,
+     *  otherwise the ensemble honestly shows them as untrained. */
+    public static final AiTechnique[] ENSEMBLE_DONORS = {
+            AiTechnique.NEUROEVO, AiTechnique.CMA_ES, AiTechnique.PBT,
+            AiTechnique.DAGGER, AiTechnique.BC,
+            AiTechnique.PPO, AiTechnique.MUZERO };
     public int ensembleDonorIndex = 0;
     public AiTechnique ensembleDonor() { return ENSEMBLE_DONORS[ensembleDonorIndex]; }
 
@@ -184,11 +201,15 @@ public final class PlaygroundConfig {
             case MCTS, ALPHAZERO,
                  ENS_MCTS_NET, ENS_MCTS_TIEBREAK, ENS_ADAPTIVE_VOTE, ENS_BANDIT -> { rollouts = 80; maxThinkMs = 450; }
             case NEUROEVO        -> { populationSize = 24; mutationSigmaIndex = 2; mutationSigma = 0.10; }
+            case PBT             -> { populationSize = 40; mutationSigmaIndex = 2; mutationSigma = 0.10;
+                                      selectionIndex = 1; crossover = true; sigmaAnneal = true; }  // rank exploit + explore
             case CMA_ES          -> populationSize = 16;
-            case DAGGER          -> learningRate = 1e-3;
+            case DAGGER, BC      -> learningRate = 1e-3;
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED -> targetReturn = 2000;
             default -> { }
         }
-        HardwarePresets.NORMAL.applyTo(this);
+        // Presets only take over once the machine has been calibrated (Settings → PRESETS);
+        // before that, the fixed sane defaults above stand so nothing is left mis-scaled.
+        if (PresetCalibration.calibrated()) HardwarePresets.BALANCED.applyTo(this);
     }
 }

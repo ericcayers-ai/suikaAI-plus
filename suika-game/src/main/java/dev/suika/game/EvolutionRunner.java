@@ -306,10 +306,20 @@ public final class EvolutionRunner extends AgentRunner {
 
     @Override
     public String[] multiLabels() {
+        // DISPLAY-ONLY: mark whichever board currently holds the highest live score with a
+        // "* LEADER" tag so the current champion (live high score) is always visible at a
+        // glance, without moving any board or touching the training logic. The champion
+        // board (index 0) always plays the trainer's best agent (see setAgent/onNewGame).
+        long[] scores = new long[ghostCount + 1];
+        scores[0] = core.getScore();
+        for (int i = 0; i < ghostCount; i++) scores[i + 1] = ghostCores[i] != null ? ghostCores[i].getScore() : 0;
+        int leader = 0;
+        for (int i = 1; i < scores.length; i++) if (scores[i] > scores[leader]) leader = i;
+
         String[] labels = new String[ghostCount + 1];
-        labels[0] = "CHAMPION  ·  " + core.getScore();
+        labels[0] = "CHAMPION  ·  " + scores[0] + (leader == 0 ? "  * LEADER" : "");
         for (int i = 0; i < ghostCount; i++) {
-            labels[i + 1] = "ELITE #" + (i + 2) + "  ·  " + (ghostCores[i] != null ? ghostCores[i].getScore() : 0);
+            labels[i + 1] = "ELITE #" + (i + 2) + "  ·  " + scores[i + 1] + (leader == i + 1 ? "  * LEADER" : "");
         }
         return labels;
     }

@@ -167,6 +167,7 @@ public final class SuikaScreen extends ScreenAdapter {
     @Override
     public void render(float delta) {
         delta = Math.min(delta, 0.05f);
+        BoardRenderer.tickFlash(delta);
         if (!paused) update(delta);
 
         // screen shake

@@ -303,11 +303,11 @@ public final class CaptureHarness implements ApplicationListener {
         List<Object[]> out = new ArrayList<>();
         if (usesRollouts(t)) {
             for (int v : ROLLOUTS) out.add(new Object[]{"rollouts", (double) v, v + "r"});
-        } else if (t == AiTechnique.NEUROEVO || t == AiTechnique.CMA_ES) {
+        } else if (t == AiTechnique.NEUROEVO || t == AiTechnique.CMA_ES || t == AiTechnique.PBT) {
             for (int v : POP) out.add(new Object[]{"population", (double) v, v + "pop"});
         } else if (t == AiTechnique.DECISION_TRANSFORMER || t == AiTechnique.ENS_RTG_VERIFIED) {
             for (int v : RETURNS) out.add(new Object[]{"return", (double) v, v + "ret"});
-        } else if (t == AiTechnique.DAGGER) {
+        } else if (t == AiTechnique.DAGGER || t == AiTechnique.BC) {
             for (double v : LRS) out.add(new Object[]{"lr", v, String.format(Locale.ROOT, "lr%.0e", v)});
         }
         if (out.isEmpty()) out.add(new Object[]{null, 0.0, ""});

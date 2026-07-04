@@ -155,6 +155,40 @@ class GameMechanicsTest {
         }
     }
 
+    /**
+     * Regression (v0.13.1): a freshly-spawned or merge-spawned fruit near the drop chute
+     * is momentarily slow ABOVE the dead-line height, but must NOT count as overflow — it
+     * hasn't piled up in the well. Before the chute-zone guard this tripped random false
+     * game-overs ("everything getting deleted at the line"), even in instant-fail mode
+     * where the very first drop would end the game. A spread-out drop sequence with plenty
+     * of room must never fail.
+     */
+    @Test
+    void spreadOutDropsWithRoomNeverFalselyFail() {
+        for (boolean instant : new boolean[]{false, true}) {
+            boolean saved = PhysicsConfig.instantFail;
+            PhysicsConfig.instantFail = instant;
+            try {
+                GameCore core = new GameCore(303L);
+                // A single fresh drop in instant-fail mode must not end the game while the
+                // fruit is still up at the spawn point.
+                core.spawnDrop(5.0);
+                core.tick();
+                assertFalse(core.isGameOver(),
+                        "A just-spawned fruit at the chute must never trip a loss (instant=" + instant + ")");
+                // Ten well-spaced drops, each settled, on a tall container leave plenty of
+                // headroom — the board must stay alive.
+                GameCore c2 = new GameCore(404L);
+                double[] xs = {1.0, 9.0, 2.0, 8.0, 3.0, 7.0, 1.5, 8.5, 2.5, 7.5};
+                for (double x : xs) { if (c2.isGameOver()) break; c2.dropAndSettle(x); }
+                assertFalse(c2.isGameOver(),
+                        "Ten spaced settled drops must not overflow a 15-tall well (instant=" + instant + ")");
+            } finally {
+                PhysicsConfig.instantFail = saved;
+            }
+        }
+    }
+
     /** Instant-fail mode ends the game with zero grace once a fruit overflows the line. */
     @Test
     void instantFailEndsGameWithoutGrace() {

@@ -44,7 +44,10 @@ final class AiSlotPlayer {
         if (isWeightBearing(t)) {
             MlpPolicy policy = ModelSlots.newCompatiblePolicy();
             if (!ModelSlots.load(t.id, slot, policy)) return null;
-            return new NeuralAgent(policy);
+            // Play a saved trained net on the GPU when GPU inference is active (load-once /
+            // infer-many path) — GpuNeuralAgent falls straight back to the exact JVM
+            // forward pass if the bridge can't start, so this never breaks playback.
+            return GpuProbe.gpuInferenceActive() ? new GpuNeuralAgent(policy) : new NeuralAgent(policy);
         }
         ModelSlots.ConfigSlot saved = ModelSlots.loadConfig(t.id, slot);
         if (saved == null) return null;

@@ -410,7 +410,12 @@ public class GameCore {
         boolean anyOverflow = false;
         for (Map.Entry<Integer, Body> e : idToBody.entrySet()) {
             Body b = e.getValue();
-            double topY = b.getWorldCenter().y + idToTier.get(e.getKey()).radius;
+            double cy = b.getWorldCenter().y;
+            // Still in the drop chute / spawn zone → never overflow (see CHUTE_ZONE_Y).
+            // This is the guard that keeps a just-spawned or just-merged fruit near the
+            // top from tripping a false loss.
+            if (cy > PhysicsConfig.CHUTE_ZONE_Y) continue;
+            double topY = cy + idToTier.get(e.getKey()).radius;
             if (topY <= PhysicsConfig.DEADLINE_Y) continue;
             if (b.getLinearVelocity().getMagnitude() > PhysicsConfig.OVERFLOW_SETTLE_SPEED) continue;
             anyOverflow = true;

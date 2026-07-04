@@ -22,6 +22,11 @@ public final class PythonSetup {
 
     private PythonSetup() {}
 
+    /** Coarse install progress, 0-100, updated per stage so the UI can show a percentage
+     *  (pip itself emits no clean overall percentage, so this is stage-weighted). */
+    private static volatile int installPct = 0;
+    public static int installPct() { return installPct; }
+
     /** True if the venv Python executable is present (install has run). */
     public static boolean isReady() {
         return Files.exists(venvPython());
@@ -68,8 +73,18 @@ public final class PythonSetup {
      *               do NOT update LibGDX scene-graph from it; just update a volatile field.
      */
     public static void installAsync(Consumer<String> status) {
+        installAsync(status, null);
+    }
+
+    /**
+     * @param status callback invoked on every progress line; runs on a daemon thread.
+     * @param onDone if non-null, run once on SUCCESSFUL completion (on the daemon thread) —
+     *               the caller uses this to re-probe the GPU and restart the app.
+     */
+    public static void installAsync(Consumer<String> status, Runnable onDone) {
         Thread t = new Thread(() -> {
             try {
+                installPct = 2;
                 status.accept("Searching for Python 3…");
                 String python = findSystemPython();
                 if (python == null) {
@@ -77,6 +92,7 @@ public final class PythonSetup {
                     return;
                 }
 
+                installPct = 8;
                 if (!Files.exists(VENV_DIR)) {
                     status.accept("Creating virtual environment at ~/.suikai/venv …");
                     Files.createDirectories(VENV_DIR.getParent());
@@ -85,11 +101,13 @@ public final class PythonSetup {
                     status.accept("Virtual environment already exists, updating packages…");
                 }
 
-                // Upgrade pip first for reliability
+                installPct = 18;
                 status.accept("Upgrading pip…");
                 run(status, venvPip().toString(), "install", "--upgrade", "pip", "--quiet");
 
-                // Install PyTorch with CUDA 12.1 support (falls back to CPU if no GPU)
+                // Install PyTorch with the current CUDA 12.x wheels (falls back to CPU if
+                // no GPU). This is the long stage — most of the bar lives here.
+                installPct = 30;
                 status.accept("Installing PyTorch + CUDA 12.1 (this can take 5-15 min on first run)…");
                 run(status,
                     venvPip().toString(), "install",
@@ -98,7 +116,7 @@ public final class PythonSetup {
                     "--quiet"
                 );
 
-                // Install gym-style extras used by the Python runners
+                installPct = 82;
                 status.accept("Installing gym, stable-baselines3, numpy…");
                 run(status,
                     venvPip().toString(), "install",
@@ -106,8 +124,11 @@ public final class PythonSetup {
                     "--quiet"
                 );
 
+                installPct = 96;
                 if (isReady()) {
-                    status.accept("Done  ·  Python environment ready at ~/.suikai/venv");
+                    installPct = 100;
+                    status.accept("Done  ·  Python environment ready — restarting to enable GPU…");
+                    if (onDone != null) onDone.run();
                 } else {
                     status.accept("Warning: venv may be incomplete — check output");
                 }

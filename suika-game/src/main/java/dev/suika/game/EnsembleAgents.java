@@ -105,13 +105,14 @@ final class EnsembleAgents {
         return loadOrFreshPolicy(sourceTechnique, 0, fallbackSeed);
     }
 
-    /** True when a donor technique has trained weights in the given slot (or ANY slot
-     *  when {@code slot <= 0}) — surfaced in the UI so "which net is this ensemble
-     *  using, and is it actually trained" is explicit. */
+    /** True when a donor technique has loadable trained WEIGHTS in the given slot (or ANY
+     *  slot when {@code slot <= 0}). Weight-aware (not just "a save exists"): a config-only
+     *  save — e.g. an untrained PPO/MuZero slot — correctly reads as untrained, so the UI
+     *  never claims a random net is a trained donor. */
     static boolean donorTrained(AiTechnique donor, int slot) {
-        if (slot >= 1 && slot <= ModelSlots.SLOT_COUNT) return ModelSlots.info(donor.id, slot).present();
+        if (slot >= 1 && slot <= ModelSlots.SLOT_COUNT) return ModelSlots.hasWeights(donor.id, slot);
         for (int s = 1; s <= ModelSlots.SLOT_COUNT; s++) {
-            if (ModelSlots.info(donor.id, s).present()) return true;
+            if (ModelSlots.hasWeights(donor.id, s)) return true;
         }
         return false;
     }

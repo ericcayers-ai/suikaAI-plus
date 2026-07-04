@@ -43,6 +43,12 @@ public final class BoardRenderer {
     private float   hoverX = Float.NaN;     // game-x of the hover guide (NaN = hidden)
     private FruitTier hoverTier;
 
+    /** Wall-clock accumulator (seconds) for the game-over flash — a frozen failed board
+     *  has no ticking sim time of its own, so the flash reads from this instead. Advanced
+     *  once per frame via {@link #tickFlash(float)} by the screen's render loop. */
+    private static float flashClock = 0f;
+    public static void tickFlash(float delta) { flashClock += delta; }
+
     public void usePortrait()                           { iOX = OX;    iOY = OY;    iScale = SCALE;   landscape = false; }
     public void useLandscape()                          { iOX = OX_L;  iOY = OY_L;  iScale = SCALE_L; landscape = true;  }
     public void useCustom(float ox, float oy, float sc) { iOX = ox;     iOY = oy;    iScale = sc;      landscape = false; }
@@ -131,11 +137,15 @@ public final class BoardRenderer {
         s.setColor(Theme.WALL_HI.r, Theme.WALL_HI.g, Theme.WALL_HI.b, Theme.WALL_HI.a * alpha);
         Ui.fillRoundRect(s, innerL - wallT, topY - 4f, wellW + 2 * wallT, 4f, 2f);
 
-        // Dead-line
+        // Dead-line — turns a prominent red ONLY once the game has actually failed (not
+        // during the grace countdown), so it unambiguously means "this board lost". The
+        // pulse is driven by a shared wall-clock accumulator (updated once per frame in
+        // drawBackground/drawBoard) so it animates even though the failed board itself is
+        // frozen.
         float dlY = bvpy(PhysicsConfig.DEADLINE_Y);
-        boolean warn = gs.timeAboveDeadline() > 0.05;
+        boolean warn = gs.gameOver();
         Color dl = warn ? Theme.DEADLINE_WARN : Theme.DEADLINE;
-        float pulse = warn ? (float) (0.55 + 0.45 * Math.sin(gs.timeAboveDeadline() * 12.0)) : 1f;
+        float pulse = warn ? (float) (0.55 + 0.45 * Math.sin(flashClock * 7.0)) : 1f;
         s.setColor(dl.r, dl.g, dl.b, dl.a * pulse * alpha);
         s.rect(innerL, dlY - 2f, wellW, 4f);
         s.setColor(dl.r, dl.g, dl.b, dl.a * 0.5f * pulse * alpha);
@@ -159,15 +169,16 @@ public final class BoardRenderer {
             float fr = bvpr(f.radius());
             float fcy = bvpy(f.y());
             if (fcy + fr > topY + maxAboveTopPx) continue; // clipped: would bleed above this board's own region
-            // Instant-fail highlight: when the "Instant fail" rule is on, the fruit that
-            // has come to overflow above the dead-line (the one that ends the game) gets a
-            // faint red halo so it's clear WHICH fruit tripped the loss. Mirrors GameCore's
-            // own overflow test (top past the line + effectively stopped) so the render
-            // marks exactly the fruit the core failed on. Full-alpha (main) boards only.
-            if (alpha >= 1f && cfg.immediateDeadline && overflowMarked(f)) {
+            // Fail highlight: ONLY once the game has actually failed does the offending
+            // fruit — the settled one overflowing the dead-line — get a light red halo, so
+            // it's clear WHICH fruit tripped the loss. Mirrors GameCore's overflow test
+            // exactly (chute-excluded, top past the line, effectively stopped) so it never
+            // marks a fruit during the grace countdown or a transient near-top fruit.
+            // Full-alpha (main) boards only.
+            if (alpha >= 1f && gs.gameOver() && overflowMarked(f)) {
                 float speed = (float) Math.sqrt(f.vx() * f.vx() + f.vy() * f.vy());
                 if (speed <= PhysicsConfig.OVERFLOW_SETTLE_SPEED) {
-                    s.setColor(0.92f, 0.26f, 0.24f, 0.35f);
+                    s.setColor(0.92f, 0.26f, 0.24f, 0.40f);
                     s.circle(bvpx(f.x()), fcy, fr + 6f, 24);
                 }
             }
@@ -178,10 +189,11 @@ public final class BoardRenderer {
         if (alpha >= 1f && cfg.particles && particles != null) particles.render(s);
     }
 
-    /** True when this fruit's top edge is past the dead-line height (candidate for the
-     *  instant-fail overflow halo; the speed check is applied at the call site). */
+    /** True when this fruit is a genuine overflow candidate: settled inside the well (not
+     *  in the drop chute) with its top past the dead-line. Speed check applied at the call
+     *  site. Mirrors {@code GameCore.checkDeadLine}'s conditions. */
     private static boolean overflowMarked(Fruit f) {
-        return f.y() + f.radius() > PhysicsConfig.DEADLINE_Y;
+        return f.y() <= PhysicsConfig.CHUTE_ZONE_Y && f.y() + f.radius() > PhysicsConfig.DEADLINE_Y;
     }
 
     private void drawFruit(ShapeRenderer s, float cx, float cy, float r,

@@ -63,11 +63,17 @@ public enum AiTechnique {
     CMA_ES("cma-es", "CMA-ES", "Evolution", "state", "learning", Family.EVOLUTION,
             true, false, true, true, 65,
             "Covariance-adaptive evolution strategy. Strong on continuous weight spaces."),
+    PBT("pbt", "Population-Based Training", "Evolution", "state", "meta", Family.EVOLUTION,
+            true, false, true, true, 66,
+            "A population trains in parallel, copying winners and perturbing their settings."),
 
     // ---- Imitation ----
     DAGGER("dagger", "DAgger", "Imitation", "state", "imitation", Family.IMITATION,
             true, false, false, true, 58,
             "Iterative imitation: relabel the states the agent actually visits."),
+    BC("bc", "Behavioral Cloning", "Imitation", "state", "imitation", Family.IMITATION,
+            true, false, false, true, 48,
+            "Learn to copy YOUR drops from your recorded games. Train-on-my-playstyle."),
 
     // ---- Offline ----
     DECISION_TRANSFORMER("dt", "Decision Transformer", "Offline", "state", "offline", Family.PYTHON,
@@ -158,6 +164,18 @@ public enum AiTechnique {
      */
     public boolean gpuCapableTraining() { return this == PPO; }
 
+    /** True for techniques that run a neural network (so GPU inference is meaningful):
+     *  the Python-backed ones, the evolved/imitation nets, and the net-blend ensemble. The
+     *  pure search/rule techniques (MCTS/Greedy/Heuristic and the search-only ensembles)
+     *  are false — they have no net and stay on the CPU by nature. */
+    public boolean netBased() {
+        return switch (this) {
+            case PPO, MUZERO, ALPHAZERO, DECISION_TRANSFORMER,
+                 NEUROEVO, CMA_ES, PBT, DAGGER, BC, ENS_MCTS_NET -> true;
+            default -> false;
+        };
+    }
+
     /**
      * A plain-English, no-prior-knowledge explanation of the technique, already split
      * into short lines for the infocard. Think "explain it to a friend", not a paper.
@@ -199,11 +217,21 @@ public enum AiTechnique {
                 "it learns which directions of change tend to help and",
                 "samples new candidates from that adapting cloud. Strong",
                 "on fine-tuning many numbers at once." };
+            case PBT -> new String[]{
+                "A whole population trains at once. The stragglers copy",
+                "the current winners' brains and settings, then shake",
+                "them up a little — good ideas spread fast while the",
+                "search keeps exploring. Evolution with live exploiting." };
             case DAGGER -> new String[]{
                 "You play, the AI copies you — but it also asks an expert",
                 "what to do in the tricky spots it ends up in, so it",
                 "doesn't just inherit your mistakes. Imitation that fixes",
                 "its own blind spots." };
+            case BC -> new String[]{
+                "Pure copy-cat learning: it watches the drops YOU make",
+                "and trains a network to do the same thing in the same",
+                "situations. Play your way and it learns your style —",
+                "no expert relabeling, just your example." };
             case DECISION_TRANSFORMER -> new String[]{
                 "You tell it a target score and it treats playing like",
                 "finishing a sentence: given 'I want to reach X', predict",
@@ -259,10 +287,16 @@ public enum AiTechnique {
             case GREEDY -> h.add("Parallelism — columns evaluated at once; Auto uses all cores.");
             case HEURISTIC -> h.add("No tunables — it follows fixed merge rules (a baseline).");
             case PPO -> {
+                h.add("Preset here — scales the live JVM surrogate's compute; the real net");
+                h.add("   trains in Python (presets don't change the Python trainer itself).");
                 h.add("Parallelism — parallel training envs (--n-envs) for the Python trainer.");
-                h.add("Prefer GPU (Settings) — trains on CUDA when a GPU is present.");
+                h.add("Prefer GPU (Settings) — trains/infers on CUDA when a GPU is present.");
             }
-            case MUZERO -> h.add("Prefer GPU (Settings) — the Python trainer uses CUDA when available.");
+            case MUZERO -> {
+                h.add("Preset here — scales the live MCTS surrogate's search depth (rollouts");
+                h.add("   + think budget); the learned world-model itself trains in Python.");
+                h.add("Prefer GPU (Settings) — the Python trainer/inference uses CUDA.");
+            }
             case DECISION_TRANSFORMER -> h.add("Target return — the score you ask it to aim for; higher = bolder play.");
             case NEUROEVO -> {
                 h.add("Population — genomes per generation: bigger = better search, more compute.");
@@ -276,7 +310,14 @@ public enum AiTechnique {
                 h.add("Sims/generation — games averaged per candidate: more = steadier fitness.");
                 h.add("Elite views / Ghost — how many top candidates you watch live.");
             }
+            case PBT -> {
+                h.add("Population — members training in parallel; bigger = more exploration.");
+                h.add("Selection — how winners are chosen for the stragglers to copy.");
+                h.add("Sims/generation — games averaged per member: more = steadier ranking.");
+                h.add("Elite views / Ghost — how many members you watch live.");
+            }
             case DAGGER -> h.add("Learning rate — how fast it adapts to the states it visits.");
+            case BC -> h.add("Learning rate — how fast it fits to your recorded drops.");
             case ENS_MCTS_NET -> {
                 h.add("Rollouts — depth of the MCTS half of the blend.");
                 h.add("Donor net — which trained save (Neuroevo/CMA-ES/DAgger) advises the pick.");
@@ -313,8 +354,8 @@ public enum AiTechnique {
             case ENS_ADAPTIVE_VOTE  -> "three agents voting, trust weights adapting";
             case ENS_RTG_VERIFIED   -> "proposing boldly, verifying with a quick search";
             case ENS_BANDIT         -> "picking which single agent drives this move";
-            case NEUROEVO, CMA_ES   -> "breeding & mutating a population of AI brains";
-            case DAGGER             -> "learning to copy your drops in real time";
+            case NEUROEVO, CMA_ES, PBT -> "breeding & mutating a population of AI brains";
+            case DAGGER, BC         -> "learning to copy your drops in real time";
             case DECISION_TRANSFORMER -> "predicting drops from logged games";
             case MUZERO             -> "planning inside a learned world model";
             case PPO                -> "running a learned policy (Python-trained)";

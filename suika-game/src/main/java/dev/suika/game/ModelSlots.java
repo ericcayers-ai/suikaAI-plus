@@ -287,6 +287,28 @@ final class ModelSlots {
         return infoLegacy(techniqueId, slot);
     }
 
+    /** The kind of a slot's save ({@link #KIND_WEIGHTS}/{@link #KIND_CONFIG}), or
+     *  {@code null} if the slot is empty. Cheap — reads only the manifest/info. */
+    static String slotKind(String techniqueId, int slot) {
+        if (Files.exists(savManifest(techniqueId, slot))) {
+            String k = readKind(slotDir(techniqueId, slot));
+            return k;
+        }
+        // Legacy binary: config saves start with MAGIC_CONFIG, weights with a positive count.
+        Path f = legacyFile(techniqueId, slot);
+        if (!Files.exists(f)) return null;
+        try (DataInputStream in = new DataInputStream(Files.newInputStream(f))) {
+            return in.readInt() == MAGIC_CONFIG ? KIND_CONFIG : KIND_WEIGHTS;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /** True when a slot holds loadable trained WEIGHTS (not just a config save). */
+    static boolean hasWeights(String techniqueId, int slot) {
+        return KIND_WEIGHTS.equals(slotKind(techniqueId, slot));
+    }
+
     private static String readKind(Path dir) {
         try (BufferedReader r = Files.newBufferedReader(dir.resolve("info.txt"), StandardCharsets.UTF_8)) {
             String line;

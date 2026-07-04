@@ -114,7 +114,26 @@ public final class GameSettings {
      * lie). Persisted across launches. See {@link GpuProbe#gpuUsableFor}.
      */
     public boolean preferGpu = false;
-    public void applyGpuPreference() { GpuProbe.setPreferGpu(preferGpu); }
+
+    /**
+     * Force the JVM CPU-only implementations for everything, even when GPU inference deps
+     * are installed. When {@code false} (default) and the GPU stack is ready, net-based
+     * techniques run inference through the GPU (Python/ONNX) path and parallelism defaults
+     * to the GPU rather than a CPU thread fan-out. Turn this on to keep the fast,
+     * dependency-free JVM path. Persisted.
+     */
+    public boolean jvmCpuOnly = false;
+
+    public void applyGpuPreference() {
+        GpuProbe.setPreferGpu(preferGpu);
+        GpuProbe.setJvmCpuOnly(jvmCpuOnly);
+    }
+
+    /** True when GPU inference should actually be used: deps ready, user hasn't forced
+     *  CPU-only, and (for the labels) a CUDA device is present. */
+    public boolean gpuInferenceActive() {
+        return !jvmCpuOnly && preferGpu && Boolean.TRUE.equals(GpuProbe.available());
+    }
 
     // ---- Autosave ----
     /** Autosave interval options in minutes; 0 = OFF. Persisted. When on, the AI control

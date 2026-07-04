@@ -1,6 +1,6 @@
 # Suika AI Sandbox
 
-A research-grade platform for training, benchmarking, and shipping AI agents that play Suika (Watermelon) Game. Includes a **fully windowed LibGDX game** with Human and AI Watch modes — no assets required, all graphics are procedurally generated.
+A research-grade platform for training, benchmarking, and shipping AI agents that play Suika (Watermelon) Game. Includes a **fully windowed LibGDX game** with Human and AI Watch modes, a curated capability matrix of AI techniques and ensembles, hardware-calibrated quality presets, human-readable model saves, and an experimental **hardware ray-traced RT Lab** — no assets required, all graphics are procedurally generated.
 
 [![CI](https://github.com/ericcayers-ai/suikaAI-plus/actions/workflows/ci.yml/badge.svg)](https://github.com/ericcayers-ai/suikaAI-plus/actions/workflows/ci.yml)
 
@@ -8,22 +8,33 @@ A research-grade platform for training, benchmarking, and shipping AI agents tha
 
 ## Quick Start — Play or Watch AI
 
-**Download the latest release** from the [Releases page](https://github.com/ericcayers-ai/suikaAI-plus/releases/latest) and extract `suika-app-0.4.0.zip`:
+**Download the latest release** from the [Releases page](https://github.com/ericcayers-ai/suikaAI-plus/releases/latest) and extract `suika-app-<version>.zip`:
 
 ```bash
 # Linux / macOS
-cd suika-app-0.4.0/bin && ./suika-app
+cd suika-app-<version>/bin && ./suika-app
 
 # Windows
-cd suika-app-0.4.0\bin && suika-app.bat
+cd suika-app-<version>\bin && suika-app.bat
 ```
 
-**Java 21+ must be on your `PATH`.** The ZIP bundles all JVM dependencies — no Python or GPU required for the game.
+**Java 21+ must be on your `PATH`.** The ZIP bundles all JVM dependencies — no Python or GPU required for the game. GPU-accelerated Python training/inference is optional and installed on demand from **Settings → AI ENVIRONMENT**.
 
 > **Headless / training mode**
 > ```bash
-> ./suika-app --headless    # runs the Explorer-mode GA demo in the terminal
+> ./suika-app --headless    # runs the built-in GA demo in the terminal
 > ```
+
+---
+
+## What's new in v0.14
+
+- **Curated capability matrix** — 12 techniques + 5 mechanically-distinct ensembles, each with an infocard that explains what every setting does and how to tune it.
+- **Hardware-calibrated presets** — 5 quality stages (Max Quality → Fastest) that scale each technique's compute to a **measured** sims/second benchmark. Calibrate once in **Settings → PRESETS**; presets stay locked until you do.
+- **GPU inference & CPU-only option** — installing the GPU deps re-probes CUDA live and (unless you tick **Force JVM CPU-only**) plays saved trained nets on the GPU, falling back to the exact JVM forward pass automatically.
+- **Human-readable folder saves** — every slot is a folder of plain-text files (`info.txt`, `progress.txt` with graph history, `model.txt`/`.onnx`, and a `.sav` quickstart manifest) with a **FOLDER** button to reveal it, plus autosave (1/5/10/30 min).
+- **Robust fail detection** — the well can no longer overflow "for free" at high speed, and a board only flashes / reddens the offending fruit once it has genuinely failed.
+- **Ensembles + evolution** — MCTS + Policy Net donors span Neuroevo / CMA-ES / PBT / DAgger / BC / PPO / MuZero with per-slot selection; evolution shows the live leader and selectable selection mathematics with convergence graphs.
 
 ---
 
@@ -34,8 +45,9 @@ cd suika-app-0.4.0\bin && suika-app.bat
 | **Main Menu** | Title + **PLAY** / **WATCH AI** / **SETTINGS** / **QUIT**, ambient backdrop |
 | **Settings** | Live graphics (FPS 30–240/unlimited, V-Sync, shading, particles, guide, labels, shake), simulation (drop columns, seed), and AI-watch knobs |
 | **Game (Human)** | Real-time physics — aim with the mouse, click to drop, watch fruit fall and settle. HUD with score, best, next-fruit preview |
-| **AI Playground** | The full capability-matrix browser (21 techniques); pick one, configure it, **LAUNCH** |
-| **Control Center** | Per-technique diagnostics — live board, score/fitness/loss charts, "see it think" bars, runtime controls (pause, speed, restart) |
+| **AI Playground** | The curated capability-matrix browser (12 techniques + 5 ensembles); pick one, configure it via the drawer (preset, speed, parallelism, per-technique + per-ensemble knobs), read its infocard, **LAUNCH** |
+| **Control Center** | Per-technique diagnostics — live board(s), score/fitness/loss/diversity charts, MCTS search-tree + perception panels, SAVES/SETUP modals, runtime controls (pause, speed, restart) |
+| **RT Lab** | Experimental raw-Vulkan hardware ray-traced game in its own window, with an in-window pause menu of live graphics settings (bloom / denoise / depth-of-field / accumulation) |
 | **Game Over** | Final score, highest fruit, fruit-on-board, seed; **PLAY AGAIN** / **MAIN MENU** |
 
 Crisp anti-aliased text (bundled Apache-2.0 DroidSans via FreeType), glossy depth-shaded
@@ -49,19 +61,25 @@ entire [capability matrix](#ai-algorithms-suika-ai--100-jvm-native-no-python-req
 (**speed**, **parallelism**, and a family-specific hyper-parameter), and **LAUNCH** its
 specialised control center:
 
-- **Planning** (Random, Heuristic, Greedy, MCTS, AlphaZero) — plays live with move-latency
-  and rollout diagnostics plus an MCTS visit-count "thinking" overlay on the well.
-- **Evolution** (Neuroevolution GA, CMA-ES, PBT) — trains generation-by-generation on a
-  background thread, hot-swaps each champion into the live board, and streams the
-  best/mean-fitness curve.
-- **Imitation** (Behavioral Cloning, DAgger) — a **"Train the AI"** card appears first; the
+- **Planning** (Heuristic, Greedy One-Ply, MCTS, AlphaZero) — plays live with move-latency
+  and rollout diagnostics plus an MCTS search-tree diagram and visit-count overlay.
+- **Evolution** (Neuroevolution GA, CMA-ES, Population-Based Training) — trains
+  generation-by-generation on a background thread, hot-swaps each champion into the live
+  board, shows the live **leader** across the champion + elite grid, and streams
+  best / mean-fitness and diversity-σ convergence curves. Selectable selection mathematics
+  (tournament / rank roulette / Boltzmann softmax), crossover, and σ-annealing.
+- **Imitation** (DAgger, Behavioral Cloning) — a **"Train the AI"** card appears first; the
   AI watches while you play one full game capturing every drop, then trains live as you
   keep playing, charting loss and action-match accuracy and showing its predicted drop.
-- **Python-backed** (PPO, DQN, SAC, Diffusion, Flow, Decision Transformer, Offline RL,
-  GAIL, MuZero, Dreamer) — probes for a Python interpreter, shows the exact training
-  command and the ONNX deploy path, and runs a JVM-native surrogate live so the board and
-  charts are always populated. Train in Python → export ONNX → load with `OnnxPolicyRunner`
-  for in-game inference with no Python at runtime.
+- **Model-based / Deep-RL** (MuZero, PPO, Decision Transformer) — probes for the managed
+  Python venv, shows the exact training command and (when GPU deps are installed) the CUDA
+  device, and runs a JVM-native surrogate live so the board and charts are always
+  populated. Train in Python → export ONNX → deploy with `OnnxPolicyRunner`.
+- **Ensembles** (Adaptive Voting Committee, Bandit Meta-Controller, MCTS + Policy Net,
+  MCTS + Greedy Tiebreak, Return-Conditioned + MCTS Verify) — each composes real
+  building-block agents, declares its members explicitly, and exposes its own knobs
+  (donor net + slot, blend weight, tie threshold, UCB exploration, adapt rate). The
+  learning ensembles persist their trust statistics through the SAVES slots.
 
 ---
 
@@ -82,7 +100,13 @@ specialised control center:
 - Moddable fruit ladders and physics constants via JSON config (`ModConfig`)
 - Replay logging with full deterministic reconstruction
 
-### AI Algorithms (suika-ai) — 100% JVM-native, no Python required
+### AI Algorithms (suika-ai) — 100% JVM-native
+
+> The AI Playground surfaces a **curated** set (12 techniques + 5 ensembles). The
+> `suika-ai` library below is the full JVM-native toolbox those are built from; every
+> algorithm runs without Python. Optional GPU acceleration (Settings → AI ENVIRONMENT)
+> routes Python-backed training and saved-net inference to CUDA when available.
+
 | Algorithm | Class | Notes |
 |---|---|---|
 | Random baseline | `RandomAgent` | Uniform drop |

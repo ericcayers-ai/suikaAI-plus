@@ -17,6 +17,9 @@ final class SettingsPersistence {
     private static final String KEY_UI_SCALE_INDEX    = "uiScaleIndex";
     private static final String KEY_PREFER_GPU        = "preferGpu";
     private static final String KEY_AUTOSAVE_INDEX    = "autosaveIndex";
+    private static final String KEY_JVM_CPU_ONLY      = "jvmCpuOnly";
+    private static final String KEY_CALIBRATED        = "presetsCalibrated";
+    private static final String KEY_CALIB_SIMS        = "presetsSimsPerSec";
 
     private SettingsPersistence() {}
 
@@ -33,6 +36,17 @@ final class SettingsPersistence {
         cfg.preferGpu = p.getBoolean(KEY_PREFER_GPU, cfg.preferGpu);
         cfg.autosaveIndex = clamp(p.getInteger(KEY_AUTOSAVE_INDEX, cfg.autosaveIndex),
                 GameSettings.AUTOSAVE_MINUTES.length);
+        cfg.jvmCpuOnly = p.getBoolean(KEY_JVM_CPU_ONLY, cfg.jvmCpuOnly);
+        PresetCalibration.restore(p.getBoolean(KEY_CALIBRATED, false),
+                (double) p.getFloat(KEY_CALIB_SIMS, 0f));
+    }
+
+    /** Persists a completed preset calibration (called from the benchmark thread). */
+    static void saveCalibration(boolean calibrated, double simsPerSec) {
+        Preferences p = Gdx.app.getPreferences(PREFS_NAME);
+        p.putBoolean(KEY_CALIBRATED, calibrated);
+        p.putFloat(KEY_CALIB_SIMS, (float) simsPerSec);
+        p.flush();
     }
 
     /** Writes the current display settings to disk immediately — cheap enough (three
@@ -44,6 +58,7 @@ final class SettingsPersistence {
         p.putInteger(KEY_UI_SCALE_INDEX, cfg.uiScaleIndex);
         p.putBoolean(KEY_PREFER_GPU, cfg.preferGpu);
         p.putInteger(KEY_AUTOSAVE_INDEX, cfg.autosaveIndex);
+        p.putBoolean(KEY_JVM_CPU_ONLY, cfg.jvmCpuOnly);
         p.flush();
     }
 

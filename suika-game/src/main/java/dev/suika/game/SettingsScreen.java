@@ -34,6 +34,7 @@ public final class SettingsScreen extends ScreenAdapter {
         String  label;
         Kind    kind;
         Supplier<String> value;     // CYCLE display
+        Supplier<String> value2;    // optional secondary status line (BUTTON rows)
         BooleanSupplier  on;        // TOGGLE state
         Runnable prev, next;        // CYCLE prev/next  (TOGGLE uses next)
         DoubleSupplier   frac;      // SLIDER fill 0..1
@@ -153,10 +154,22 @@ public final class SettingsScreen extends ScreenAdapter {
         toggle(null, "Prefer GPU acceleration (Python techniques)",
                 () -> cfg.preferGpu, () -> { cfg.preferGpu = !cfg.preferGpu; cfg.applyGpuPreference(); SettingsPersistence.save(cfg); })
                 .value = () -> gpuToggleHint();
+        // When GPU deps are ready, the default is GPU inference for net-based techniques
+        // (no CPU thread fan-out); flip this on to force the fast JVM CPU-only path.
+        toggle(null, "Force JVM CPU-only implementations",
+                () -> cfg.jvmCpuOnly, () -> { cfg.jvmCpuOnly = !cfg.jvmCpuOnly; cfg.applyGpuPreference(); SettingsPersistence.save(cfg); });
         slider(null, "Max GPU utilization (Python training)",
                 () -> (cfg.gpuUtilPercent - 10) / 90.0,
                 f -> cfg.gpuUtilPercent = (int) (Math.round((10 + clamp01(f) * 90) / 5.0) * 5))
                 .value = () -> cfg.gpuUtilPercent + "%";
+
+        // ---- Presets (must be calibrated before the quality presets are usable) ----
+        Row calib = button("PRESETS", "Calibrate presets for this machine",
+                () -> PresetCalibration.running() ? PresetCalibration.progressPct() + "%"
+                        : PresetCalibration.calibrated() ? "RECALIBRATE" : "CALIBRATE",
+                () -> { if (!PresetCalibration.running()) PresetCalibration.calibrateAsync(); });
+        calib.value2 = PresetCalibration::statusLabel;
+        calib.heightOverride = ROW_H + 26f;   // room for the status line under the label
 
         // ---- Saves ----
         cycle("SAVES", "Autosave (AI progress -> slot 1)", cfg::autosaveLabel,
@@ -180,13 +193,28 @@ public final class SettingsScreen extends ScreenAdapter {
     private void startInstall() {
         if (installing) return;
         installing = true;
-        installStatus = "Starting…";
-        PythonSetup.installAsync(msg -> {
-            boolean done = msg.startsWith("Done") || msg.startsWith("Error")
-                    || msg.startsWith("Warning") || msg.startsWith("Python not found");
-            installStatus = done ? fit(msg) : fit(msg);
-            if (done) installing = false;
-        });
+        installStatus = "Starting… 0%";
+        PythonSetup.installAsync(
+            msg -> {
+                boolean done = msg.startsWith("Error")
+                        || msg.startsWith("Warning") || msg.startsWith("Python not found");
+                // Prefix every in-progress line with the stage percentage.
+                installStatus = done ? fit(msg) : "[" + PythonSetup.installPct() + "%] " + fit(msg);
+                if (done) installing = false;
+            },
+            () -> {
+                // Success: re-probe the GPU live, switch on GPU inference, persist, then
+                // restart so the whole stack comes up with CUDA available.
+                GpuProbe.forceReprobe();
+                cfg.preferGpu = true;
+                cfg.jvmCpuOnly = false;
+                cfg.applyGpuPreference();
+                SettingsPersistence.save(cfg);
+                installing = false;
+                // Give the probe a moment and the user a beat to read "restarting…".
+                try { Thread.sleep(1500); } catch (InterruptedException ignored) { }
+                AppRestart.restart();
+            });
     }
 
     // --- row builders ---
@@ -377,6 +405,10 @@ public final class SettingsScreen extends ScreenAdapter {
                 } else if (r.kind == Kind.BUTTON) {
                     Ui.textCenter(game.batch, game.fontSmall, r.value.get(),
                             r.area.x + r.area.width / 2f, r.area.y + r.area.height / 2f, Theme.TEXT);
+                    // Optional status line under the label (e.g. calibration result).
+                    if (r.value2 != null)
+                        Ui.text(game.batch, game.fontSmall, r.value2.get(),
+                                MARGIN_X + 16f, labelY - 22f, Theme.TEXT_DIM);
                 }
             }
             y = rowBot - ROW_GAP;

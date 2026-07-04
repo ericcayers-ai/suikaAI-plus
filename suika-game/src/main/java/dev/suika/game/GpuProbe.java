@@ -40,16 +40,39 @@ final class GpuProbe {
     static void setPreferGpu(boolean v) { preferGpu = v; }
     static boolean preferGpu() { return preferGpu; }
 
+    /** Settings → "Force JVM CPU-only": when on, no GPU routing happens anywhere. */
+    private static volatile boolean jvmCpuOnly = false;
+    static void setJvmCpuOnly(boolean v) { jvmCpuOnly = v; }
+    static boolean jvmCpuOnly() { return jvmCpuOnly; }
+
+    /** True when GPU inference is active on this machine: deps ready, a CUDA device was
+     *  detected, the user prefers GPU, and hasn't forced CPU-only. */
+    static boolean gpuInferenceActive() {
+        return !jvmCpuOnly && preferGpu && Boolean.TRUE.equals(available);
+    }
+
     /** True when {@code technique} can actually run on the GPU right now: it has a Python
-     *  path, the user asked to prefer the GPU, and a CUDA device was detected. */
+     *  path, the user asked to prefer the GPU (and hasn't forced CPU-only), and a CUDA
+     *  device was detected. */
     static boolean gpuUsableFor(AiTechnique technique) {
-        return technique.python && preferGpu && Boolean.TRUE.equals(available);
+        return technique.python && gpuInferenceActive();
     }
 
     /** Idempotent — safe to call from any screen constructor; only the first call spawns the probe. */
     static void ensureStarted() {
         if (!STARTED.compareAndSet(false, true)) return;
         Thread t = new Thread(GpuProbe::probe, "gpu-probe");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** Re-runs the probe from scratch — called right after the GPU deps finish installing
+     *  so "GPU found" updates immediately without needing a manual restart. */
+    static void forceReprobe() {
+        available = null;
+        deviceName = null;
+        STARTED.set(true);   // keep ensureStarted() a no-op; we own the probe thread here
+        Thread t = new Thread(GpuProbe::probe, "gpu-reprobe");
         t.setDaemon(true);
         t.start();
     }

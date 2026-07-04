@@ -72,6 +72,17 @@ public final class PhysicsConfig {
      * the line with near-zero velocity also correctly counts.
      */
     public static final double OVERFLOW_SETTLE_SPEED = 5.0;
+    /**
+     * Fruit whose CENTRE is above this height is still in the drop chute / spawn zone
+     * (a freshly-dropped fruit spawns at {@link #DROP_Y}), NOT piled inside the well, so
+     * it must never count toward overflow — even though it's momentarily slow right after
+     * spawning and a merge can briefly appear here. This is the fix for the v0.13.1
+     * regression where slow-but-just-spawned fruit tripped a false game-over ("everything
+     * getting deleted at the line"). A genuine overflow always has settled fruit lower in
+     * the stack (centre between the dead-line and here), so excluding the chute never
+     * misses a real loss.
+     */
+    public static final double CHUTE_ZONE_Y = CONTAINER_HEIGHT + 0.5;
 
     // --- Drop ---
     /** Y at which a new fruit is created (top of container). */

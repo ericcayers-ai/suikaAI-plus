@@ -79,6 +79,9 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private static final float INFO_MW = 600f, INFO_MH = 640f;
     private AiTechnique infocardTech = null;
 
+    /** Seconds left to show the "calibrate first" hint after a preset click while uncalibrated. */
+    private float presetHintTimer = 0f;
+
     /** Test/QA hook: open the info modal for a technique (used by the capture harness). */
     void openInfocardForCapture(AiTechnique t) { this.infocardTech = t; }
 
@@ -199,6 +202,8 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             return;
         }
         if (presetCtrl.contains(x, y)) {
+            // Presets are unusable until the machine is calibrated (Settings → PRESETS).
+            if (!PresetCalibration.calibrated()) { presetHintTimer = 3f; return; }
             var presets = HardwarePresets.values();
             int idx = Math.floorMod(cfg.preset.ordinal() + dir(x, presetCtrl), presets.length);
             presets[idx].applyTo(cfg);
@@ -277,34 +282,34 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private boolean paramApplicable() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return true;
         return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES, DECISION_TRANSFORMER, DAGGER, ENS_RTG_VERIFIED -> true;
+            case NEUROEVO, CMA_ES, PBT, DECISION_TRANSFORMER, DAGGER, BC, ENS_RTG_VERIFIED -> true;
             default -> false;
         };
     }
     private String paramLabel() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return "Rollouts";
         return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES                         -> "Population";
+            case NEUROEVO, CMA_ES, PBT                    -> "Population";
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED   -> "Target return";
-            case DAGGER                                   -> "Learning rate";
+            case DAGGER, BC                               -> "Learning rate";
             default                                       -> "—";
         };
     }
     private String paramValue() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return Integer.toString(cfg.rollouts);
         return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES                         -> Integer.toString(cfg.populationSize);
+            case NEUROEVO, CMA_ES, PBT                    -> Integer.toString(cfg.populationSize);
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED   -> Integer.toString((int) cfg.targetReturn);
-            case DAGGER                                   -> String.format("%.0e", cfg.learningRate);
+            case DAGGER, BC                               -> String.format("%.0e", cfg.learningRate);
             default                                       -> "—";
         };
     }
     private void cycleParam(int d) {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) { cfg.rollouts = cycleInt(ROLLOUTS, cfg.rollouts, d); return; }
         switch (cfg.technique) {
-            case NEUROEVO, CMA_ES                         -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
+            case NEUROEVO, CMA_ES, PBT                    -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED   -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
-            case DAGGER                                   -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
+            case DAGGER, BC                               -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
             default -> { }
         }
     }
@@ -319,15 +324,20 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
     // ---- context rows 5-7: evolution selection math OR ensemble customization ----
 
+    /** GA-based evolution (Neuroevo + PBT) shares the selection/mutation/breeding knobs. */
+    private boolean gaEvolution() {
+        return cfg.technique == AiTechnique.NEUROEVO || cfg.technique == AiTechnique.PBT;
+    }
+
     private boolean ctx1Applicable() {
-        if (cfg.technique == AiTechnique.NEUROEVO) return true;                 // Selection
+        if (gaEvolution()) return true;                                        // Selection
         return switch (cfg.technique) {
             case ENS_MCTS_NET, ENS_MCTS_TIEBREAK, ENS_BANDIT, ENS_ADAPTIVE_VOTE -> true;
             default -> false;
         };
     }
     private String ctx1Label() {
-        if (cfg.technique == AiTechnique.NEUROEVO) return "Selection";
+        if (gaEvolution()) return "Selection";
         return switch (cfg.technique) {
             case ENS_MCTS_NET      -> "Donor net";
             case ENS_MCTS_TIEBREAK -> "Tie threshold";
@@ -337,7 +347,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         };
     }
     private String ctx1Value() {
-        if (cfg.technique == AiTechnique.NEUROEVO) return cfg.selection().label;
+        if (gaEvolution()) return cfg.selection().label;
         return switch (cfg.technique) {
             case ENS_MCTS_NET      -> cfg.ensembleDonor().display
                     + (EnsembleAgents.donorTrained(cfg.ensembleDonor(), cfg.ensembleDonorSlot) ? " (trained)" : " (untrained)");
@@ -348,9 +358,11 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         };
     }
     private void cycleCtx1(int d) {
+        if (gaEvolution()) {
+            cfg.selectionIndex = wrap(cfg.selectionIndex + d, dev.suika.ai.GeneticTrainer.Selection.values().length);
+            return;
+        }
         switch (cfg.technique) {
-            case NEUROEVO          -> cfg.selectionIndex = wrap(cfg.selectionIndex + d,
-                    dev.suika.ai.GeneticTrainer.Selection.values().length);
             case ENS_MCTS_NET      -> cfg.ensembleDonorIndex = wrap(cfg.ensembleDonorIndex + d, PlaygroundConfig.ENSEMBLE_DONORS.length);
             case ENS_MCTS_TIEBREAK -> cfg.tieThresholdIndex = wrap(cfg.tieThresholdIndex + d, PlaygroundConfig.TIE_THRESHOLD_OPTIONS.length);
             case ENS_BANDIT        -> cfg.ucbCIndex = wrap(cfg.ucbCIndex + d, PlaygroundConfig.UCB_C_OPTIONS.length);
@@ -360,7 +372,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     }
 
     private boolean ctx2Applicable() {
-        return cfg.technique == AiTechnique.NEUROEVO || cfg.technique == AiTechnique.ENS_MCTS_NET;
+        return gaEvolution() || cfg.technique == AiTechnique.ENS_MCTS_NET;
     }
     private String ctx2Label() {
         return cfg.technique == AiTechnique.ENS_MCTS_NET ? "Net weight" : "Mutation σ";
@@ -379,9 +391,9 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         }
     }
 
-    /** NEUROEVO: breeding combo (crossover × σ-anneal). ENS_MCTS_NET: donor save slot. */
+    /** GA evolution: breeding combo (crossover × σ-anneal). ENS_MCTS_NET: donor save slot. */
     private boolean ctx3Applicable() {
-        return cfg.technique == AiTechnique.NEUROEVO || cfg.technique == AiTechnique.ENS_MCTS_NET;
+        return gaEvolution() || cfg.technique == AiTechnique.ENS_MCTS_NET;
     }
     private String ctx3Label() {
         return cfg.technique == AiTechnique.ENS_MCTS_NET ? "Donor slot" : "Breeding";
@@ -662,6 +674,11 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
                 CARD_X + 4, LIST_BOT - 44, Theme.TEXT_DIM);
 
         cyclerText("Preset",      cfg.preset.cyclerLabel(),  presetCtrl, true);
+        if (presetHintTimer > 0f) {
+            presetHintTimer -= Gdx.graphics.getDeltaTime();
+            Ui.textCenter(game.batch, game.fontSmall, "Calibrate presets in Settings -> PRESETS first",
+                    Theme.VW / 2f, 92, Theme.GOLD);
+        }
         cyclerText("Speed",       cfg.speedLabel(),          speedCtrl, true);
         cyclerText("Parallelism", cfg.parallelismLabel(),    paraCtrl,  t.parallel);
         cyclerText(paramLabel(),  paramValue(),              paramCtrl, paramApplicable());
