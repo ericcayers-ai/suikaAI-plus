@@ -133,6 +133,7 @@ class BCTrainer:
         lr:          float = 1e-3,
         batch_size:  int   = 256,
         seed:        int   = 0,
+        device:      str   = "auto",
     ) -> None:
         self.obs_dim     = obs_dim
         self.num_actions = num_actions
@@ -143,13 +144,20 @@ class BCTrainer:
         self._rng = np.random.default_rng(seed)
 
         if HAS_TORCH:
+            # "auto" prefers CUDA when available — a real backprop training loop
+            # genuinely benefits from the GPU at larger batch sizes, unlike the tiny
+            # forward-only inference this architecture also serves elsewhere.
+            if device == "auto":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.device = device
             self._model = nn.Sequential(
                 nn.Linear(obs_dim, hidden),
                 nn.Tanh(),
                 nn.Linear(hidden, num_actions),
-            )
+            ).to(device)
             self._opt = optim.Adam(self._model.parameters(), lr=lr)
         else:
+            self.device = "cpu"
             self._model = NumpyMLP(obs_dim, hidden, num_actions, self._rng)
             self._opt   = None
 
@@ -167,7 +175,7 @@ class BCTrainer:
         arr = np.asarray(obs, dtype=np.float32)
         if HAS_TORCH:
             with torch.no_grad():
-                logits = self._model(torch.from_numpy(arr).unsqueeze(0))
+                logits = self._model(torch.from_numpy(arr).unsqueeze(0).to(self.device))
             return int(logits.argmax(dim=1).item())
         return self._model.predict(arr)
 
@@ -240,8 +248,8 @@ class BCTrainer:
 
     def _torch_step(self, obs: np.ndarray, actions: np.ndarray) -> float:
         self._opt.zero_grad()
-        x   = torch.from_numpy(obs)
-        y   = torch.from_numpy(actions)
+        x   = torch.from_numpy(obs).to(self.device)
+        y   = torch.from_numpy(actions).to(self.device)
         out = self._model(x)
         loss = nn.functional.cross_entropy(out, y)
         loss.backward()

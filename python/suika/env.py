@@ -114,7 +114,8 @@ class StandaloneSimulator:
 
         merges = self._simulate_until_settled()
 
-        score_gained = sum(FRUIT_TIERS[tier - 1][2] for _, tier in merges)
+        # Each merge is (mx, my, new_tier) — see _detect_merges().
+        score_gained = sum(FRUIT_TIERS[tier - 1][2] for _, _, tier in merges)
         self._score += score_gained
         if self._score > self._best:
             self._best = self._score
@@ -285,7 +286,7 @@ class StandaloneSimulator:
 # SuikaEnv — Gymnasium-compatible wrapper
 # ---------------------------------------------------------------------------
 
-class SuikaEnv:
+class SuikaEnv(gym.Env if HAS_GYMNASIUM else object):
     """
     Gymnasium-compatible Suika environment.
 

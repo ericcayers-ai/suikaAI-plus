@@ -315,22 +315,60 @@ class TrajectoryDataset:
 # Training helper
 # ---------------------------------------------------------------------------
 
+def default_tb_logdir() -> str:
+    """Matches TensorboardLauncher.logDir("dt") on the Java side exactly, so the
+    app's OPEN TensorBoard button can always find these logs."""
+    return str(Path.home() / ".suikai" / "tb_logs" / "dt")
+
+
+def resolve_device(device: str = "auto") -> str:
+    """'auto' picks CUDA when torch reports it available, else CPU — matches
+    train_ppo.py's convention so every real training script in this project
+    prefers the GPU by default when one is actually usable."""
+    if device != "auto":
+        return device
+    if HAS_TORCH and torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
+
+
 def train_dt(
-    dt:         DecisionTransformer,
-    dataset:    TrajectoryDataset,
-    epochs:     int   = 50,
-    batch_size: int   = 128,
-    ctx_len:    int   = 20,
-    lr:         float = 1e-4,
-    device:     str   = "cpu",
+    dt:          DecisionTransformer,
+    dataset:     TrajectoryDataset,
+    epochs:      int   = 50,
+    batch_size:  int   = 128,
+    ctx_len:     int   = 20,
+    lr:          float = 1e-4,
+    device:      str   = "cpu",
+    tb_logdir:   str | None = None,
+    tb_detailed: bool  = False,
 ) -> list[float]:
-    """Train a DecisionTransformer on trajectory data. Returns per-epoch losses."""
+    """Train a DecisionTransformer on trajectory data. Returns per-epoch losses.
+
+    When ``tb_logdir`` is given, per-epoch loss is always written to TensorBoard;
+    with ``tb_detailed`` also on, per-batch loss, the gradient norm, and periodic
+    weight histograms are written too — genuinely more detail, not just the same
+    numbers logged more often.
+    """
     if not HAS_TORCH:
         raise ImportError("PyTorch is required: pip install torch")
 
+    device = resolve_device(device)
     dt.to(device)
+    # Plain ASCII only — see train_ppo.py's identical note (Windows console mojibake).
+    print(f"Device: {device}" + (f"  |  TensorBoard: {tb_logdir}" if tb_logdir else ""))
+
+    writer = None
+    if tb_logdir:
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+            writer = SummaryWriter(log_dir=tb_logdir)
+        except ImportError:
+            print("Warning: tensorboard not installed (pip install tensorboard) — skipping TB logging")
+
     opt    = optim.AdamW(dt.parameters(), lr=lr, weight_decay=1e-4)
     losses = []
+    global_step = 0
 
     for epoch in range(epochs):
         obs_np, act_np, rtg_np = dataset.sample_batch(
@@ -351,14 +389,84 @@ def train_dt(
             loss = nn.functional.cross_entropy(
                 logits.view(B * T, A), act_t.view(B * T))
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(dt.parameters(), 0.25)
+            grad_norm = torch.nn.utils.clip_grad_norm_(dt.parameters(), 0.25)
             opt.step()
-            epoch_loss += float(loss.item())
+            batch_loss = float(loss.item())
+            epoch_loss += batch_loss
             n_batches  += 1
+            global_step += 1
+
+            if writer is not None and tb_detailed:
+                writer.add_scalar("train/batch_loss", batch_loss, global_step)
+                writer.add_scalar("train/grad_norm", float(grad_norm), global_step)
 
         avg = epoch_loss / max(n_batches, 1)
         losses.append(avg)
+        if writer is not None:
+            writer.add_scalar("train/epoch_loss", avg, epoch)
+            if tb_detailed and (epoch + 1) % 10 == 0:
+                for name, param in dt.named_parameters():
+                    if param.dim() < 2:
+                        continue
+                    writer.add_histogram(f"weights/{name}", param.detach().cpu().numpy().flatten(), epoch)
         if (epoch + 1) % 10 == 0:
             print(f"  epoch {epoch+1:4d}/{epochs}  loss={avg:.4f}")
 
+    if writer is not None:
+        writer.flush()
+        writer.close()
     return losses
+
+
+def main() -> None:
+    """CLI entry point (previously library-only). Usage::
+
+        python -m suika.decision_transformer --data-dir demos/ --out models/dt.pt
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Train a Decision Transformer on Suika demo trajectories")
+    parser.add_argument("--data-dir",  type=str, required=True,
+                         help="Directory of .npz trajectory recordings (see TrajectoryDataset.from_recordings).")
+    parser.add_argument("--out",       type=str, default="models/dt.pt")
+    parser.add_argument("--epochs",    type=int, default=50)
+    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--ctx-len",   type=int, default=20)
+    parser.add_argument("--lr",        type=float, default=1e-4)
+    parser.add_argument("--rtg-scale", type=float, default=5000.0)
+    parser.add_argument("--device",    type=str, default="auto",
+                         help="'auto' picks CUDA when available, else CPU; 'cpu' forces CPU-only.")
+    parser.add_argument("--tb-logdir", type=str, default=None,
+                         help="TensorBoard log directory (default: ~/.suikai/tb_logs/dt, "
+                              "matching the app's OPEN TensorBoard button).")
+    parser.add_argument("--tb-detailed", action="store_true",
+                         help="Also log per-batch loss, gradient norm, and periodic weight histograms.")
+    args = parser.parse_args()
+
+    if not HAS_TORCH:
+        raise SystemExit("PyTorch is required: pip install torch")
+
+    dataset = TrajectoryDataset.from_recordings(args.data_dir)
+    if len(dataset) == 0:
+        raise SystemExit(f"No trajectories found in {args.data_dir} (expected .npz recordings)")
+
+    dt = DecisionTransformer(rtg_scale=args.rtg_scale, ctx_len=args.ctx_len)
+    train_dt(
+        dt, dataset,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        ctx_len=args.ctx_len,
+        lr=args.lr,
+        device=args.device,
+        tb_logdir=args.tb_logdir or default_tb_logdir(),
+        tb_detailed=args.tb_detailed,
+    )
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    dt.save(out)
+    print(f"Saved checkpoint: {out}")
+
+
+if __name__ == "__main__":
+    main()

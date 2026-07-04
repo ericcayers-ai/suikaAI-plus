@@ -97,6 +97,7 @@ final class AiSlotPlayer {
         m.put("selectionIndex", (double) cfg.selectionIndex);
         m.put("crossover", cfg.crossover ? 1.0 : 0.0);
         m.put("sigmaAnneal", cfg.sigmaAnneal ? 1.0 : 0.0);
+        m.put("tensorboardDetailed", cfg.tensorboardDetailed ? 1.0 : 0.0);
         return m;
     }
 
@@ -125,6 +126,7 @@ final class AiSlotPlayer {
                 clampIdx(p.get("selectionIndex"), dev.suika.ai.GeneticTrainer.Selection.values().length);
         if (p.containsKey("crossover"))   cfg.crossover   = p.get("crossover") > 0.5;
         if (p.containsKey("sigmaAnneal")) cfg.sigmaAnneal = p.get("sigmaAnneal") > 0.5;
+        if (p.containsKey("tensorboardDetailed")) cfg.tensorboardDetailed = p.get("tensorboardDetailed") > 0.5;
     }
 
     private static int clampIdx(double v, int len) {

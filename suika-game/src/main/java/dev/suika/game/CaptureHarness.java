@@ -470,10 +470,16 @@ public final class CaptureHarness implements ApplicationListener {
             case 15-> { if (stageT > 5.0f) { shoot("90-adaptive-vote.png"); launchControlCenter(AiTechnique.NEUROEVO, true); nextStage(); } }
             case 16-> { if (stageT > 9.0f) { shoot("91-neuroevo-ghost.png"); nextStage(); } }
 
-            case 17-> { if (stageT > 0.2f) { humanPlay = new SuikaScreen(game, SuikaScreen.Mode.HUMAN); game.setScreen(humanPlay); nextStage(); } }
-            case 18-> { if (stageT > 1.5f) { shoot("92-human-play.png"); humanPlay.pauseForCapture(); nextStage(); } }
-            case 19-> { if (stageT > 0.5f) { shoot("92b-human-pause.png"); openGameOver(); nextStage(); } }
-            case 20-> { if (stageT > 1.0f) { shoot("93-game-over.png"); nextStage(); Gdx.app.exit(); } }
+            // TensorBoard SETUP row — only meaningful for PPO/Decision Transformer (see
+            // AiTechnique#supportsTensorboard()); confirms the toggle + OPEN button render.
+            case 17-> { if (stageT > 0.2f) { launchControlCenter(AiTechnique.PPO, false); nextStage(); } }
+            case 18-> { if (stageT > 1.0f) { cc.openHotswapForCapture(); nextStage(); } }
+            case 19-> { if (stageT > 0.5f) { shoot("94-tensorboard-hotswap.png"); nextStage(); } }
+
+            case 20-> { if (stageT > 0.2f) { humanPlay = new SuikaScreen(game, SuikaScreen.Mode.HUMAN); game.setScreen(humanPlay); nextStage(); } }
+            case 21-> { if (stageT > 1.5f) { shoot("92-human-play.png"); humanPlay.pauseForCapture(); nextStage(); } }
+            case 22-> { if (stageT > 0.5f) { shoot("92b-human-pause.png"); openGameOver(); nextStage(); } }
+            case 23-> { if (stageT > 1.0f) { shoot("93-game-over.png"); nextStage(); Gdx.app.exit(); } }
             default -> { }
         }
     }
