@@ -241,6 +241,67 @@ public enum AiTechnique {
         };
     }
 
+    /**
+     * Ordered, plain-language guide to the settings that apply to THIS technique — what
+     * each knob does and how to use it, top (most impactful) to bottom. Shown in the
+     * infocard so a player knows exactly which drawer controls matter for the technique
+     * they picked. Preset/Speed apply to everything, so they lead every list.
+     */
+    public String[] settingsHints() {
+        java.util.List<String> h = new java.util.ArrayList<>();
+        h.add("Preset — Slow = best quality (deeper/slower), High = fastest.");
+        h.add("Speed — playback multiplier; doesn't change the AI, just how fast you watch.");
+        switch (this) {
+            case MCTS, ALPHAZERO -> {
+                h.add("Rollouts — imagined futures per move: more = stronger but slower.");
+                h.add("Parallelism — search trees run at once; Auto uses all cores.");
+            }
+            case GREEDY -> h.add("Parallelism — columns evaluated at once; Auto uses all cores.");
+            case HEURISTIC -> h.add("No tunables — it follows fixed merge rules (a baseline).");
+            case PPO -> {
+                h.add("Parallelism — parallel training envs (--n-envs) for the Python trainer.");
+                h.add("Prefer GPU (Settings) — trains on CUDA when a GPU is present.");
+            }
+            case MUZERO -> h.add("Prefer GPU (Settings) — the Python trainer uses CUDA when available.");
+            case DECISION_TRANSFORMER -> h.add("Target return — the score you ask it to aim for; higher = bolder play.");
+            case NEUROEVO -> {
+                h.add("Population — genomes per generation: bigger = better search, more compute.");
+                h.add("Selection — Tournament / Rank / Boltzmann: how parents are chosen.");
+                h.add("Mutation σ — random tweak size; Breeding toggles crossover & σ-anneal.");
+                h.add("Sims/generation — games averaged per genome: more = less noisy fitness.");
+                h.add("Elite views / Ghost — how many lineages you watch live at once.");
+            }
+            case CMA_ES -> {
+                h.add("Population — λ candidates the Gaussian cloud samples each generation.");
+                h.add("Sims/generation — games averaged per candidate: more = steadier fitness.");
+                h.add("Elite views / Ghost — how many top candidates you watch live.");
+            }
+            case DAGGER -> h.add("Learning rate — how fast it adapts to the states it visits.");
+            case ENS_MCTS_NET -> {
+                h.add("Rollouts — depth of the MCTS half of the blend.");
+                h.add("Donor net — which trained save (Neuroevo/CMA-ES/DAgger) advises the pick.");
+                h.add("Donor slot — Auto (first saved) or a specific slot to compare nets.");
+                h.add("Net weight — how much the net's opinion counts vs raw search visits.");
+            }
+            case ENS_MCTS_TIEBREAK -> {
+                h.add("Rollouts — depth of the MCTS search.");
+                h.add("Tie threshold — how close columns must be to trigger the exact tiebreak.");
+            }
+            case ENS_RTG_VERIFIED -> h.add("Target return — score the proposer aims for; the MCTS verifier checks it.");
+            case ENS_ADAPTIVE_VOTE -> {
+                h.add("Rollouts — depth of the MCTS voter.");
+                h.add("Adapt rate — how fast each member's trust weight shifts with results.");
+            }
+            case ENS_BANDIT -> {
+                h.add("Rollouts — depth of the MCTS arm.");
+                h.add("Explore (UCB c) — higher tries under-used agents more; lower exploits.");
+            }
+        }
+        if (family == Family.EVOLUTION || family == Family.IMITATION)
+            h.add("SAVES — persist/reload trained weights; Autosave (Settings) writes slot 1.");
+        return h.toArray(new String[0]);
+    }
+
     /** One short line describing what this technique is doing moment-to-moment, live. */
     public String liveHint() {
         return switch (this) {

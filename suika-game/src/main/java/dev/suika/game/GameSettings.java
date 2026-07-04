@@ -41,6 +41,9 @@ public final class GameSettings {
 
     public void applyPhysics() {
         dev.suika.core.PhysicsConfig.restitution = bounceEnabled ? BOUNCE_RESTITUTION : 0.0;
+        // Instant-fail is a core-physics gameplay rule now (drives GameCore's dead-line
+        // check app-wide: champion, ghosts, human play, RT lab), not just a UI delay skip.
+        dev.suika.core.PhysicsConfig.instantFail = immediateDeadline;
     }
 
     // ---- Display (persisted — see SettingsPersistence) ----
@@ -101,6 +104,29 @@ public final class GameSettings {
      * has no effect on any JVM-native technique, which never touches the GPU at all.
      */
     public int gpuUtilPercent = 100;   // 10-100
+
+    /**
+     * Global "prefer GPU acceleration" preference. When on, every Python-backed technique
+     * (PPO, MuZero, Decision Transformer, AlphaZero's net) trains/infers on the detected
+     * CUDA device instead of the CPU — not just PPO. JVM-native techniques run dyn4j
+     * physics + small hand-rolled MLPs and have no CUDA binding in this project, so the
+     * UI honestly reports them as CPU-only regardless (fabricating GPU use would be a
+     * lie). Persisted across launches. See {@link GpuProbe#gpuUsableFor}.
+     */
+    public boolean preferGpu = false;
+    public void applyGpuPreference() { GpuProbe.setPreferGpu(preferGpu); }
+
+    // ---- Autosave ----
+    /** Autosave interval options in minutes; 0 = OFF. Persisted. When on, the AI control
+     *  center periodically saves the running technique's progress into slot 1 so a long
+     *  unattended training run survives a crash/close without a manual SAVES click. */
+    public static final int[] AUTOSAVE_MINUTES = {0, 1, 5, 10, 30};
+    public int autosaveIndex = 0;   // default OFF
+    public int autosaveMinutes() { return AUTOSAVE_MINUTES[autosaveIndex]; }
+    public String autosaveLabel() {
+        int m = autosaveMinutes();
+        return m == 0 ? "Off" : "Every " + m + " min";
+    }
 
     // -------------------------------------------------------------------------
 

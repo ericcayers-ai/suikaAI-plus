@@ -125,7 +125,11 @@ public final class PythonRunner extends AgentRunner {
     public String[] extendedStats() {
         java.util.List<String> s = new java.util.ArrayList<>();
         boolean ppo = cfg.technique == AiTechnique.PPO;
-        s.add("train       python -m " + trainModule() + (ppo ? ppoTrainFlags() : ""));
+        // Every Python technique's train command shows --device cuda when "Prefer GPU" is
+        // on and a CUDA device was detected (PPO also carries its --n-envs/--gpu-mem flags).
+        String deviceFlag = GpuProbe.gpuUsableFor(cfg.technique) ? " --device cuda" : "";
+        s.add("train       python -m " + trainModule() + (ppo ? ppoTrainFlags() : deviceFlag));
+        if (!ppo && GpuProbe.gpuUsableFor(cfg.technique)) s.add("accel       GPU (CUDA) — Prefer GPU is on");
         s.add("deploy      export ONNX -> OnnxPolicyRunner");
         s.add(PythonSetup.isReady()
                 ? "env ready   GPU stack linked"

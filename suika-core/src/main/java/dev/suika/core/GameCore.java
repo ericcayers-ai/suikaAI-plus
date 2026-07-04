@@ -400,17 +400,30 @@ public class GameCore {
     }
 
     private void checkDeadLine() {
-        boolean anyResting = false;
+        // A fruit counts as OVERFLOW when its top is above the dead-line AND it has
+        // effectively stopped there (speed below OVERFLOW_SETTLE_SPEED) — NOT the strict
+        // isAtRest() sleep check the old code used. At high sim speeds a piled-up stack
+        // is perpetually jostled and never fully sleeps, so the old check let the well
+        // silently overflow forever without failing (the "cheat" where scores climbed on
+        // a broken, overflowing board). A fruit actively falling through the drop zone
+        // moves far faster than this threshold, so it's correctly ignored until it settles.
+        boolean anyOverflow = false;
         for (Map.Entry<Integer, Body> e : idToBody.entrySet()) {
             Body b = e.getValue();
-            if (!b.isAtRest()) continue;
             double topY = b.getWorldCenter().y + idToTier.get(e.getKey()).radius;
-            if (topY > PhysicsConfig.DEADLINE_Y) {
-                anyResting = true;
-                break;
-            }
+            if (topY <= PhysicsConfig.DEADLINE_Y) continue;
+            if (b.getLinearVelocity().getMagnitude() > PhysicsConfig.OVERFLOW_SETTLE_SPEED) continue;
+            anyOverflow = true;
+            break;
         }
-        if (anyResting) {
+        if (anyOverflow) {
+            // Instant-fail mode: end immediately, no grace. Peg the timer at the grace
+            // ceiling so any UI reading timeAboveDeadline sees a fully-tripped state.
+            if (PhysicsConfig.instantFail) {
+                timeAboveDeadline = PhysicsConfig.DEADLINE_GRACE_SECONDS;
+                gameOver = true;
+                return;
+            }
             timeAboveDeadline += PhysicsConfig.FIXED_DT;
             if (timeAboveDeadline >= PhysicsConfig.DEADLINE_GRACE_SECONDS) {
                 gameOver = true;

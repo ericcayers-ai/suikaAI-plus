@@ -74,7 +74,9 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         return new Rectangle(CTRL_X, 386 - i * CTRL_STEP, CTRL_W, CTRL_H);
     }
 
-    // Infocard modal (null = closed)
+    // Infocard modal (null = closed). Sized to fit the explainer, ensemble members, the
+    // ordered per-setting guide, and the attribute bars without crowding.
+    private static final float INFO_MW = 600f, INFO_MH = 640f;
     private AiTechnique infocardTech = null;
 
     /** Test/QA hook: open the info modal for a technique (used by the capture harness). */
@@ -142,11 +144,12 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
                 return false;
             }
             @Override public boolean scrolled(float ax, float ay) {
-                // Negated: wheel-down (ay > 0) must reveal content further down the
-                // list, not scroll back toward the top — the classic y-up-virtual-space
-                // scroll-sign trap.
+                // Wheel-down (ay > 0) reveals content further down the list. Increasing
+                // `scroll` lifts lower cards up into the visible band (see cardTop()), so
+                // this ADDS ay — the previous negation scrolled the wrong way (reported
+                // by the user, confirmed across every scrollable view; fixed app-wide).
                 if (infocardTech == null)
-                    scroll = MathUtils.clamp(scroll - ay * 46f, 0f, maxScroll());
+                    scroll = MathUtils.clamp(scroll + ay * 46f, 0f, maxScroll());
                 return true;
             }
             @Override public boolean keyDown(int k) {
@@ -337,7 +340,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         if (cfg.technique == AiTechnique.NEUROEVO) return cfg.selection().label;
         return switch (cfg.technique) {
             case ENS_MCTS_NET      -> cfg.ensembleDonor().display
-                    + (EnsembleAgents.donorTrained(cfg.ensembleDonor()) ? "" : " (untrained)");
+                    + (EnsembleAgents.donorTrained(cfg.ensembleDonor(), cfg.ensembleDonorSlot) ? " (trained)" : " (untrained)");
             case ENS_MCTS_TIEBREAK -> Math.round(cfg.ensembleTieThreshold() * 100) + "%";
             case ENS_BANDIT        -> String.format("%.1f", cfg.ensembleUcbC());
             case ENS_ADAPTIVE_VOTE -> String.format("%.2f", cfg.ensembleAdaptLr());
@@ -376,15 +379,30 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         }
     }
 
-    /** Breeding combo (crossover on/off × σ-anneal on/off) as one 4-way cycler. */
-    private boolean ctx3Applicable() { return cfg.technique == AiTechnique.NEUROEVO; }
+    /** NEUROEVO: breeding combo (crossover × σ-anneal). ENS_MCTS_NET: donor save slot. */
+    private boolean ctx3Applicable() {
+        return cfg.technique == AiTechnique.NEUROEVO || cfg.technique == AiTechnique.ENS_MCTS_NET;
+    }
+    private String ctx3Label() {
+        return cfg.technique == AiTechnique.ENS_MCTS_NET ? "Donor slot" : "Breeding";
+    }
     private String ctx3Value() {
+        if (cfg.technique == AiTechnique.ENS_MCTS_NET) {
+            String base = cfg.ensembleDonorSlotLabel();
+            if (cfg.ensembleDonorSlot >= 1)
+                return base + (EnsembleAgents.donorTrained(cfg.ensembleDonor(), cfg.ensembleDonorSlot) ? " (saved)" : " (empty)");
+            return base;
+        }
         if (cfg.crossover && cfg.sigmaAnneal) return "Crossover + anneal";
         if (cfg.crossover)   return "Crossover";
         if (cfg.sigmaAnneal) return "Mutation + anneal";
         return "Mutation only";
     }
     private void cycleCtx3(int d) {
+        if (cfg.technique == AiTechnique.ENS_MCTS_NET) {
+            cfg.ensembleDonorSlot = wrap(cfg.ensembleDonorSlot + d, ModelSlots.SLOT_COUNT + 1); // 0=Auto,1..3
+            return;
+        }
         int cur = (cfg.crossover ? 1 : 0) | (cfg.sigmaAnneal ? 2 : 0);
         int next = wrap(cur + d, 4);
         cfg.crossover   = (next & 1) != 0;
@@ -475,7 +493,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         if (infocardTech != null) {
             s.setColor(0.03f, 0.04f, 0.07f, 0.94f);
             s.rect(0, 0, Theme.VW, Theme.VH);
-            float mW = 580f, mH = 440f;
+            float mW = INFO_MW, mH = INFO_MH;
             float mX = (Theme.VW - mW) / 2f, mY = (Theme.VH - mH) / 2f;
             s.setColor(0.08f, 0.09f, 0.13f, 1f);
             Ui.fillRoundRect(s, mX, mY, mW, mH, 18);
@@ -530,33 +548,47 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         // Infocard modal text
         if (infocardTech != null) {
             AiTechnique t = infocardTech;
-            float mW = 580f, mH = 440f;
+            float mW = INFO_MW, mH = INFO_MH;
             float mX = (Theme.VW - mW) / 2f, mY = (Theme.VH - mH) / 2f;
             float tx  = mX + 28f;
             Ui.text(game.batch, game.fontMed, t.display,
-                    tx, mY + mH - 44, Theme.TEXT);
+                    tx, mY + mH - 40, Theme.TEXT);
             Ui.textRight(game.batch, game.fontSmall, t.envBadge(),
-                    mX + mW - 24, mY + mH - 46, familyColor(t));
+                    mX + mW - 24, mY + mH - 42, familyColor(t));
             Ui.text(game.batch, game.fontSmall,
                     t.category + "  ·  " + t.kind + "  ·  obs: " + t.dataMode,
-                    tx, mY + mH - 82, Theme.TEXT_DIM);
-            // Plain-English explanation (no prior knowledge needed), pre-wrapped.
-            String[] lines = t.explainerLines();
-            float ey = mY + mH - 106;
-            for (int li = 0; li < Math.min(4, lines.length); li++) {
-                Ui.text(game.batch, game.fontSmall, lines[li], tx, ey, Theme.TEXT);
-                ey -= 22f;
+                    tx, mY + mH - 74, Theme.TEXT_DIM);
+            // Content flows top→bottom with a running cursor: explanation, then (for
+            // ensembles) the member manifest, then the ordered per-setting guide. The
+            // attribute bars are pinned to the bottom region (drawInfoBarsShapes), so the
+            // flow stops just above them.
+            float cy = mY + mH - 100;
+            for (String line : t.explainerLines()) {
+                Ui.text(game.batch, game.fontSmall, line, tx, cy, Theme.TEXT);
+                cy -= 21f;
             }
-            // Ensembles: an explicit member manifest, so what's inside is never a mystery.
             if (t.isEnsemble()) {
-                Ui.text(game.batch, game.fontSmall, "MEMBERS", tx, mY + 230f, Theme.TEXT_DIM);
-                float my2 = mY + 230f;
+                cy -= 6f;
+                Ui.text(game.batch, game.fontSmall, "USES", tx, cy, Theme.GOLD);
                 for (String m : t.ensembleMembers()) {
-                    Ui.text(game.batch, game.fontSmall, "· " + m, tx + 100f, my2, Theme.TEXT);
-                    my2 -= 22f;
+                    Ui.text(game.batch, game.fontSmall, "· " + m, tx + 60f, cy, Theme.TEXT);
+                    cy -= 20f;
                 }
+                cy -= 4f;
+            } else {
+                cy -= 10f;
             }
-            // Attribute bars section
+            // Ordered "what each setting does" guide — the whole point of the infocard's
+            // new lower half, so a player knows which drawer knobs matter for this pick.
+            Ui.text(game.batch, game.fontSmall, "SETTINGS — WHAT TO TUNE", tx, cy, Theme.GOLD);
+            cy -= 20f;
+            float barsTop = mY + 176f;   // don't overrun the attribute bars pinned below
+            for (String hint : t.settingsHints()) {
+                if (cy < barsTop) break;
+                Ui.text(game.batch, game.fontSmall, hint, tx, cy, Theme.TEXT_DIM);
+                cy -= 19f;
+            }
+            // Attribute bars section (pinned bottom)
             Ui.text(game.batch, game.fontSmall, "ATTRIBUTES", tx, mY + 152f, Theme.TEXT_DIM);
             Ui.text(game.batch, game.fontSmall, "Performance", tx, mY + 124f, Theme.TEXT_DIM);
             Ui.text(game.batch, game.fontSmall, "Speed",       tx, mY + 94f,  Theme.TEXT_DIM);
@@ -635,7 +667,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         cyclerText(paramLabel(),  paramValue(),              paramCtrl, paramApplicable());
         cyclerText(ctx1Applicable() ? ctx1Label() : "Strategy", ctx1Value(), ctx1Ctrl, ctx1Applicable());
         cyclerText(ctx2Applicable() ? ctx2Label() : "Blend",    ctx2Value(), ctx2Ctrl, ctx2Applicable());
-        cyclerText("Breeding",    ctx3Value(),               ctx3Ctrl, ctx3Applicable());
+        cyclerText(ctx3Applicable() ? ctx3Label() : "Breeding", ctx3Value(), ctx3Ctrl, ctx3Applicable());
 
         boolean evo = evolutionApplicable();
         cyclerText("Sims/generation", Integer.toString(cfg.simsPerGen()),   simsCtrl,      evo);

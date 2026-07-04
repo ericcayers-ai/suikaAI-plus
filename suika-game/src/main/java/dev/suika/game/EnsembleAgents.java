@@ -85,25 +85,38 @@ final class EnsembleAgents {
         String[] learnedStateLines();
     }
 
-    /** Loads the first present slot for {@code sourceTechnique}, or a freshly
-     *  random-initialised policy of the same architecture if none exist yet. */
-    private static MlpPolicy loadOrFreshPolicy(AiTechnique sourceTechnique, long fallbackSeed) {
+    /** Loads a specific donor slot ({@code slot} 1..SLOT_COUNT), or the first present
+     *  slot when {@code slot <= 0}, or a freshly random-initialised policy of the same
+     *  architecture if none load. */
+    private static MlpPolicy loadOrFreshPolicy(AiTechnique sourceTechnique, int slot, long fallbackSeed) {
         MlpPolicy p = ModelSlots.newCompatiblePolicy();
-        for (int slot = 1; slot <= ModelSlots.SLOT_COUNT; slot++) {
+        if (slot >= 1 && slot <= ModelSlots.SLOT_COUNT) {
             if (ModelSlots.load(sourceTechnique.id, slot, p)) return p;
+        } else {
+            for (int s = 1; s <= ModelSlots.SLOT_COUNT; s++) {
+                if (ModelSlots.load(sourceTechnique.id, s, p)) return p;
+            }
         }
         p.initRandom(new Random(fallbackSeed));
         return p;
     }
 
-    /** True when a donor technique actually has trained weights saved (any slot) —
-     *  surfaced in the UI so "which net is this ensemble using" is explicit. */
-    static boolean donorTrained(AiTechnique donor) {
-        for (int slot = 1; slot <= ModelSlots.SLOT_COUNT; slot++) {
-            if (ModelSlots.info(donor.id, slot).present()) return true;
+    private static MlpPolicy loadOrFreshPolicy(AiTechnique sourceTechnique, long fallbackSeed) {
+        return loadOrFreshPolicy(sourceTechnique, 0, fallbackSeed);
+    }
+
+    /** True when a donor technique has trained weights in the given slot (or ANY slot
+     *  when {@code slot <= 0}) — surfaced in the UI so "which net is this ensemble
+     *  using, and is it actually trained" is explicit. */
+    static boolean donorTrained(AiTechnique donor, int slot) {
+        if (slot >= 1 && slot <= ModelSlots.SLOT_COUNT) return ModelSlots.info(donor.id, slot).present();
+        for (int s = 1; s <= ModelSlots.SLOT_COUNT; s++) {
+            if (ModelSlots.info(donor.id, s).present()) return true;
         }
         return false;
     }
+
+    static boolean donorTrained(AiTechnique donor) { return donorTrained(donor, 0); }
 
     private static double normalize(double[] v, int i) {
         double max = Double.NEGATIVE_INFINITY, min = Double.POSITIVE_INFINITY;
@@ -132,19 +145,23 @@ final class EnsembleAgents {
         private final MlpPolicy net;
         private final double netWeight;
         final AiTechnique donor;
+        final int donorSlot;
         final boolean donorTrained;
         private final StateObservationEncoder encoder = new StateObservationEncoder();
         private volatile int[] lastVisits = new int[0];
 
-        NetGuidedMcts(int rollouts, int actionBins, AiTechnique donor, double netWeight) {
+        NetGuidedMcts(int rollouts, int actionBins, AiTechnique donor, int donorSlot, double netWeight) {
             this.mcts = new MctsAgent(rollouts, Math.sqrt(2), 6, actionBins);
             this.donor = donor;
-            this.donorTrained = donorTrained(donor);
-            this.net = loadOrFreshPolicy(donor, 101L);
+            this.donorSlot = donorSlot;
+            this.donorTrained = donorTrained(donor, donorSlot);
+            this.net = loadOrFreshPolicy(donor, donorSlot, 101L);
             this.netWeight = netWeight;
         }
         @Override public String id()          { return "ens-mcts-net"; }
-        @Override public String displayName() { return "MCTS + Policy Net (" + donor.display + ")"; }
+        @Override public String displayName() {
+            return "MCTS + Policy Net (" + donor.display + (donorSlot >= 1 ? " slot " + donorSlot : "") + ")";
+        }
         @Override public MctsAgent mctsCore()  { return mcts; }
 
         @Override public Object selectAction(GameState state, ActionSpec spec) {

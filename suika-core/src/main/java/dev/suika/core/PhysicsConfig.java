@@ -34,6 +34,16 @@ public final class PhysicsConfig {
     public static final double FRICTION_STATIC  = 0.7;
     public static final double FRICTION_DYNAMIC = 0.5;
 
+    /**
+     * Instant-fail toggle. When true the game ends the moment a fruit comes to overflow
+     * above the dead-line (zero grace); when false the {@link #DEADLINE_GRACE_SECONDS}
+     * delay applies. Mutable/volatile for the same reason as {@link #restitution} — it's
+     * a settings-driven gameplay toggle read by {@link GameCore} instances that may be
+     * evaluated on background threads, and threading it through 50+ construction sites
+     * would be pure churn. Flipped from {@code GameSettings.applyPhysics()}.
+     */
+    public static volatile boolean instantFail = false;
+
     // --- Container (all in game units) ---
     public static final double CONTAINER_WIDTH     = 10.0;
     public static final double CONTAINER_HEIGHT    = 15.0;
@@ -51,6 +61,17 @@ public final class PhysicsConfig {
     public static final double DEADLINE_Y = CONTAINER_HEIGHT - 1.5;
     /** Seconds a fruit may be above the dead-line before game-over. */
     public static final double DEADLINE_GRACE_SECONDS = 3.0;
+    /**
+     * A fruit above the dead-line whose speed is below this counts as overflow (it has
+     * effectively stopped or is merely jostling on the pile), even if it never reaches
+     * the strict {@link #SLEEP_LINEAR_VELOCITY} at-rest threshold. A fruit actively
+     * falling through the drop zone crosses the line at ~15 game-units/s, so this cleanly
+     * excludes it. This is the fix for the high-speed overflow "cheat": at large sim
+     * speeds a piled-up stack never fully sleeps, so the old at-rest-only check let the
+     * well overflow forever without ever failing. Merge-spawned fruit that appears above
+     * the line with near-zero velocity also correctly counts.
+     */
+    public static final double OVERFLOW_SETTLE_SPEED = 5.0;
 
     // --- Drop ---
     /** Y at which a new fruit is created (top of container). */

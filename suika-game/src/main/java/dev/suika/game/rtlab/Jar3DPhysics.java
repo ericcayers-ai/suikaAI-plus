@@ -246,6 +246,7 @@ public final class Jar3DPhysics {
             if (resting && b.y + b.radius > PhysicsConfig.DEADLINE_Y) anyRestingAbove = true;
         }
         if (anyRestingAbove) {
+            if (PhysicsConfig.instantFail) { timeAboveDeadline = PhysicsConfig.DEADLINE_GRACE_SECONDS; gameOver = true; return; }
             timeAboveDeadline += dt;
             if (timeAboveDeadline >= PhysicsConfig.DEADLINE_GRACE_SECONDS) gameOver = true;
         } else {

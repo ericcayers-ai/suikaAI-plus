@@ -86,6 +86,7 @@ final class AiSlotPlayer {
         m.put("actionBins", (double) cfg.actionBins);
         // v0.12 additions — ensemble customization + evolution selection math.
         m.put("ensembleDonorIndex", (double) cfg.ensembleDonorIndex);
+        m.put("ensembleDonorSlot", (double) cfg.ensembleDonorSlot);
         m.put("netWeightIndex", (double) cfg.netWeightIndex);
         m.put("tieThresholdIndex", (double) cfg.tieThresholdIndex);
         m.put("ucbCIndex", (double) cfg.ucbCIndex);
@@ -107,6 +108,8 @@ final class AiSlotPlayer {
         if (p.containsKey("actionBins"))     cfg.actionBins     = p.get("actionBins").intValue();
         if (p.containsKey("ensembleDonorIndex")) cfg.ensembleDonorIndex =
                 clampIdx(p.get("ensembleDonorIndex"), PlaygroundConfig.ENSEMBLE_DONORS.length);
+        if (p.containsKey("ensembleDonorSlot")) cfg.ensembleDonorSlot =
+                clampIdx(p.get("ensembleDonorSlot"), ModelSlots.SLOT_COUNT + 1);
         if (p.containsKey("netWeightIndex")) cfg.netWeightIndex =
                 clampIdx(p.get("netWeightIndex"), PlaygroundConfig.NET_WEIGHT_OPTIONS.length);
         if (p.containsKey("tieThresholdIndex")) cfg.tieThresholdIndex =

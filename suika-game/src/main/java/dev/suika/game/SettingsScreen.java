@@ -138,8 +138,8 @@ public final class SettingsScreen extends ScreenAdapter {
         // ---- Experimental gameplay variants ----
         // Genuinely optional rule changes — no master gate; each is its own toggle,
         // same as every other setting on this screen.
-        toggle("EXPERIMENTAL", "Immediate game over (no safety delay)",
-                () -> cfg.immediateDeadline, () -> cfg.immediateDeadline = !cfg.immediateDeadline);
+        toggle("EXPERIMENTAL", "Instant fail (no safety delay)",
+                () -> cfg.immediateDeadline, () -> { cfg.immediateDeadline = !cfg.immediateDeadline; cfg.applyPhysics(); });
         toggle(null, "Bouncy fruit (no instant settle)",
                 () -> cfg.bounceEnabled, () -> { cfg.bounceEnabled = !cfg.bounceEnabled; cfg.applyPhysics(); });
 
@@ -148,10 +148,28 @@ public final class SettingsScreen extends ScreenAdapter {
         button(null, "Download AI GPU deps",
                 () -> PythonSetup.isReady() ? "REINSTALL" : installing ? "WORKING…" : "SETUP",
                 this::startInstall);
-        slider(null, "Max GPU utilization (PPO training)",
+        // Honest GPU toggle: routes every PYTHON-backed technique to CUDA (not just PPO).
+        // JVM-native techniques have no CUDA path here, so the value readout says so.
+        toggle(null, "Prefer GPU acceleration (Python techniques)",
+                () -> cfg.preferGpu, () -> { cfg.preferGpu = !cfg.preferGpu; cfg.applyGpuPreference(); SettingsPersistence.save(cfg); })
+                .value = () -> gpuToggleHint();
+        slider(null, "Max GPU utilization (Python training)",
                 () -> (cfg.gpuUtilPercent - 10) / 90.0,
                 f -> cfg.gpuUtilPercent = (int) (Math.round((10 + clamp01(f) * 90) / 5.0) * 5))
                 .value = () -> cfg.gpuUtilPercent + "%";
+
+        // ---- Saves ----
+        cycle("SAVES", "Autosave (AI progress -> slot 1)", cfg::autosaveLabel,
+                () -> { cfg.autosaveIndex = wrap(cfg.autosaveIndex - 1, GameSettings.AUTOSAVE_MINUTES.length); SettingsPersistence.save(cfg); },
+                () -> { cfg.autosaveIndex = wrap(cfg.autosaveIndex + 1, GameSettings.AUTOSAVE_MINUTES.length); SettingsPersistence.save(cfg); });
+    }
+
+    /** Honest one-word status for the GPU toggle's value readout. */
+    private String gpuToggleHint() {
+        if (!cfg.preferGpu) return "Off";
+        Boolean gpu = GpuProbe.available();
+        if (gpu == null) return "On (probing…)";
+        return gpu ? "On (CUDA)" : "On (no GPU found)";
     }
 
     /** Shorten a progress line so it fits the ~250 px status cycler box. */
@@ -205,8 +223,8 @@ public final class SettingsScreen extends ScreenAdapter {
                 camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight()); mx = touch.x; my = touch.y; return false;
             }
             @Override public boolean scrolled(float ax, float ay) {
-                // Negated — see AiPlaygroundScreen's identical fix for why.
-                scroll = Math.max(0f, Math.min(scroll - ay * 46f, maxScroll()));
+                // Wheel-down reveals lower rows — see AiPlaygroundScreen's identical fix.
+                scroll = Math.max(0f, Math.min(scroll + ay * 46f, maxScroll()));
                 return true;
             }
             @Override public boolean keyDown(int k) {

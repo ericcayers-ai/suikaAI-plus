@@ -40,8 +40,12 @@ public final class PlaygroundConfig {
      * thread/core count regardless of GPU presence.
      */
     public String parallelismLabel() {
-        if (parallelism > 0) return parallelism + (technique.gpuCapableTraining() ? " envs" : " threads");
-        if (technique.gpuCapableTraining()) {
+        // A technique shows a GPU label when it can actually use one: PPO's real
+        // --device flag, or ANY Python-backed technique once the "Prefer GPU" setting is
+        // on and a CUDA device was detected (see GpuProbe#gpuUsableFor).
+        boolean gpuRoute = technique.gpuCapableTraining() || GpuProbe.gpuUsableFor(technique);
+        if (parallelism > 0) return parallelism + (gpuRoute ? " envs" : " threads");
+        if (gpuRoute) {
             Boolean gpu = GpuProbe.available();
             if (gpu == null) return "Auto (probing GPU…)";
             return gpu ? "Auto (GPU" + (GpuProbe.deviceName() != null ? ": " + shortDevice() : "") + ")"
@@ -77,6 +81,12 @@ public final class PlaygroundConfig {
             { AiTechnique.NEUROEVO, AiTechnique.CMA_ES, AiTechnique.DAGGER };
     public int ensembleDonorIndex = 0;
     public AiTechnique ensembleDonor() { return ENSEMBLE_DONORS[ensembleDonorIndex]; }
+
+    /** Which of the donor technique's save slots to source the net from. 0 = "Auto"
+     *  (first present slot); 1..SLOT_COUNT pins a specific slot so you can compare
+     *  differently-trained donor nets. */
+    public int ensembleDonorSlot = 0;   // 0 = auto (first present)
+    public String ensembleDonorSlotLabel() { return ensembleDonorSlot == 0 ? "Auto" : "Slot " + ensembleDonorSlot; }
 
     /** How much of the MCTS + Policy Net final score comes from the net (vs search visits). */
     public static final double[] NET_WEIGHT_OPTIONS = {0.1, 0.3, 0.5, 0.7, 0.9};

@@ -159,11 +159,29 @@ public final class BoardRenderer {
             float fr = bvpr(f.radius());
             float fcy = bvpy(f.y());
             if (fcy + fr > topY + maxAboveTopPx) continue; // clipped: would bleed above this board's own region
+            // Instant-fail highlight: when the "Instant fail" rule is on, the fruit that
+            // has come to overflow above the dead-line (the one that ends the game) gets a
+            // faint red halo so it's clear WHICH fruit tripped the loss. Mirrors GameCore's
+            // own overflow test (top past the line + effectively stopped) so the render
+            // marks exactly the fruit the core failed on. Full-alpha (main) boards only.
+            if (alpha >= 1f && cfg.immediateDeadline && overflowMarked(f)) {
+                float speed = (float) Math.sqrt(f.vx() * f.vx() + f.vy() * f.vy());
+                if (speed <= PhysicsConfig.OVERFLOW_SETTLE_SPEED) {
+                    s.setColor(0.92f, 0.26f, 0.24f, 0.35f);
+                    s.circle(bvpx(f.x()), fcy, fr + 6f, 24);
+                }
+            }
             drawFruit(s, bvpx(f.x()), fcy, fr, f.tier(), cfg, alpha);
         }
 
         // Merge particles (only on main board)
         if (alpha >= 1f && cfg.particles && particles != null) particles.render(s);
+    }
+
+    /** True when this fruit's top edge is past the dead-line height (candidate for the
+     *  instant-fail overflow halo; the speed check is applied at the call site). */
+    private static boolean overflowMarked(Fruit f) {
+        return f.y() + f.radius() > PhysicsConfig.DEADLINE_Y;
     }
 
     private void drawFruit(ShapeRenderer s, float cx, float cy, float r,

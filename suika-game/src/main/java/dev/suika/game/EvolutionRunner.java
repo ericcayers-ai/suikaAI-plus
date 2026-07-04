@@ -51,6 +51,16 @@ public final class EvolutionRunner extends AgentRunner {
     private volatile boolean holdChampion = false;
 
     /**
+     * The trainer's most recently published best agent (highest fitness so far),
+     * stashed by the worker thread so the render thread can re-adopt it WITHOUT reaching
+     * into {@link GeneticTrainer}/{@link CmaEsTrainer} internals concurrently. Used by
+     * {@link #onNewGame()} to guarantee that whenever the displayed champion board
+     * fails and auto-restarts, it comes back playing the current best — you always keep
+     * watching the highest-scoring agent so far, never a dead or stale one.
+     */
+    private volatile AgentPlugin latestChampion;
+
+    /**
      * Distinguishes worker "generations" across a RESTART. A shared boolean alone is
      * racy here: an old worker thread, interrupted mid-iteration by restart(), could
      * still be inside its catch block setting {@code running = false} right as the new
@@ -125,6 +135,7 @@ public final class EvolutionRunner extends AgentRunner {
         diversityChart.clear();
         topAgents = new ArrayList<>();
         holdChampion = false;
+        latestChampion = null;   // don't let onNewGame re-adopt a pre-restart champion
         start();
     }
 
@@ -137,11 +148,32 @@ public final class EvolutionRunner extends AgentRunner {
         if (!p) holdChampion = false;
     }
 
+    /**
+     * When the displayed champion board fails and the base runner auto-restarts it,
+     * re-adopt the trainer's current best agent (and release any held loaded slot) so
+     * you keep watching the highest-scoring agent so far rather than replaying the dead
+     * one. Reads the volatile {@link #latestChampion} the worker publishes — never
+     * touches trainer internals from this (render) thread.
+     */
+    @Override
+    protected void onNewGame() {
+        super.onNewGame();
+        holdChampion = false;
+        AgentPlugin best = latestChampion;
+        if (best != null) setAgent(best);
+    }
+
     private void initGhosts() {
         for (int i = 0; i < ghostCount; i++) {
             ghostCores[i] = new GameCore(seed + i + 1);
             ghostTimer[i] = (i + 1) * 0.3f;
             ghostStartGen[i] = 0;
+            // Seed every ghost with the current live agent so it DROPS from frame one
+            // instead of sitting empty until generation 1 finishes publishing its top
+            // agents — the "ghosts don't appear" bug, worst at high sims/generation where
+            // gen 0 can take many seconds. Once the trainer publishes elites, trainLoop
+            // swaps each ghost onto its own elite; until then they all mirror the champion.
+            ghostAgents[i] = agent();
         }
     }
 
@@ -151,8 +183,8 @@ public final class EvolutionRunner extends AgentRunner {
                 if (isCma) {
                     cma.update();
                     generation = cma.generation();
-                    var champ = cma.bestAgent();
-                    if (!holdChampion) setAgent(champ);
+                    latestChampion = cma.bestAgent();
+                    if (!holdChampion) setAgent(latestChampion);
                     bestFit = cma.bestFitness();
                     meanFit = cma.meanFitness();
                     // this generation's top offspring, skipping index 0 (redundant with
@@ -164,7 +196,8 @@ public final class EvolutionRunner extends AgentRunner {
                     generation = ga.generation();
                     bestFit = ga.bestFitness();
                     meanFit = ga.meanFitness();
-                    if (!holdChampion) setAgent(ga.bestAgent());
+                    latestChampion = ga.bestAgent();
+                    if (!holdChampion) setAgent(latestChampion);
                     // expose top agents for ghost view (champion is already in agent())
                     var elites = ga.eliteAgents(ghostCount + 1);
                     topAgents = elites.size() > 1 ? elites.subList(1, elites.size()) : List.of();
@@ -396,10 +429,17 @@ public final class EvolutionRunner extends AgentRunner {
     // Save / load — 3 slots per technique, persisted to disk (see ModelSlots).
     // -------------------------------------------------------------------------
 
-    /** Persists the CURRENT champion's weights + best-so-far fitness into a slot. */
+    /** Persists the CURRENT champion's weights + best-so-far fitness into a slot, along
+     *  with the fitness/mean/diversity graph history so a reloaded slot restores its
+     *  charts (written to the slot folder's progress.txt — see {@link ModelSlots}). */
     public boolean saveToSlot(int slot) {
         if (!(agent() instanceof NeuralAgent na)) return false;
-        ModelSlots.save(cfg.technique.id, slot, na.policy(), bestSoFar);
+        java.util.Map<String, float[]> graphs = new java.util.LinkedHashMap<>();
+        graphs.put("bestFitness", fitnessChart.export());
+        graphs.put("meanFitness", meanFitChart.export());
+        graphs.put("diversity",   diversityChart.export());
+        ModelSlots.save(cfg.technique.id, slot, na.policy(), bestSoFar,
+                new ModelSlots.SaveExtras(graphs));
         return true;
     }
 
@@ -419,6 +459,12 @@ public final class EvolutionRunner extends AgentRunner {
         if (!ModelSlots.load(cfg.technique.id, slot, p)) return false;
         setAgent(new NeuralAgent(p));
         holdChampion = true;
+        // Restore the saved graph history so the charts continue from where the save was
+        // taken instead of resetting to blank.
+        var graphs = ModelSlots.loadGraphs(cfg.technique.id, slot);
+        if (graphs.containsKey("bestFitness")) fitnessChart.importSeries(graphs.get("bestFitness"));
+        if (graphs.containsKey("meanFitness")) meanFitChart.importSeries(graphs.get("meanFitness"));
+        if (graphs.containsKey("diversity"))   diversityChart.importSeries(graphs.get("diversity"));
         return true;
     }
 

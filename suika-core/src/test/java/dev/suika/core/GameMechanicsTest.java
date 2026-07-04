@@ -127,4 +127,57 @@ class GameMechanicsTest {
         assertTrue(s.nextFruitTier().isDroppable(),
                 "Next fruit tier must be droppable (tier ≤ 5)");
     }
+
+    /**
+     * The high-speed overflow "cheat" regression: piling fruit up past the dead-line in
+     * live {@link GameCore#tick()} play must eventually END the game, not let the well
+     * overflow forever while the score keeps climbing. Before the v0.13 fix the dead-line
+     * check required a fruit to be strictly {@code isAtRest()} above the line, which a
+     * perpetually-jostled stack never reaches, so the game never failed. Now a fruit that
+     * has merely slowed down above the line trips the (graced) loss.
+     */
+    @Test
+    void continuousStackingAboveDeadlineEventuallyEndsGame() {
+        boolean savedInstant = PhysicsConfig.instantFail;
+        PhysicsConfig.instantFail = false;
+        try {
+            GameCore core = new GameCore(101L);
+            // Spawn fruit into the same column far more often than it can settle, then run
+            // many live ticks — the classic overflow scenario at high sim speed.
+            for (int i = 0; i < 400 && !core.isGameOver(); i++) {
+                if (core.getState().fruits().size() < 60) core.spawnDrop(5.0);
+                for (int t = 0; t < 20; t++) { core.tick(); if (core.isGameOver()) break; }
+            }
+            assertTrue(core.isGameOver(),
+                    "A well continuously overfilled past the dead-line must eventually fail");
+        } finally {
+            PhysicsConfig.instantFail = savedInstant;
+        }
+    }
+
+    /** Instant-fail mode ends the game with zero grace once a fruit overflows the line. */
+    @Test
+    void instantFailEndsGameWithoutGrace() {
+        boolean savedInstant = PhysicsConfig.instantFail;
+        PhysicsConfig.instantFail = true;
+        try {
+            GameCore core = new GameCore(202L);
+            int ticksWhenOver = -1;
+            for (int i = 0; i < 400 && !core.isGameOver(); i++) {
+                if (core.getState().fruits().size() < 60) core.spawnDrop(5.0);
+                for (int t = 0; t < 20; t++) {
+                    core.tick();
+                    if (core.isGameOver()) { ticksWhenOver = i; break; }
+                }
+            }
+            assertTrue(core.isGameOver(), "Instant-fail must end the game once fruit overflows");
+            // Grace timer should be pegged at the ceiling (instant), never a partial value.
+            assertEquals(PhysicsConfig.DEADLINE_GRACE_SECONDS,
+                    core.getState().timeAboveDeadline(), 1e-9,
+                    "Instant-fail pegs the dead-line timer at the grace ceiling");
+            assertTrue(ticksWhenOver >= 0);
+        } finally {
+            PhysicsConfig.instantFail = savedInstant;
+        }
+    }
 }

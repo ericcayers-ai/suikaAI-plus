@@ -30,6 +30,22 @@ public final class LiveChart {
     public int  size()  { return count; }
     public float latest() { return count > 0 ? at(count - 1) : 0f; }
 
+    /** Snapshot of the series in oldest→newest order — for persisting graph history to a
+     *  save slot (see {@link ModelSlots}). */
+    public float[] export() {
+        float[] out = new float[count];
+        for (int i = 0; i < count; i++) out[i] = at(i);
+        return out;
+    }
+
+    /** Restore a persisted series (oldest→newest), clamped to capacity (keeps the most
+     *  recent values if the saved series is longer than this chart's buffer). */
+    public void importSeries(float[] values) {
+        clear();
+        int from = Math.max(0, values.length - cap);
+        for (int i = from; i < values.length; i++) add(values[i]);
+    }
+
     public float at(int i) {
         int start = (head - count + cap) % cap;
         return buf[(start + i) % cap];

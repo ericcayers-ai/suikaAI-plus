@@ -31,7 +31,7 @@ public final class Agents {
             // ---- Ensembles: composed agents (see EnsembleAgents.java), each wired to
             // its PlaygroundConfig customization knobs ----
             case ENS_MCTS_NET       -> new EnsembleAgents.NetGuidedMcts(
-                    cfg.rollouts, bins, cfg.ensembleDonor(), cfg.ensembleNetWeight());
+                    cfg.rollouts, bins, cfg.ensembleDonor(), cfg.ensembleDonorSlot, cfg.ensembleNetWeight());
             case ENS_MCTS_TIEBREAK  -> new EnsembleAgents.McTsGreedyTiebreak(
                     cfg.rollouts, bins, cfg.ensembleTieThreshold());
             case ENS_RTG_VERIFIED   -> new EnsembleAgents.ReturnConditionedVerified(cfg.targetReturn, bins);

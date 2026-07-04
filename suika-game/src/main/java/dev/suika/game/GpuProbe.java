@@ -27,6 +27,25 @@ final class GpuProbe {
     private static volatile Boolean available = null;
     private static volatile String deviceName = null;
 
+    /**
+     * User preference (Settings → AI ENVIRONMENT → "Prefer GPU acceleration"): when on,
+     * every Python-backed technique routes its training/inference to the detected CUDA
+     * device instead of the CPU, not just PPO. JVM-native techniques (planning /
+     * evolution / imitation / ensembles) have no CUDA path in this project, so this flag
+     * honestly does nothing for them — see {@link #gpuUsableFor}. Mirrored here (rather
+     * than read from GameSettings) so the label logic in {@link PlaygroundConfig} can
+     * consult it without a settings reference.
+     */
+    private static volatile boolean preferGpu = false;
+    static void setPreferGpu(boolean v) { preferGpu = v; }
+    static boolean preferGpu() { return preferGpu; }
+
+    /** True when {@code technique} can actually run on the GPU right now: it has a Python
+     *  path, the user asked to prefer the GPU, and a CUDA device was detected. */
+    static boolean gpuUsableFor(AiTechnique technique) {
+        return technique.python && preferGpu && Boolean.TRUE.equals(available);
+    }
+
     /** Idempotent — safe to call from any screen constructor; only the first call spawns the probe. */
     static void ensureStarted() {
         if (!STARTED.compareAndSet(false, true)) return;

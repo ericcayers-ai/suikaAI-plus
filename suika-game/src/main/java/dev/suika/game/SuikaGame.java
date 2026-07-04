@@ -57,6 +57,7 @@ public class SuikaGame extends Game {
 
         settings.applyDisplay();
         settings.applyPhysics();
+        settings.applyGpuPreference();
         GpuProbe.ensureStarted(); // background CUDA probe; resolves well before AI Playground is opened
         setScreen(new MainMenuScreen(this));
     }

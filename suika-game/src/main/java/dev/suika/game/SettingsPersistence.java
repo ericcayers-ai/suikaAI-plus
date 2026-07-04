@@ -15,6 +15,8 @@ final class SettingsPersistence {
     private static final String KEY_RES_HEIGHT_INDEX = "resHeightIndex";
     private static final String KEY_FULLSCREEN        = "fullscreen";
     private static final String KEY_UI_SCALE_INDEX    = "uiScaleIndex";
+    private static final String KEY_PREFER_GPU        = "preferGpu";
+    private static final String KEY_AUTOSAVE_INDEX    = "autosaveIndex";
 
     private SettingsPersistence() {}
 
@@ -28,6 +30,9 @@ final class SettingsPersistence {
         cfg.fullscreen = p.getBoolean(KEY_FULLSCREEN, cfg.fullscreen);
         cfg.uiScaleIndex = clamp(p.getInteger(KEY_UI_SCALE_INDEX, cfg.uiScaleIndex),
                 GameSettings.UI_SCALE_OPTIONS.length);
+        cfg.preferGpu = p.getBoolean(KEY_PREFER_GPU, cfg.preferGpu);
+        cfg.autosaveIndex = clamp(p.getInteger(KEY_AUTOSAVE_INDEX, cfg.autosaveIndex),
+                GameSettings.AUTOSAVE_MINUTES.length);
     }
 
     /** Writes the current display settings to disk immediately — cheap enough (three
@@ -37,6 +42,8 @@ final class SettingsPersistence {
         p.putInteger(KEY_RES_HEIGHT_INDEX, cfg.resHeightIndex);
         p.putBoolean(KEY_FULLSCREEN, cfg.fullscreen);
         p.putInteger(KEY_UI_SCALE_INDEX, cfg.uiScaleIndex);
+        p.putBoolean(KEY_PREFER_GPU, cfg.preferGpu);
+        p.putInteger(KEY_AUTOSAVE_INDEX, cfg.autosaveIndex);
         p.flush();
     }
 

@@ -89,7 +89,9 @@ public final class PlanningRunner extends AgentRunner {
                 java.util.Collections.addAll(s, h.learnedStateLines());
             }
             if (agent() instanceof EnsembleAgents.NetGuidedMcts n) {
-                s.add("donor        " + n.donor.display + (n.donorTrained ? " (trained save)" : " (untrained — train it first)"));
+                String slot = n.donorSlot >= 1 ? "slot " + n.donorSlot : "auto (first saved)";
+                s.add("donor        " + n.donor.display + " · " + slot
+                        + (n.donorTrained ? " · trained" : " · UNTRAINED (train it first)"));
                 s.add("net weight   " + Math.round(cfg.ensembleNetWeight() * 100) + "% of the final blend");
             }
         }

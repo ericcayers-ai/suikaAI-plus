@@ -64,11 +64,20 @@ public final class ControlCenterScreen extends ScreenAdapter {
     // Save/load slots modal — only meaningful for Evolution (champion weights) and
     // Imitation (BC/DAgger policy weights); the button is hidden for every other
     // family since there's no trainable state to persist.
+    // Autosave (Settings → SAVES → Autosave): every N real-time minutes, silently save
+    // the running technique's progress into slot 1 so a long unattended training run
+    // survives a crash/close. Uses wall-clock delta (not the sped-up sim time) so "5 min"
+    // means 5 real minutes regardless of the playback speed.
+    private float autosaveTimer = 0f;
+    private String autosaveNote = "";
+    private float autosaveNoteTimer = 0f;
+
     private boolean slotsOpen = false;
     private final Rectangle[] slotSaveBtn = { new Rectangle(), new Rectangle(), new Rectangle() };
     private final Rectangle[] slotLoadBtn = { new Rectangle(), new Rectangle(), new Rectangle() };
+    private final Rectangle[] slotRevealBtn = { new Rectangle(), new Rectangle(), new Rectangle() };
     private final Rectangle   slotsCloseBtn = new Rectangle();
-    private static final float SLOTS_MW = 560f, SLOTS_MH = 360f;
+    private static final float SLOTS_MW = 640f, SLOTS_MH = 380f;
     private volatile String slotsMessage = "";
 
     // Hotswap (quick-settings) modal — mirrors the AI Playground drawer so every
@@ -157,8 +166,8 @@ public final class ControlCenterScreen extends ScreenAdapter {
                 if (hotswapOpen || slotsOpen) return false;
                 float[] p = panelBounds();
                 if (mx < p[0] || mx > p[0] + p[2] || my < p[1] || my > p[1] + p[3]) return false;
-                // Negated — see AiPlaygroundScreen's identical fix for why.
-                statsScroll = MathUtils.clamp(statsScroll - amountY * 40f, 0f, maxStatsScroll());
+                // Wheel-down reveals lower stat lines — see AiPlaygroundScreen's fix.
+                statsScroll = MathUtils.clamp(statsScroll + amountY * 40f, 0f, maxStatsScroll());
                 return true;
             }
             @Override public boolean keyDown(int k) {
@@ -218,6 +227,11 @@ public final class ControlCenterScreen extends ScreenAdapter {
             for (int i = 0; i < ModelSlots.SLOT_COUNT; i++) {
                 if (slotSaveBtn[i].contains(x, y)) { doSaveSlot(i + 1); return; }
                 if (slotLoadBtn[i].contains(x, y)) { doLoadSlot(i + 1); return; }
+                if (slotRevealBtn[i].contains(x, y)) {
+                    String folder = ModelSlots.revealSlotFolder(cfg.technique.id, i + 1);
+                    slotsMessage = "Folder: " + folder;
+                    return;
+                }
             }
             if (slotsCloseBtn.contains(x, y)) { slotsOpen = false; return; }
             float m0x = slotsModalX(), m0y = slotsModalY();
@@ -297,6 +311,19 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private void changeSpeed(int d) {
         cfg.speedIndex = MathUtils.clamp(cfg.speedIndex + d, 0, PlaygroundConfig.SPEEDS.length - 1);
         runner.setSpeed(cfg.speed());
+    }
+
+    private void tickAutosave(float delta) {
+        if (autosaveNoteTimer > 0f) autosaveNoteTimer -= delta;
+        int minutes = game.settings.autosaveMinutes();
+        if (minutes <= 0 || !slotsSupported()) { autosaveTimer = 0f; return; }
+        autosaveTimer += delta;
+        if (autosaveTimer >= minutes * 60f) {
+            autosaveTimer = 0f;
+            doSaveSlot(1);                        // reuses the SAVES path — writes slot 1's folder
+            autosaveNote = "Autosaved to slot 1";
+            autosaveNoteTimer = 3f;
+        }
     }
 
     // ---- view-count rule ----
@@ -544,6 +571,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
     @Override
     public void render(float delta) {
         delta = Math.min(delta, 0.05f);
+        tickAutosave(delta);
         int views = viewCount();
         if (views == 1 && runner.acceptsHumanInput()) runner.setHover(hoverGameX);
         else if (imitationDual()) runner.setHover(hoverGameX);
@@ -933,7 +961,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
             // Plain ASCII only — an earlier arrow glyph (▸) silently rendered as a tofu
             // box on the bundled DroidSans font; "·" and "-" are already proven safe
             // elsewhere in this UI.
-            String hint = statsScroll < maxScroll - 1f ? "- scroll for more -" : "- scroll up for less -";
+            String hint = statsScroll < maxScroll - 1f ? "- scroll down for more -" : "- scroll up for less -";
             Ui.text(game.batch, game.fontSmall, hint, px + 18, minY + 2, Theme.GOLD);
         }
         MctsAgent treeForLabel = mctsTreeSource();
@@ -1069,6 +1097,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
         else if (!landscape && viewCount() == 1)
             Ui.textCenter(game.batch, game.fontSmall, "live · " + cfg.technique.liveHint(),
                     Theme.VW / 2f, 84, Theme.ACCENT_BLUE);
+        // Transient autosave confirmation, top-centre so it's visible in any layout.
+        if (autosaveNoteTimer > 0f) {
+            float vw = landscape ? Theme.VW_L : Theme.VW;
+            float vh = landscape ? Theme.VH_L : Theme.VH;
+            Ui.textCenter(game.batch, game.fontSmall, autosaveNote, vw / 2f, vh - 14, Theme.GOLD);
+        }
     }
 
     // ---- hotswap (quick settings) modal ----
@@ -1172,8 +1206,9 @@ public final class ControlCenterScreen extends ScreenAdapter {
         float m0x = slotsModalX(), m0y = slotsModalY();
         for (int i = 0; i < ModelSlots.SLOT_COUNT; i++) {
             float rowY = m0y + SLOTS_MH - 100 - i * 70;
-            slotSaveBtn[i].set(m0x + 330, rowY, 95, 40);
-            slotLoadBtn[i].set(m0x + 435, rowY, 95, 40);
+            slotSaveBtn[i].set(m0x + 300, rowY, 88, 40);
+            slotLoadBtn[i].set(m0x + 394, rowY, 88, 40);
+            slotRevealBtn[i].set(m0x + 488, rowY, 128, 40);
         }
         slotsCloseBtn.set(m0x + SLOTS_MW / 2f - 90, m0y + 20, 180, 44);
     }
@@ -1198,10 +1233,13 @@ public final class ControlCenterScreen extends ScreenAdapter {
             s.setColor(Theme.PANEL);
             Ui.fillRoundRect(s, slotSaveBtn[i].x, slotSaveBtn[i].y, slotSaveBtn[i].width, slotSaveBtn[i].height, 8);
             Ui.fillRoundRect(s, slotLoadBtn[i].x, slotLoadBtn[i].y, slotLoadBtn[i].width, slotLoadBtn[i].height, 8);
+            Ui.fillRoundRect(s, slotRevealBtn[i].x, slotRevealBtn[i].y, slotRevealBtn[i].width, slotRevealBtn[i].height, 8);
             s.setColor(slotSaveBtn[i].contains(mx, my) ? Theme.ACCENT_2    : Theme.PANEL_EDGE);
             Ui.fillRoundRect(s, slotSaveBtn[i].x + 3, slotSaveBtn[i].y + 3, slotSaveBtn[i].width - 6, slotSaveBtn[i].height - 6, 6);
             s.setColor(slotLoadBtn[i].contains(mx, my) ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
             Ui.fillRoundRect(s, slotLoadBtn[i].x + 3, slotLoadBtn[i].y + 3, slotLoadBtn[i].width - 6, slotLoadBtn[i].height - 6, 6);
+            s.setColor(slotRevealBtn[i].contains(mx, my) ? Theme.GOLD : Theme.PANEL_EDGE);
+            Ui.fillRoundRect(s, slotRevealBtn[i].x + 3, slotRevealBtn[i].y + 3, slotRevealBtn[i].width - 6, slotRevealBtn[i].height - 6, 6);
         }
         boolean ch = slotsCloseBtn.contains(mx, my);
         s.setColor(0f, 0f, 0f, 0.35f);
@@ -1226,9 +1264,16 @@ public final class ControlCenterScreen extends ScreenAdapter {
             Ui.textCenter(game.batch, game.fontSmall, "LOAD",
                     slotLoadBtn[i].x + slotLoadBtn[i].width / 2f, slotLoadBtn[i].y + slotLoadBtn[i].height / 2f - 5f,
                     info.present() ? Theme.TEXT : Theme.TEXT_FAINT);
+            Ui.textCenter(game.batch, game.fontSmall, "FOLDER",
+                    slotRevealBtn[i].x + slotRevealBtn[i].width / 2f, slotRevealBtn[i].y + slotRevealBtn[i].height / 2f - 5f, Theme.TEXT);
         }
-        if (!slotsMessage.isEmpty()) Ui.textCenter(game.batch, game.fontSmall, slotsMessage,
-                m0x + SLOTS_MW / 2f, m0y + 70, Theme.GOLD);
+        // Saves land in per-slot folders (info / progress / model / .sav) — FOLDER opens
+        // one in the OS file manager, then echoes its path here.
+        String footer = slotsMessage.isEmpty()
+                ? "text-file saves in ~/.suikai/saves/" + cfg.technique.id + "/slotN/  ·  FOLDER reveals one"
+                : slotsMessage;
+        Ui.textCenter(game.batch, game.fontSmall, footer, m0x + SLOTS_MW / 2f, m0y + 74,
+                slotsMessage.isEmpty() ? Theme.TEXT_FAINT : Theme.GOLD);
         Ui.textCenter(game.batch, game.fontSmall, "CLOSE",
                 slotsCloseBtn.x + slotsCloseBtn.width / 2f, slotsCloseBtn.y + 25, Theme.TEXT);
         game.batch.end();
