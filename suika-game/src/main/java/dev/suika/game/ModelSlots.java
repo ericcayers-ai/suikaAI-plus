@@ -2,9 +2,7 @@ package dev.suika.game;
 
 import dev.suika.ai.AgentPlugin;
 import dev.suika.ai.MlpPolicy;
-import dev.suika.ai.PlaygroundConfig;
 import dev.suika.ai.NeuralAgent;
-import dev.suika.ai.AiTechnique;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -323,6 +321,8 @@ public final class ModelSlots {
 
             PlaygroundConfig cfg = new PlaygroundConfig();
             cfg.selectDefaultsFor(t);
+
+            // FIX: Qualified isWeightBearing method call to target AiSlotPlayer
             if (AiSlotPlayer.isWeightBearing(t)) {
                 MlpPolicy policy = newCompatiblePolicy();
                 Path modelFile = savFile.getParent().resolve("model.txt");

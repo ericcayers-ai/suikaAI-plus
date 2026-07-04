@@ -1,6 +1,7 @@
 package dev.suika.game;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.ScreenAdapter;
 import com.badlogic.gdx.graphics.GL20;
@@ -47,7 +48,7 @@ public final class MainMenuScreen extends ScreenAdapter {
     private String aiPickerMessage = "";
     private static final int AI_ROWS_VISIBLE = 6;
 
-    // FIX: Heightened the panel geometry to accommodate the browse button
+    // Heightened panel geometry to accommodate the browse button
     private static final float AI_MW = 600f, AI_MH = 560f;
     private final Rectangle[] aiRowBtn = new Rectangle[AI_ROWS_VISIBLE];
     private final Rectangle aiCloseBtn = new Rectangle();
@@ -219,7 +220,7 @@ public final class MainMenuScreen extends ScreenAdapter {
         aiScrollUpBtn.set(m0x + AI_MW - 84, m0y + AI_MH - 44, 30, 30);
         aiScrollDownBtn.set(m0x + AI_MW - 48, m0y + AI_MH - 44, 30, 30);
 
-        // FIX: Realigned browse and close buttons to fit the new height constraints
+        // Browse button placed below the rows but above the close button
         aiBrowseBtn.set(m0x + 24, m0y + 74, AI_MW - 48, 44);
         aiCloseBtn.set(m0x + AI_MW / 2f - 90, m0y + 16, 180, 44);
     }
@@ -232,7 +233,7 @@ public final class MainMenuScreen extends ScreenAdapter {
             return;
         }
 
-        // FIX: Trigger standard system open dialog on browse click
+        // Trigger standard system open dialog on browse click
         if (aiBrowseBtn.contains(x, y)) {
             triggerFileBrowse();
             return;
@@ -256,22 +257,25 @@ public final class MainMenuScreen extends ScreenAdapter {
     }
 
     /**
-     * FIX: Triggers a native system file explorer dialog using LWJGL's bundled TinyFileDialogs implementation.
+     * Triggers a native system file explorer dialog using JDK's standard AWT FileDialog
+     * (Fully supported on Windows, macOS, and Linux out-of-the-box with zero LWJGL dependency issues).
      */
     private void triggerFileBrowse() {
-        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
-            org.lwjgl.PointerBuffer filters = stack.mallocPointer(1);
-            filters.put(stack.UTF8("*.sav"));
-            filters.flip();
-            String path = org.lwjgl.util.tinyfd.TinyFileDialogs.tinyfd_openFileDialog(
+        try {
+            java.awt.FileDialog dialog = new java.awt.FileDialog(
+                    (java.awt.Frame) null,
                     "Load Suika AI Save (.sav)",
-                    System.getProperty("user.home") + "/.suikai/saves",
-                    filters,
-                    "Suika AI Saves (*.sav)",
-                    false
+                    java.awt.FileDialog.LOAD
             );
-            if (path != null) {
-                java.nio.file.Path p = java.nio.file.Paths.get(path);
+            dialog.setFilenameFilter((dir, name) -> name.endsWith(".sav"));
+            dialog.setDirectory(System.getProperty("user.home") + java.io.File.separator + ".suikai" + java.io.File.separator + "saves");
+            dialog.setVisible(true);
+
+            String directory = dialog.getDirectory();
+            String file = dialog.getFile();
+
+            if (directory != null && file != null) {
+                java.nio.file.Path p = java.nio.file.Paths.get(directory, file);
                 dev.suika.ai.AgentPlugin driver = ModelSlots.loadFromFile(p);
                 if (driver == null) {
                     aiPickerMessage = "Couldn't load: invalid or corrupt .sav / model files";
@@ -312,7 +316,6 @@ public final class MainMenuScreen extends ScreenAdapter {
         s.setColor(hasMore ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE);
         Ui.fillRoundRect(s, aiScrollDownBtn.x, aiScrollDownBtn.y, aiScrollDownBtn.width, aiScrollDownBtn.height, 6);
 
-        // FIX: Render browse local file button
         s.setColor(aiBrowseBtn.contains(mx, my) ? Theme.ACCENT_BLUE : Theme.PANEL);
         Ui.fillRoundRect(s, aiBrowseBtn.x, aiBrowseBtn.y, aiBrowseBtn.width, aiBrowseBtn.height, 8);
         s.setColor(aiBrowseBtn.contains(mx, my) ? Theme.TEXT : Theme.PANEL_EDGE);
@@ -349,11 +352,9 @@ public final class MainMenuScreen extends ScreenAdapter {
             }
         }
 
-        // FIX: Draw label on the browser button
         Ui.textCenter(game.batch, game.fontSmall, "BROWSE LOCAL FILE (.sav)...",
                 aiBrowseBtn.x + aiBrowseBtn.width / 2f, aiBrowseBtn.y + aiBrowseBtn.height / 2f - 5f, Theme.TEXT);
 
-        // FIX: Shifted the y position to clear the browse button bounds
         if (!aiPickerMessage.isEmpty()) Ui.textCenter(game.batch, game.fontSmall, aiPickerMessage,
                 m0x + AI_MW / 2f, m0y + 128, Theme.GOLD);
         Ui.textCenter(game.batch, game.fontSmall, "CLOSE",
