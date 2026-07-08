@@ -96,24 +96,43 @@ public abstract class AgentRunner extends LiveBoardRunner {
         }
         switch (phase) {
             case WAIT -> {
+                // Pondering: thinking starts the moment the chute is clear — the whole
+                // waiting timespan (move cadence + settle time) is used to strategize —
+                // but the DROP itself still waits for the cadence timer below, so the
+                // pacing the player watches is unchanged.
                 moveTimer -= dt;
-                if (moveTimer <= 0f && chuteClear() && agent != null) startThink();
+                if (chuteClear() && agent != null) startThink();
             }
             case THINK -> {
-                Double x = result.getAndSet(null);
-                if (x != null && !thinking) {
-                    markerX = x.floatValue();
-                    doDrop(x);
-                    phase = Phase.WAIT;
-                    moveTimer = baseDelay();
+                moveTimer -= dt;
+                if (!thinking && moveTimer <= 0f) {
+                    Double x = result.getAndSet(null);
+                    if (x != null) {
+                        markerX = x.floatValue();
+                        doDrop(x);
+                        phase = Phase.WAIT;
+                        moveTimer = baseDelay();
+                    }
                 }
             }
         }
     }
 
+    /** Wall-clock start of the in-flight think, for the control center's stuck-run
+     *  watchdog. 0 when no think is running. */
+    private volatile long thinkStartNs = 0;
+
+    /** Milliseconds the current think has been running (0 when idle) — the safety
+     *  watchdog treats a think that exceeds its window as a stuck configuration. */
+    long thinkingForMs() {
+        long t0 = thinkStartNs;
+        return (thinking && t0 > 0) ? (System.nanoTime() - t0) / 1_000_000 : 0;
+    }
+
     private void startThink() {
         phase = Phase.THINK;
         thinking = true;
+        thinkStartNs = System.nanoTime();
         final var snap = core.snapshot();
         final AgentPlugin a = agent;
         final int myGen = gameGen;
@@ -132,6 +151,13 @@ public abstract class AgentRunner extends LiveBoardRunner {
                 parallelWorkers = 1;
             }
             double x = spec.toDropX(act, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
+            // Auto drop-adjustment / precision pass: the discrete column choice is
+            // refined by simulating a handful of sub-column positions around it for
+            // real and keeping the exact x that scores best — utmost drop precision
+            // beyond the technique's own column grid. (Settings -> Drop columns: Auto.)
+            if (cfg.autoDrop) {
+                x = refineDropX(snap, x, deadlineNs > 0 ? deadlineNs : Long.MAX_VALUE);
+            }
             lastThinkMs = (System.nanoTime() - t0) / 1_000_000;
             // A slower think from an earlier game finishing after a restart must not
             // publish into the new one — see gameGen's javadoc.
@@ -141,6 +167,37 @@ public abstract class AgentRunner extends LiveBoardRunner {
         }, "playground-think");
         t.setDaemon(true);
         t.start();
+    }
+
+    /**
+     * Local continuous refinement of a chosen drop x: simulates the drop for real at a
+     * few sub-column offsets around the discrete pick and returns the exact position
+     * with the best immediate outcome (score gained; a game-ending drop is heavily
+     * penalised). Each probe forks its own snapshot, so the live board is untouched.
+     * Respects the remaining think-time budget — probes stop the moment it's exceeded.
+     */
+    private double refineDropX(GameCore snap, double x, long deadlineNs) {
+        double colW = (PhysicsConfig.DROP_X_MAX - PhysicsConfig.DROP_X_MIN)
+                / Math.max(1, cfg.actionBins - 1);
+        double bestX = x;
+        double bestV = probeDrop(snap, x);
+        for (double off : new double[]{-0.66, -0.33, 0.33, 0.66}) {
+            if (System.nanoTime() > deadlineNs) break;
+            double cx = Math.max(PhysicsConfig.DROP_X_MIN,
+                    Math.min(PhysicsConfig.DROP_X_MAX, x + off * colW));
+            double v = probeDrop(snap, cx);
+            if (v > bestV) { bestV = v; bestX = cx; }
+        }
+        return bestX;
+    }
+
+    private static double probeDrop(GameCore snap, double x) {
+        GameCore fork = snap.snapshot();
+        long before = fork.getScore();
+        var r = fork.dropAndSettle(x);
+        double v = fork.getScore() - before;
+        if (r.terminated()) v -= 1000.0;
+        return v;
     }
 
     /**

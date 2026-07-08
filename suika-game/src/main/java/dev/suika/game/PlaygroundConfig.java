@@ -85,6 +85,16 @@ public final class PlaygroundConfig {
      */
     public long maxThinkMs = 450;
 
+    /**
+     * Drop columns: Auto live adjustment. When on, every technique's discrete column
+     * pick gets a real-physics refinement pass ({@link AgentRunner#refineDropX}) that
+     * simulates a handful of sub-column offsets and keeps whichever exact x scores
+     * best — utmost drop precision beyond the technique's own action-bin grid, for
+     * techniques and ensembles alike. Off by default (adds a few extra fast sim
+     * forks per move).
+     */
+    public boolean autoDrop = false;
+
     // ---- Ensemble customization (see EnsembleAgents) ----
 
     /** Which trained save the MCTS + Policy Net ensemble sources its donor net from.
@@ -94,7 +104,7 @@ public final class PlaygroundConfig {
      *  otherwise the ensemble honestly shows them as untrained. */
     public static final AiTechnique[] ENSEMBLE_DONORS = {
             AiTechnique.NEUROEVO, AiTechnique.CMA_ES, AiTechnique.PBT,
-            AiTechnique.DAGGER, AiTechnique.BC,
+            AiTechnique.DAGGER, AiTechnique.BC, AiTechnique.DQN,
             AiTechnique.PPO, AiTechnique.MUZERO };
     public int ensembleDonorIndex = 0;
     public AiTechnique ensembleDonor() { return ENSEMBLE_DONORS[ensembleDonorIndex]; }
@@ -215,6 +225,7 @@ public final class PlaygroundConfig {
                                       selectionIndex = 1; crossover = true; sigmaAnneal = true; }  // rank exploit + explore
             case CMA_ES          -> populationSize = 16;
             case DAGGER, BC      -> learningRate = 1e-3;
+            case DQN             -> learningRate = 1e-3;
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED -> targetReturn = 2000;
             default -> { }
         }

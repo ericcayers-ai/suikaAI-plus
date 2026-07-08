@@ -98,8 +98,11 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private final Rectangle swapTbOpenBtn = new Rectangle();
     private String tbMessage = "";
     private float  tbMessageTimer = 0f;
+    // Drop columns: Auto live adjustment — see PlaygroundConfig#autoDrop. Applies to
+    // every technique/ensemble (not gated behind evo/tb like the rows above it).
+    private final Rectangle swapAutoDropToggle = new Rectangle();
     private final Rectangle swapCloseBtn      = new Rectangle();
-    private static final float SWAP_MW = 480f, SWAP_MH = 614f;
+    private static final float SWAP_MW = 480f, SWAP_MH = 668f;
 
     // Hotswap param tables (mirror AiPlaygroundScreen)
     private static final int[]    ROLLOUTS = {40, 80, 150, 300, 600, 1200, 2400};
@@ -124,6 +127,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
             case EVOLUTION -> new EvolutionRunner(game, cfg);
             case IMITATION -> new ImitationRunner(game, cfg);
             case PYTHON    -> new PythonRunner(game, cfg);
+            case DEEP_RL   -> new DqnRunner(game, cfg);
         };
         applyOrientation(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
     }
@@ -284,6 +288,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
                 tbMessageTimer = 4f;
                 return;
             }
+            if (swapAutoDropToggle.contains(x, y)) { cfg.autoDrop = !cfg.autoDrop; return; }
             if (swapCloseBtn.contains(x, y)) { hotswapOpen = false; return; }
             float m0x = swapModalX(), m0y = swapModalY();
             if (x < m0x || x > m0x + SWAP_MW || y < m0y || y > m0y + SWAP_MH) hotswapOpen = false;
@@ -376,6 +381,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
         boolean ok;
         if (runner instanceof EvolutionRunner er) ok = er.saveToSlot(slot);
         else if (runner instanceof ImitationRunner ir) ok = ir.saveToSlot(slot);
+        else if (runner instanceof DqnRunner dr) ok = dr.saveToSlot(slot);
         else {
             // Learning ensembles (adaptive committee, bandit) persist their live trust
             // statistics alongside the hyperparameters — real progress, not just knobs.
@@ -397,6 +403,10 @@ public final class ControlCenterScreen extends ScreenAdapter {
             slotsMessage = ir.loadFromSlot(slot) ? "Loaded slot " + slot : "Slot " + slot + " is empty";
             return;
         }
+        if (runner instanceof DqnRunner dr) {
+            slotsMessage = dr.loadFromSlot(slot) ? "Loaded slot " + slot : "Slot " + slot + " is empty";
+            return;
+        }
         // Config-only techniques: apply the saved hyperparameters live (mirrors the
         // hotswap modal) rather than rebuilding the runner — there's no weight array
         // to restore, just the knobs that fully determine this technique's behavior.
@@ -413,6 +423,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private ModelSlots.SlotInfo slotInfo(int slot) {
         if (runner instanceof EvolutionRunner er) return er.slotInfo(slot);
         if (runner instanceof ImitationRunner ir) return ir.slotInfo(slot);
+        if (runner instanceof DqnRunner dr) return dr.slotInfo(slot);
         return ModelSlots.info(cfg.technique.id, slot);
     }
 
@@ -468,6 +479,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
         swapEliteViewCtrl.set(m0x + 230, m0y + SWAP_MH - 420, 220, 38);
         swapTbToggle.set(     m0x + 230, m0y + SWAP_MH - 474, 70, 38);
         swapTbOpenBtn.set(    m0x + 308, m0y + SWAP_MH - 474, 142, 38);
+        swapAutoDropToggle.set(m0x + 230, m0y + SWAP_MH - 528, 70, 38);
         swapCloseBtn.set( m0x + SWAP_MW / 2f - 90, m0y + 22, 180, 44);
     }
 
@@ -484,7 +496,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private boolean paramApplicable() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return true;
         return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES, PBT, DECISION_TRANSFORMER, DAGGER, BC, ENS_RTG_VERIFIED -> true;
+            case NEUROEVO, CMA_ES, PBT, DECISION_TRANSFORMER, DAGGER, BC, DQN, ENS_RTG_VERIFIED -> true;
             default -> false;
         };
     }
@@ -493,7 +505,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
         return switch (cfg.technique) {
             case NEUROEVO, CMA_ES, PBT                   -> "Population";
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED  -> "Return";
-            case DAGGER, BC                              -> "LR";
+            case DAGGER, BC, DQN                         -> "LR";
             default                                      -> "—";
         };
     }
@@ -502,7 +514,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
         return switch (cfg.technique) {
             case NEUROEVO, CMA_ES, PBT                   -> Integer.toString(cfg.populationSize);
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED  -> Integer.toString((int) cfg.targetReturn);
-            case DAGGER, BC                              -> String.format("%.0e", cfg.learningRate);
+            case DAGGER, BC, DQN                         -> String.format("%.0e", cfg.learningRate);
             default                                      -> "—";
         };
     }
@@ -511,7 +523,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
         switch (cfg.technique) {
             case NEUROEVO, CMA_ES, PBT                   -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED  -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
-            case DAGGER, BC                              -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
+            case DAGGER, BC, DQN                         -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
             default -> { }
         }
     }
@@ -1169,6 +1181,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
                       : new Color(0.10f, 0.11f, 0.16f, 0.8f));
         Ui.fillRoundRect(s, swapTbOpenBtn.x, swapTbOpenBtn.y, swapTbOpenBtn.width, swapTbOpenBtn.height, 8);
 
+        s.setColor(Theme.PANEL);
+        Ui.fillRoundRect(s, swapAutoDropToggle.x, swapAutoDropToggle.y,
+                swapAutoDropToggle.width, swapAutoDropToggle.height, 8);
+        Ui.toggle(s, swapAutoDropToggle.x + 4, swapAutoDropToggle.y + 4,
+                swapAutoDropToggle.width - 8, swapAutoDropToggle.height - 8, cfg.autoDrop);
+
         // Flat CLOSE button (no glossy sheen, so the label stays crisp).
         boolean ch = swapCloseBtn.contains(mx, my);
         s.setColor(0f, 0f, 0f, 0.35f);
@@ -1213,6 +1231,8 @@ public final class ControlCenterScreen extends ScreenAdapter {
         Ui.textCenter(game.batch, game.fontSmall, tb ? "OPEN" : "n/a",
                 swapTbOpenBtn.x + swapTbOpenBtn.width / 2f, swapTbOpenBtn.y + swapTbOpenBtn.height / 2f - 5f,
                 tb ? Theme.TEXT : Theme.TEXT_FAINT);
+
+        Ui.text(game.batch, game.font, "Drop columns: Auto", m0x + 24, swapAutoDropToggle.y + 25, Theme.TEXT);
 
         // Imitation's trainer deliberately persists across RESTART (so accumulated
         // learning isn't thrown away) — its knobs don't get a "rebuild" note. The

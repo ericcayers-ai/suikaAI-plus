@@ -162,4 +162,63 @@ public final class MlpPolicy {
         for (int i = 0; i < grad.length; i++) grad[i] /= n;
         return grad;
     }
+
+    /**
+     * Analytical gradient of the mean squared TD error over a batch, treating the
+     * network outputs as Q-values: loss = mean over samples of
+     * {@code (Q(s, a) - target)^2 / 2}. Only the chosen action's output unit receives
+     * an error signal (the standard semi-gradient DQN update). Same flat layout and
+     * cost profile as {@link #backpropCrossEntropyGradient}.
+     *
+     * @param inputs  batch of observation vectors
+     * @param actions batch of taken action indices, one per input
+     * @param targets batch of TD targets {@code r + γ·max_a' Q_target(s', a')}
+     * @return flat gradient array in the same layout as {@link #getWeights()}
+     */
+    public synchronized double[] backpropQGradient(float[][] inputs, int[] actions, double[] targets) {
+        int n = inputs.length;
+        double[] grad = new double[weights.length];
+        if (n == 0) return grad;
+
+        int w1Offset = 0;
+        int b1Offset = inputSize * hiddenSize;
+        int w2Offset = b1Offset + hiddenSize;
+        int b2Offset = w2Offset + hiddenSize * outputSize;
+
+        double[] hidden = new double[hiddenSize];
+        double[] da1    = new double[hiddenSize];
+
+        for (int s = 0; s < n; s++) {
+            float[] x = inputs[s];
+            int a = Math.max(0, Math.min(outputSize - 1, actions[s]));
+
+            // ---- forward ----
+            for (int h = 0; h < hiddenSize; h++) {
+                double sum = weights[b1Offset + h];
+                for (int i = 0; i < inputSize; i++) sum += weights[w1Offset + h * inputSize + i] * x[i];
+                hidden[h] = Math.tanh(sum);
+            }
+            double q = weights[b2Offset + a];
+            for (int h = 0; h < hiddenSize; h++) q += weights[w2Offset + a * hiddenSize + h] * hidden[h];
+
+            // dL/dq for the chosen action only, clipped for stability (Huber-style).
+            double d = q - targets[s];
+            d = Math.max(-1.0, Math.min(1.0, d));
+
+            // ---- backward (only output unit `a` carries error) ----
+            java.util.Arrays.fill(da1, 0.0);
+            for (int h = 0; h < hiddenSize; h++) {
+                grad[w2Offset + a * hiddenSize + h] += d * hidden[h];
+                da1[h] = d * weights[w2Offset + a * hiddenSize + h];
+            }
+            grad[b2Offset + a] += d;
+            for (int h = 0; h < hiddenSize; h++) {
+                double dz1 = da1[h] * (1.0 - hidden[h] * hidden[h]);
+                for (int i = 0; i < inputSize; i++) grad[w1Offset + h * inputSize + i] += dz1 * x[i];
+                grad[b1Offset + h] += dz1;
+            }
+        }
+        for (int i = 0; i < grad.length; i++) grad[i] /= n;
+        return grad;
+    }
 }

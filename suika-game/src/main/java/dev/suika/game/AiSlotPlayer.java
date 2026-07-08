@@ -29,7 +29,9 @@ final class AiSlotPlayer {
     /** True for technique families with a trained {@link MlpPolicy} to save — every
      *  other technique's "save" is its hyperparameters, not weights. */
     static boolean isWeightBearing(AiTechnique t) {
-        return t.family == AiTechnique.Family.EVOLUTION || t.family == AiTechnique.Family.IMITATION;
+        return t.family == AiTechnique.Family.EVOLUTION
+                || t.family == AiTechnique.Family.IMITATION
+                || t.family == AiTechnique.Family.DEEP_RL;
     }
 
     static boolean hasSave(AiTechnique t, int slot) {
@@ -98,6 +100,7 @@ final class AiSlotPlayer {
         m.put("crossover", cfg.crossover ? 1.0 : 0.0);
         m.put("sigmaAnneal", cfg.sigmaAnneal ? 1.0 : 0.0);
         m.put("tensorboardDetailed", cfg.tensorboardDetailed ? 1.0 : 0.0);
+        m.put("autoDrop", cfg.autoDrop ? 1.0 : 0.0);
         return m;
     }
 
@@ -127,6 +130,7 @@ final class AiSlotPlayer {
         if (p.containsKey("crossover"))   cfg.crossover   = p.get("crossover") > 0.5;
         if (p.containsKey("sigmaAnneal")) cfg.sigmaAnneal = p.get("sigmaAnneal") > 0.5;
         if (p.containsKey("tensorboardDetailed")) cfg.tensorboardDetailed = p.get("tensorboardDetailed") > 0.5;
+        if (p.containsKey("autoDrop")) cfg.autoDrop = p.get("autoDrop") > 0.5;
     }
 
     private static int clampIdx(double v, int len) {

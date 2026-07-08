@@ -50,6 +50,9 @@ public enum AiTechnique {
     PPO("ppo", "PPO", "Deep RL", "either", "learning", Family.PYTHON,
             false, true, true, true, 80,
             "On-policy policy-gradient via Stable-Baselines3. Pairs with the vector env."),
+    DQN("dqn", "DQN", "Deep RL", "state", "learning", Family.DEEP_RL,
+            true, false, true, true, 74,
+            "Value-based deep RL: Q-learning with experience replay + a target network, training live on the JVM."),
 
     // ---- Model-based ----
     MUZERO("muzero", "MuZero", "Model-Based", "pixels", "both", Family.PYTHON,
@@ -107,7 +110,7 @@ public enum AiTechnique {
             "A return-conditioned proposal gets sanity-checked against a shallow MCTS search.");
 
     /** Which specialised control-center drives this technique. */
-    public enum Family { PLANNING, EVOLUTION, IMITATION, PYTHON }
+    public enum Family { PLANNING, EVOLUTION, IMITATION, PYTHON, DEEP_RL }
 
     public final String id, display, category, dataMode, kind, blurb;
     public final Family family;
@@ -180,7 +183,7 @@ public enum AiTechnique {
      *  are false — they have no net and stay on the CPU by nature. */
     public boolean netBased() {
         return switch (this) {
-            case PPO, MUZERO, ALPHAZERO, DECISION_TRANSFORMER,
+            case PPO, DQN, MUZERO, ALPHAZERO, DECISION_TRANSFORMER,
                  NEUROEVO, CMA_ES, PBT, DAGGER, BC, ENS_MCTS_NET -> true;
             default -> false;
         };
@@ -207,6 +210,11 @@ public enum AiTechnique {
                 "and checks the immediate score, then keeps the best.",
                 "Fast and surprisingly solid — but it never looks more",
                 "than one move ahead." };
+            case DQN -> new String[]{
+                "Learns a 'how good is each column right now' score",
+                "(a Q-value) by trial and error. It remembers thousands",
+                "of past moves in a replay buffer and studies random",
+                "batches of them — the classic Atari-playing algorithm." };
             case PPO -> new String[]{
                 "A neural network learns by trial and error, like a",
                 "player slowly getting good. It nudges its behaviour",
@@ -332,6 +340,10 @@ public enum AiTechnique {
                 h.add("Sims/generation — games averaged per member: more = steadier ranking.");
                 h.add("Elite views / Ghost — how many members you watch live.");
             }
+            case DQN -> {
+                h.add("Learning rate — TD update step size; too high makes Q-values oscillate.");
+                h.add("Epsilon decays automatically — it explores early, exploits once trained.");
+            }
             case DAGGER -> h.add("Learning rate — how fast it adapts to the states it visits.");
             case BC -> h.add("Learning rate — how fast it fits to your recorded drops.");
             case ENS_MCTS_NET -> {
@@ -354,7 +366,7 @@ public enum AiTechnique {
                 h.add("Explore (UCB c) — higher tries under-used agents more; lower exploits.");
             }
         }
-        if (family == Family.EVOLUTION || family == Family.IMITATION)
+        if (family == Family.EVOLUTION || family == Family.IMITATION || family == Family.DEEP_RL)
             h.add("SAVES — persist/reload trained weights; Autosave (Settings) writes slot 1.");
         return h.toArray(new String[0]);
     }
@@ -375,6 +387,7 @@ public enum AiTechnique {
             case DECISION_TRANSFORMER -> "predicting drops from logged games";
             case MUZERO             -> "planning inside a learned world model";
             case PPO                -> "running a learned policy (Python-trained)";
+            case DQN                -> "learning Q-values from replayed experience";
         };
     }
 

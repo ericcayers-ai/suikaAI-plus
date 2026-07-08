@@ -95,7 +95,8 @@ public final class EvolutionRunner extends AgentRunner {
         int threads = cfg.evalThreads();
         int sims    = Math.max(1, cfg.simsPerGen());
         if (isCma) {
-            cma = new CmaEsTrainer(0.3, sims, seed, threads);
+            // λ comes from the Population knob (was previously ignored for CMA-ES).
+            cma = new CmaEsTrainer(0.3, sims, seed, threads, Math.max(8, cfg.populationSize));
         } else {
             int pop = Math.max(8, cfg.populationSize);
             ga = new GeneticTrainer(pop, Math.max(2, pop / 6), cfg.mutationSigma, sims, seed, threads,
@@ -350,7 +351,7 @@ public final class EvolutionRunner extends AgentRunner {
 
     /** Population size actually being evaluated each generation (λ for CMA-ES). */
     private int evalPopulation() {
-        if (isCma) return cma != null ? cma.lambda() : 0;
+        if (isCma) return cma != null ? cma.lambda() : Math.max(8, cfg.populationSize);
         return Math.max(8, cfg.populationSize);
     }
 
@@ -376,9 +377,11 @@ public final class EvolutionRunner extends AgentRunner {
         java.util.List<String> s = new java.util.ArrayList<>();
         s.add("elapsed      " + elapsedLabel() + "  ·  " + String.format("%.1f", gensPerMin()) + " gens/min");
         s.add("throughput   " + Math.round(evalsPerSec()) + " games/sec (parallel)");
-        s.add("diversity σ  " + Math.round(diversitySigma()) + "  ·  mutation σ "
-                + String.format("%.3f", ga != null ? ga.currentSigma() : cfg.mutationSigma)
-                + (cfg.sigmaAnneal && !isCma ? " (annealing)" : ""));
+        s.add("diversity σ  " + Math.round(diversitySigma()) + "  ·  "
+                + (isCma ? "step σ " + String.format("%.3f", cma != null ? cma.currentSigma() : 0.3)
+                         + (cma != null && cma.restartCount() > 0 ? " (" + cma.restartCount() + " re-div)" : "")
+                         : "mutation σ " + String.format("%.3f", ga != null ? ga.currentSigma() : cfg.mutationSigma)
+                         + (cfg.sigmaAnneal ? " (annealing)" : "")));
         if (!isCma) {
             s.add("selection    " + cfg.selection().label
                     + "  ·  crossover " + (cfg.crossover ? "uniform" : "off"));
@@ -414,7 +417,7 @@ public final class EvolutionRunner extends AgentRunner {
             "generation   " + generation,
             "best fitness " + Math.round(bestSoFar) + "  (this gen " + Math.round(bestFit) + ")",
             (isCma ? "mode         separable CMA-ES" : "mean fitness " + Math.round(meanFit)),
-            "population   " + evalPopulation() + (isCma ? " (λ, auto)" : ""),
+            "population   " + evalPopulation() + (isCma ? " (λ)" : ""),
             "sims/genome  " + Math.max(1, cfg.simsPerGen()),
             "eval threads " + cfg.parallelismLabel(),
             "champion sc. " + core.getScore(),

@@ -246,7 +246,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private boolean paramApplicable() {
         if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return true;
         return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES, PBT, DECISION_TRANSFORMER, DAGGER, BC, ENS_RTG_VERIFIED -> true;
+            case NEUROEVO, CMA_ES, PBT, DECISION_TRANSFORMER, DAGGER, BC, DQN, ENS_RTG_VERIFIED -> true;
             default -> false;
         };
     }
@@ -255,7 +255,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         return switch (cfg.technique) {
             case NEUROEVO, CMA_ES, PBT                    -> "Population";
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED   -> "Target return";
-            case DAGGER, BC                               -> "Learning rate";
+            case DAGGER, BC, DQN                          -> "Learning rate";
             default                                       -> "—";
         };
     }
@@ -264,7 +264,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         return switch (cfg.technique) {
             case NEUROEVO, CMA_ES, PBT                    -> Integer.toString(cfg.populationSize);
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED   -> Integer.toString((int) cfg.targetReturn);
-            case DAGGER, BC                               -> String.format("%.0e", cfg.learningRate);
+            case DAGGER, BC, DQN                          -> String.format("%.0e", cfg.learningRate);
             default                                       -> "—";
         };
     }
@@ -273,7 +273,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         switch (cfg.technique) {
             case NEUROEVO, CMA_ES, PBT                    -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
             case DECISION_TRANSFORMER, ENS_RTG_VERIFIED   -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
-            case DAGGER, BC                               -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
+            case DAGGER, BC, DQN                          -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
             default -> { }
         }
     }
@@ -387,6 +387,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             case EVOLUTION -> Theme.ACCENT_2;
             case IMITATION -> Theme.GOLD;
             case PYTHON    -> Theme.ACCENT;
+            case DEEP_RL   -> Theme.ACCENT;
         };
     }
 
@@ -615,6 +616,7 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             case EVOLUTION -> 0.60f;
             case IMITATION -> 0.50f;
             case PYTHON    -> 0.30f;
+            case DEEP_RL   -> 0.70f;
         };
     }
 

@@ -31,8 +31,18 @@ public final class PhysicsConfig {
      * being flipped from the render thread.
      */
     public static volatile double restitution = 0.0;   // no bounce; merge spawns land cleanly
-    public static final double FRICTION_STATIC  = 0.7;
-    public static final double FRICTION_DYNAMIC = 0.5;
+    /**
+     * Slightly below the original 0.7/0.5 calibration: high friction made circles wedge
+     * rigidly against their neighbours the moment they touched, so a stack read as glued
+     * together instead of fruit settling into the gaps around it. Lowered just enough
+     * that a resting pile still holds its shape (no visible creep) while a fruit landing
+     * against a slope can subtly slide/rotate into the pocket beside it, and the weight of
+     * fruit stacked above presses the pile down rather than balancing rigidly on point
+     * contacts. Tuned by feel in small steps against a settled 6+ tier stack — larger
+     * drops than this reintroduce visible sliding after the pile should be at rest.
+     */
+    public static final double FRICTION_STATIC  = 0.62;
+    public static final double FRICTION_DYNAMIC = 0.42;
 
     /**
      * Instant-fail toggle. When true the game ends the moment a fruit comes to overflow
