@@ -166,7 +166,15 @@ public final class CmaEsTrainer implements TrainerPlugin, AutoCloseable {
             final int idx = k;
             for (int e = 0; e < episodesPerEval; e++) {
                 final int ep = e;
-                final long epSeed = (long) gen * lambda * episodesPerEval + (long) idx * episodesPerEval + ep;
+                // Common Random Numbers: every offspring in a generation is scored on the
+                // SAME boards (the seed depends on generation + episode, NOT the offspring
+                // index), so the fitness ranking reflects policy quality rather than board
+                // luck. This is the crux of the flatline fix — CMA-ES estimates its natural
+                // gradient from the *ordering* of offspring, and per-offspring random boards
+                // drowned that signal in evaluation noise, so σ contracted with no directed
+                // progress and the curve went flat. Boards still rotate each generation (gen
+                // is in the seed), so the policy can't overfit one lucky board either.
+                final long epSeed = (long) gen * episodesPerEval + ep;
                 fts.add(pool.submit(() -> scores[idx][ep] = evaluator.runSingleEpisode(buildAgent(s), epSeed)));
             }
         }

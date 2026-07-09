@@ -291,6 +291,9 @@ public class GameCore {
         f.setDensity(PhysicsConfig.BASE_DENSITY * tier.radius * tier.radius);
         b.addFixture(f);
         b.setMass(MassType.NORMAL);
+        // Subtle weigh-down / slide-into-gaps feel — see PhysicsConfig.LINEAR_DAMPING.
+        b.setLinearDamping(PhysicsConfig.LINEAR_DAMPING);
+        b.setAngularDamping(PhysicsConfig.ANGULAR_DAMPING);
         b.translate(x, y);
         return b;
     }

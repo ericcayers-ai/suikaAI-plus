@@ -129,10 +129,62 @@ public final class GameSettings {
         GpuProbe.setJvmCpuOnly(jvmCpuOnly);
     }
 
+    /**
+     * First-class compute mode replacing the two separate GPU toggles in the UI.
+     * {@code true} = GPU mode: every AI implementation prefers the Python/CUDA path
+     * when a CUDA device is detected (app-wide GPU priority). {@code false} = CPU
+     * mode: the original JVM implementations (or JVM+Python where a technique is
+     * Python-only). The legacy {@link #preferGpu}/{@link #jvmCpuOnly} flags are kept
+     * and derived from this so every existing call site (GpuProbe, PlaygroundConfig
+     * labels, ControlCenterScreen, PythonRunner…) keeps working unchanged. Persisted.
+     */
+    public boolean gpuMode = false;
+
+    /** Maps {@link #gpuMode} onto the legacy {@link #preferGpu}/{@link #jvmCpuOnly}
+     *  flags and pushes the result into {@link GpuProbe}. Call after changing
+     *  {@code gpuMode}. Note GPU mode still falls back to CPU at runtime when no
+     *  CUDA device is detected — {@link GpuProbe} gates on {@code available()}. */
+    public void applyComputeMode() {
+        preferGpu  = gpuMode;
+        jvmCpuOnly = !gpuMode;
+        applyGpuPreference();
+    }
+
     /** True when GPU inference should actually be used: deps ready, user hasn't forced
      *  CPU-only, and (for the labels) a CUDA device is present. */
     public boolean gpuInferenceActive() {
         return !jvmCpuOnly && preferGpu && Boolean.TRUE.equals(GpuProbe.available());
+    }
+
+    // ---- Custom numeric entry (persisted toggle; overrides are session-only like
+    // the array indices they shadow) ----
+    /** When on, clicking a numeric settings row in {@link SettingsScreen} opens a
+     *  small type-a-number overlay instead of only cycling preset options. Persisted. */
+    public boolean customValueEntry = false;
+
+    /** Stuck-run watchdog: back out of a hung AI run after 10s. Exposed here for
+     *  other screens to read; not wired by the settings screen itself. Persisted. */
+    public boolean watchdogEnabled = true;
+
+    // Typed overrides shadow the preset arrays. Sentinel -1 = "no override, use the
+    // array index"; any value >= 0 is a live custom value (so 0 = unlimited FPS / OFF
+    // autosave are both reachable). Session-only, like the indices they shadow.
+    /** Typed FPS-cap override in Hz (0 = unlimited), or -1 to use {@link #FPS_OPTIONS}[fpsIndex]. */
+    public int customFps = -1;
+    /** Typed drop-column override, or -1 to use {@link #BIN_OPTIONS}[binIndex]. */
+    public int customBins = -1;
+    /** Typed autosave-minutes override (0 = OFF), or -1 to use {@link #AUTOSAVE_MINUTES}[autosaveIndex]. */
+    public int customAutosaveMinutes = -1;
+
+    /** Sets {@link #aiMoveDelay} clamped to the safe 0.05–5 s range (used by the
+     *  custom numeric entry; the field itself stays public for existing readers). */
+    public void setAiMoveDelayClamped(double seconds) {
+        aiMoveDelay = (float) Math.max(0.05, Math.min(5.0, seconds));
+    }
+
+    /** Clears every custom numeric override so the preset cyclers drive the values again. */
+    public void clearCustomOverrides() {
+        customFps = -1; customBins = -1; customAutosaveMinutes = -1;
     }
 
     // ---- Autosave ----
@@ -141,22 +193,27 @@ public final class GameSettings {
      *  unattended training run survives a crash/close without a manual SAVES click. */
     public static final int[] AUTOSAVE_MINUTES = {0, 1, 5, 10, 30};
     public int autosaveIndex = 0;   // default OFF
-    public int autosaveMinutes() { return AUTOSAVE_MINUTES[autosaveIndex]; }
+    public int autosaveMinutes() {
+        return customAutosaveMinutes >= 0 ? customAutosaveMinutes : AUTOSAVE_MINUTES[autosaveIndex];
+    }
     public String autosaveLabel() {
         int m = autosaveMinutes();
-        return m == 0 ? "Off" : "Every " + m + " min";
+        String custom = customAutosaveMinutes >= 0 ? " *" : "";
+        return (m == 0 ? "Off" : "Every " + m + " min") + custom;
     }
 
     // -------------------------------------------------------------------------
 
-    public int targetFps() { return FPS_OPTIONS[fpsIndex]; }
+    public int targetFps() { return customFps >= 0 ? customFps : FPS_OPTIONS[fpsIndex]; }
 
     public String fpsLabel() {
         int f = targetFps();
-        return f == 0 ? "Unlimited" : (f + " FPS");
+        String custom = customFps >= 0 ? " *" : "";
+        return (f == 0 ? "Unlimited" : (f + " FPS")) + custom;
     }
 
-    public int actionBins() { return BIN_OPTIONS[binIndex]; }
+    public int actionBins() { return customBins >= 0 ? customBins : BIN_OPTIONS[binIndex]; }
+    public String binsLabel() { return actionBins() + (customBins >= 0 ? " *" : ""); }
 
     /** Applies frame-rate and vsync settings to the live LWJGL3 window. */
     public void applyDisplay() {

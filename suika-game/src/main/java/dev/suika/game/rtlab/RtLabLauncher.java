@@ -201,6 +201,15 @@ public final class RtLabLauncher {
                 float[] lastCursor = {(float) width / 2f, (float) height / 2f};
                 float ORBIT_SENSITIVITY = 0.006f;
 
+                // WASD aiming — keyboard aliases for the mouse aim: A/D glide the
+                // drop pointer left/right, W/S up/down (the vertical axis only
+                // matters in 3D physics mode, where pointer-y aims depth; in 2D it's
+                // a harmless no-op). Both inputs write the same normalized pointer,
+                // so whichever moved last wins and mouse aiming stays unchanged.
+                boolean[] wasdHeld = new boolean[4]; // W, A, S, D
+                float[] pointerNorm = {0.5f, 0.5f};
+                final float WASD_POINTER_SPEED = 0.6f; // window spans per second
+
                 // §5 pause menu state + the live graphics settings it exposes (bloom,
                 // denoise, depth of field, temporal accumulation) — see
                 // RtGraphicsSettings for why the set is scoped to knobs that don't
@@ -213,6 +222,17 @@ public final class RtLabLauncher {
                 // shadow/DoF path above still benefits from denoising, and there's no
                 // good reason a player would want to see raw RT noise in normal play.
                 glfwSetKeyCallback(window.handle, (win, key, scancode, action, mods) -> {
+                    // Track held state (press/release; GLFW_REPEAT is ignored so a
+                    // repeat burst can't get a key stuck) for the WASD aim keys.
+                    if (action == GLFW_PRESS || action == GLFW_RELEASE) {
+                        boolean down = action == GLFW_PRESS;
+                        switch (key) {
+                            case GLFW_KEY_W -> wasdHeld[0] = down;
+                            case GLFW_KEY_A -> wasdHeld[1] = down;
+                            case GLFW_KEY_S -> wasdHeld[2] = down;
+                            case GLFW_KEY_D -> wasdHeld[3] = down;
+                        }
+                    }
                     if (action != GLFW_PRESS) return;
                     if (key == GLFW_KEY_R) {
                         session.reset();
@@ -226,7 +246,9 @@ public final class RtLabLauncher {
                         cam.orbitYaw   += (fx - lastCursor[0]) * ORBIT_SENSITIVITY;
                         cam.orbitPitch -= (fy - lastCursor[1]) * ORBIT_SENSITIVITY;
                     } else if (aiDriver == null && !paused[0]) {
-                        session.setPointer(fx / width, fy / height);
+                        pointerNorm[0] = fx / width;
+                        pointerNorm[1] = fy / height;
+                        session.setPointer(pointerNorm[0], pointerNorm[1]);
                     }
                     lastCursor[0] = fx; lastCursor[1] = fy;
                 });
@@ -300,6 +322,22 @@ public final class RtLabLauncher {
                     float dt = Math.min((nowNs - lastNs) / 1e9f, 0.05f);
                     lastNs = nowNs;
                     float time = (float) ((nowNs - startNs) / 1e9);
+
+                    // WASD aiming (human play only): held keys glide the shared
+                    // pointer at a fixed normalized speed, then feed setPointer just
+                    // like a cursor move would. Suppressed while orbiting, mirroring
+                    // how cursor motion is repurposed during a right-drag orbit.
+                    if (aiDriver == null && !paused[0] && !orbiting[0]
+                            && (wasdHeld[0] || wasdHeld[1] || wasdHeld[2] || wasdHeld[3])) {
+                        float aimStep = WASD_POINTER_SPEED * dt;
+                        if (wasdHeld[1]) pointerNorm[0] -= aimStep; // A = left
+                        if (wasdHeld[3]) pointerNorm[0] += aimStep; // D = right
+                        if (wasdHeld[0]) pointerNorm[1] -= aimStep; // W = up (away, 3D)
+                        if (wasdHeld[2]) pointerNorm[1] += aimStep; // S = down (toward, 3D)
+                        pointerNorm[0] = Math.clamp(pointerNorm[0], 0f, 1f);
+                        pointerNorm[1] = Math.clamp(pointerNorm[1], 0f, 1f);
+                        session.setPointer(pointerNorm[0], pointerNorm[1]);
+                    }
 
                     if (!paused[0]) {
                         session.step(dt);

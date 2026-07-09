@@ -177,6 +177,23 @@ public enum AiTechnique {
      */
     public boolean supportsTensorboard() { return this == PPO || this == DECISION_TRANSFORMER; }
 
+    /**
+     * True for every technique whose training progress can be VIEWED in TensorBoard. That's
+     * the two Python scripts above <em>plus</em> all the JVM-native learners, whose LiveChart
+     * curves are now exported to a TensorBoard log on each save (see
+     * {@link TensorboardLauncher#exportScalarsAsync}). The distinction from
+     * {@link #supportsTensorboard()} is real: only the Python scripts honour the
+     * {@code --tb-detailed} training flag, so the "detailed logging" toggle stays gated on
+     * that method while the "open TensorBoard" button is gated on this one.
+     */
+    public boolean tensorboardViewable() {
+        return supportsTensorboard()
+                || family == Family.EVOLUTION
+                || family == Family.IMITATION
+                || family == Family.DEEP_RL
+                || isEnsemble();
+    }
+
     /** True for techniques that run a neural network (so GPU inference is meaningful):
      *  the Python-backed ones, the evolved/imitation nets, and the net-blend ensemble. The
      *  pure search/rule techniques (MCTS/Greedy/Heuristic and the search-only ensembles)

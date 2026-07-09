@@ -63,6 +63,22 @@ public final class ModelSlots {
         public static final SaveExtras NONE = new SaveExtras(Map.of());
     }
 
+    /**
+     * Single-thread daemon executor for the Python-backed save side-effects (ONNX export,
+     * TensorBoard scalar export). These shell out to the venv interpreter and can take
+     * seconds; running them on the caller — which for a SAVE click or Autosave tick is the
+     * libGDX render thread — froze the whole window mid-save. The fast, pure-Java parts of a
+     * save (info.txt / progress.txt / model.txt / .sav manifest) still complete synchronously
+     * before this ever runs, so the on-disk save is valid the instant {@code save()} returns;
+     * only the derived .onnx / TB logs land a moment later.
+     */
+    private static final java.util.concurrent.ExecutorService SIDE_EFFECTS =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "modelslots-export");
+                t.setDaemon(true);
+                return t;
+            });
+
     private static Path baseDir(String techniqueId) {
         return Path.of(System.getProperty("user.home"), ".suikai", "saves", techniqueId);
     }
@@ -100,8 +116,11 @@ public final class ModelSlots {
                         "params = " + w.length),
                 "model.txt", model.toString(), Map.of());
 
-        // Export weights to standard model.onnx automatically using python
-        exportToOnnx(techniqueId, slot, w);
+        // Derived Python side-effects (never on the caller's thread — see SIDE_EFFECTS):
+        //  · standards-compliant model.onnx alongside the raw model.txt weights
+        //  · the run's progress curves pushed to TensorBoard so they're viewable there
+        exportToOnnxAsync(techniqueId, slot, w);
+        TensorboardLauncher.exportScalarsAsync(techniqueId, extras.graphs());
     }
 
     public static void saveConfig(String techniqueId, int slot, Map<String, Double> params, double score) {
@@ -115,6 +134,8 @@ public final class ModelSlots {
         writeSlot(techniqueId, slot, KIND_CONFIG, score, extras,
                 infoLines(techniqueId, slot, KIND_CONFIG, score, "params = " + params.size()),
                 "model.txt", model.toString(), params);
+        // Learning ensembles carry real progress curves too — push them to TensorBoard.
+        TensorboardLauncher.exportScalarsAsync(techniqueId, extras.graphs());
     }
 
     private static List<String> infoLines(String techniqueId, int slot, String kind, double score, String... extra) {
@@ -180,6 +201,11 @@ public final class ModelSlots {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < v.length; i++) { if (i > 0) sb.append(','); sb.append(v[i]); }
         return sb.toString();
+    }
+
+    private static void exportToOnnxAsync(String techniqueId, int slot, double[] weights) {
+        if (!PythonSetup.isReady()) return;
+        SIDE_EFFECTS.submit(() -> exportToOnnx(techniqueId, slot, weights));
     }
 
     private static void exportToOnnx(String techniqueId, int slot, double[] weights) {

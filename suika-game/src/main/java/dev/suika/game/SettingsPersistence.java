@@ -20,6 +20,9 @@ final class SettingsPersistence {
     private static final String KEY_JVM_CPU_ONLY      = "jvmCpuOnly";
     private static final String KEY_CALIBRATED        = "presetsCalibrated";
     private static final String KEY_CALIB_SIMS        = "presetsSimsPerSec";
+    private static final String KEY_GPU_MODE          = "gpuMode";
+    private static final String KEY_CUSTOM_ENTRY      = "customValueEntry";
+    private static final String KEY_WATCHDOG          = "watchdogEnabled";
 
     private SettingsPersistence() {}
 
@@ -37,6 +40,12 @@ final class SettingsPersistence {
         cfg.autosaveIndex = clamp(p.getInteger(KEY_AUTOSAVE_INDEX, cfg.autosaveIndex),
                 GameSettings.AUTOSAVE_MINUTES.length);
         cfg.jvmCpuOnly = p.getBoolean(KEY_JVM_CPU_ONLY, cfg.jvmCpuOnly);
+        // Compute mode: migrate from the old two-flag world on first run (GPU mode ==
+        // preferGpu && !jvmCpuOnly), then let the persisted value win thereafter.
+        cfg.gpuMode = p.getBoolean(KEY_GPU_MODE, cfg.preferGpu && !cfg.jvmCpuOnly);
+        cfg.applyComputeMode();   // re-derive preferGpu/jvmCpuOnly so all three agree
+        cfg.customValueEntry = p.getBoolean(KEY_CUSTOM_ENTRY, cfg.customValueEntry);
+        cfg.watchdogEnabled  = p.getBoolean(KEY_WATCHDOG, cfg.watchdogEnabled);
         PresetCalibration.restore(p.getBoolean(KEY_CALIBRATED, false),
                 (double) p.getFloat(KEY_CALIB_SIMS, 0f));
     }
@@ -59,6 +68,9 @@ final class SettingsPersistence {
         p.putBoolean(KEY_PREFER_GPU, cfg.preferGpu);
         p.putInteger(KEY_AUTOSAVE_INDEX, cfg.autosaveIndex);
         p.putBoolean(KEY_JVM_CPU_ONLY, cfg.jvmCpuOnly);
+        p.putBoolean(KEY_GPU_MODE, cfg.gpuMode);
+        p.putBoolean(KEY_CUSTOM_ENTRY, cfg.customValueEntry);
+        p.putBoolean(KEY_WATCHDOG, cfg.watchdogEnabled);
         p.flush();
     }
 

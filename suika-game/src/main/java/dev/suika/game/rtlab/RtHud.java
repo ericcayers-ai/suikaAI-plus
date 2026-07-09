@@ -211,8 +211,8 @@ final class RtHud implements AutoCloseable {
         String hints = aiName != null
                 ? (use3d ? "RIGHT-DRAG ORBIT   ·   SCROLL ZOOM   ·   R RESTART   ·   ESC PAUSE"
                          : "SCROLL ZOOM   ·   R RESTART   ·   ESC PAUSE")
-                : (use3d ? "CLICK DROP   ·   RIGHT-DRAG ORBIT   ·   SCROLL ZOOM   ·   R RESTART   ·   ESC PAUSE"
-                         : "CLICK DROP   ·   SCROLL ZOOM   ·   R RESTART   ·   ESC PAUSE");
+                : (use3d ? "WASD / MOUSE AIM   ·   CLICK DROP   ·   RIGHT-DRAG ORBIT   ·   SCROLL ZOOM   ·   R RESTART   ·   ESC PAUSE"
+                         : "A/D + MOUSE AIM   ·   CLICK DROP   ·   SCROLL ZOOM   ·   R RESTART   ·   ESC PAUSE");
         if (trayExpanded) {
             float hintTracking = 1.1f;
             int hw = trackedWidth(g.getFontMetrics(), hints, hintTracking);

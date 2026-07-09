@@ -72,6 +72,14 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private String autosaveNote = "";
     private float autosaveNoteTimer = 0f;
 
+    // Stuck-run watchdog (Settings -> INPUT -> "Stuck-run watchdog"): if a single think
+    // hangs past STUCK_THINK_MS, or the machine can't keep up (many-second frames piling
+    // up), safely back out to the technique/ensemble menu instead of freezing there. The
+    // outgoing screen's hide() disposes the runner, so its threads stop cleanly.
+    private static final long STUCK_THINK_MS = 10_000;
+    private float watchdogStall = 0f;   // accumulated seconds of severe frame stalls
+    private boolean bailingOut = false;
+
     private boolean slotsOpen = false;
     private final Rectangle[] slotSaveBtn = { new Rectangle(), new Rectangle(), new Rectangle() };
     private final Rectangle[] slotLoadBtn = { new Rectangle(), new Rectangle(), new Rectangle() };
@@ -282,8 +290,9 @@ public final class ControlCenterScreen extends ScreenAdapter {
                 return;
             }
             boolean tb = cfg.technique.supportsTensorboard();
+            boolean tbView = cfg.technique.tensorboardViewable();
             if (swapTbToggle.contains(x, y) && tb) { cfg.tensorboardDetailed = !cfg.tensorboardDetailed; return; }
-            if (swapTbOpenBtn.contains(x, y) && tb) {
+            if (swapTbOpenBtn.contains(x, y) && tbView) {
                 tbMessage = TensorboardLauncher.launch(cfg.technique.id);
                 tbMessageTimer = 4f;
                 return;
@@ -330,6 +339,34 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private void changeSpeed(int d) {
         cfg.speedIndex = MathUtils.clamp(cfg.speedIndex + d, 0, PlaygroundConfig.SPEEDS.length - 1);
         runner.setSpeed(cfg.speed());
+    }
+
+    /**
+     * Returns true (and switches back to the technique/ensemble menu) when the run is
+     * hung — a single think stuck past {@link #STUCK_THINK_MS}, or the machine buried
+     * under multi-second frames for ~10 s total. No-op when the watchdog is disabled.
+     */
+    private boolean tickWatchdog(float rawDt) {
+        if (bailingOut) return true;
+        if (!game.settings.watchdogEnabled) { watchdogStall = 0f; return false; }
+
+        boolean stuckThink = runner instanceof AgentRunner ar && ar.thinkingForMs() > STUCK_THINK_MS;
+        // "Too much for the system": frames taking > 1.5 s mean the machine can't keep up;
+        // accumulate that stall time (and bleed it off when frames are healthy) so a brief
+        // hitch never trips it but a sustained overload does.
+        if (rawDt > 1.5f) watchdogStall += rawDt;
+        else watchdogStall = Math.max(0f, watchdogStall - rawDt);
+        boolean overwhelmed = watchdogStall > 10f;
+
+        if (stuckThink || overwhelmed) {
+            bailingOut = true;
+            AiPlaygroundScreen.pendingBackoutNote = stuckThink
+                    ? "Run stalled 10s+ — backed out safely (lower the load or turn off Auto-drop)"
+                    : "System overloaded — backed out safely to keep things responsive";
+            game.setScreen(new AiPlaygroundScreen(game, cfg));
+            return true;
+        }
+        return false;
     }
 
     private void tickAutosave(float delta) {
@@ -598,6 +635,9 @@ public final class ControlCenterScreen extends ScreenAdapter {
 
     @Override
     public void render(float delta) {
+        // Watchdog reads the RAW frame time (before the sim clamp below) so a machine that
+        // can't keep up — multi-second frames — is actually detectable.
+        if (tickWatchdog(Gdx.graphics.getDeltaTime())) return;
         delta = Math.min(delta, 0.05f);
         BoardRenderer.tickFlash(delta);
         tickAutosave(delta);
@@ -1173,11 +1213,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
         drawHotswapCycler(s, swapEliteViewCtrl, evo);
 
         boolean tb = cfg.technique.supportsTensorboard();
+        boolean tbView = cfg.technique.tensorboardViewable();
         s.setColor(tb ? Theme.PANEL : new Color(0.10f, 0.11f, 0.16f, 0.8f));
         Ui.fillRoundRect(s, swapTbToggle.x, swapTbToggle.y, swapTbToggle.width, swapTbToggle.height, 8);
         if (tb) Ui.toggle(s, swapTbToggle.x + 4, swapTbToggle.y + 4,
                 swapTbToggle.width - 8, swapTbToggle.height - 8, cfg.tensorboardDetailed);
-        s.setColor(tb ? (swapTbOpenBtn.contains(mx, my) ? Theme.GOLD : Theme.PANEL_EDGE)
+        s.setColor(tbView ? (swapTbOpenBtn.contains(mx, my) ? Theme.GOLD : Theme.PANEL_EDGE)
                       : new Color(0.10f, 0.11f, 0.16f, 0.8f));
         Ui.fillRoundRect(s, swapTbOpenBtn.x, swapTbOpenBtn.y, swapTbOpenBtn.width, swapTbOpenBtn.height, 8);
 
@@ -1227,10 +1268,10 @@ public final class ControlCenterScreen extends ScreenAdapter {
         cyclerGlyphs(swapEliteViewCtrl, evo ? cfg.eliteViewCount() + "x" : "n/a", evo);
 
         Ui.text(game.batch, game.font, "TensorBoard", m0x + 24, swapTbToggle.y + 25,
-                tb ? Theme.TEXT : Theme.TEXT_FAINT);
-        Ui.textCenter(game.batch, game.fontSmall, tb ? "OPEN" : "n/a",
+                tbView ? Theme.TEXT : Theme.TEXT_FAINT);
+        Ui.textCenter(game.batch, game.fontSmall, tbView ? "OPEN" : "n/a",
                 swapTbOpenBtn.x + swapTbOpenBtn.width / 2f, swapTbOpenBtn.y + swapTbOpenBtn.height / 2f - 5f,
-                tb ? Theme.TEXT : Theme.TEXT_FAINT);
+                tbView ? Theme.TEXT : Theme.TEXT_FAINT);
 
         Ui.text(game.batch, game.font, "Drop columns: Auto", m0x + 24, swapAutoDropToggle.y + 25, Theme.TEXT);
 

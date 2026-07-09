@@ -136,9 +136,19 @@ public abstract class AgentRunner extends LiveBoardRunner {
         final var snap = core.snapshot();
         final AgentPlugin a = agent;
         final int myGen = gameGen;
-        // Set a wall-clock deadline so MCTS never stalls at fast speeds.
-        long deadlineNs = (a instanceof MctsAgent && cfg.maxThinkMs > 0)
-                ? System.nanoTime() + cfg.maxThinkMs * 1_000_000L : 0L;
+        // Pondering budget: a planner never gets LESS than maxThinkMs, but when the drop
+        // cadence leaves a longer wait ahead (slow playback speeds), it may think for the
+        // whole waiting window and genuinely strategize deeper — "think in the timespans
+        // of waiting". moveTimer holds the time remaining until the next drop is allowed.
+        // maxThinkMs == 0 keeps the original "unlimited" meaning.
+        final long deadlineNs;
+        if (a instanceof MctsAgent && cfg.maxThinkMs > 0) {
+            long windowNs = (long) (Math.max(0f, moveTimer) * 1_000_000_000L);
+            long budgetNs = Math.max(cfg.maxThinkMs * 1_000_000L, windowNs);
+            deadlineNs = System.nanoTime() + budgetNs;
+        } else {
+            deadlineNs = 0L;
+        }
         if (a instanceof MctsAgent m && deadlineNs > 0) m.setSearchDeadline(deadlineNs);
         Thread t = new Thread(() -> {
             long t0 = System.nanoTime();
@@ -181,14 +191,31 @@ public abstract class AgentRunner extends LiveBoardRunner {
                 / Math.max(1, cfg.actionBins - 1);
         double bestX = x;
         double bestV = probeDrop(snap, x);
-        for (double off : new double[]{-0.66, -0.33, 0.33, 0.66}) {
-            if (System.nanoTime() > deadlineNs) break;
-            double cx = Math.max(PhysicsConfig.DROP_X_MIN,
-                    Math.min(PhysicsConfig.DROP_X_MAX, x + off * colW));
+        // Two-pass local search for utmost sub-column precision: a coarse sweep across
+        // ±1 column to find the best basin, then a fine sweep around it at ~1/12-column
+        // resolution. Every probe is a real forked drop, so the placement is genuinely
+        // the best-scoring exact x — not merely the grid center. Deadline-bounded, so at
+        // turbo speeds it still at least keeps the discrete pick.
+        final int COARSE = 6;
+        for (int i = 0; i <= COARSE; i++) {
+            if (System.nanoTime() > deadlineNs) return bestX;
+            double cx = clampDropX(x - colW + (2.0 * colW) * i / COARSE);
+            double v = probeDrop(snap, cx);
+            if (v > bestV) { bestV = v; bestX = cx; }
+        }
+        double center = bestX, fineHalf = colW * 0.5;
+        final int FINE = 6;
+        for (int i = 0; i <= FINE; i++) {
+            if (System.nanoTime() > deadlineNs) return bestX;
+            double cx = clampDropX(center - fineHalf + (2.0 * fineHalf) * i / FINE);
             double v = probeDrop(snap, cx);
             if (v > bestV) { bestV = v; bestX = cx; }
         }
         return bestX;
+    }
+
+    private static double clampDropX(double x) {
+        return Math.max(PhysicsConfig.DROP_X_MIN, Math.min(PhysicsConfig.DROP_X_MAX, x));
     }
 
     private static double probeDrop(GameCore snap, double x) {

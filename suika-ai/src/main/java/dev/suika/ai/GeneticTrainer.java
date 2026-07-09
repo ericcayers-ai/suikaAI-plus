@@ -146,8 +146,10 @@ public final class GeneticTrainer implements TrainerPlugin, AutoCloseable {
             final int idx = i;
             for (int ep = 0; ep < episodesPerEval; ep++) {
                 final int e = ep;
-                final long seed = (long) generation * populationSize * episodesPerEval
-                        + (long) idx * episodesPerEval + e;
+                // Common Random Numbers (see CmaEsTrainer): every genome in a generation is
+                // scored on the SAME boards so selection compares policies, not board luck;
+                // the seed rotates per generation so the population can't overfit one board.
+                final long seed = (long) generation * episodesPerEval + e;
                 futures.add(pool.submit(() ->
                         scores[idx][e] = evaluator.runSingleEpisode(buildAgent(population[idx]), seed)));
             }

@@ -74,6 +74,13 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
     private float presetHintTimer = 0f;
 
+    /** One-shot note surfaced when the control center's stuck-run watchdog backs a hung
+     *  run out to this menu (Settings → INPUT → "Stuck-run watchdog"). Set statically just
+     *  before the screen switch, consumed once on construction. */
+    static String pendingBackoutNote = null;
+    private String backoutNote = "";
+    private float  backoutNoteTimer = 0f;
+
     void openInfocardForCapture(AiTechnique t) { this.infocardTech = t; }
     void setEnsemblesExpandedForCapture(boolean expanded) { this.ensemblesExpanded = expanded; }
 
@@ -89,6 +96,9 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         this.cfg  = existing != null ? existing : new PlaygroundConfig();
         if (existing == null) cfg.selectDefaultsFor(AiTechnique.MCTS);
         cfg.actionBins = game.settings.actionBins();
+        if (pendingBackoutNote != null) {
+            backoutNote = pendingBackoutNote; backoutNoteTimer = 6f; pendingBackoutNote = null;
+        }
         viewport = new FitViewport(Theme.VW, Theme.VH, camera);
         camera.position.set(Theme.VW / 2f, Theme.VH / 2f, 0f);
         camera.update();
@@ -646,6 +656,10 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             presetHintTimer -= Gdx.graphics.getDeltaTime();
             Ui.textCenter(game.batch, game.fontSmall, "Calibrate presets in Settings -> PRESETS first",
                     Theme.VW / 2f, 92, Theme.GOLD);
+        }
+        if (backoutNoteTimer > 0f) {
+            backoutNoteTimer -= Gdx.graphics.getDeltaTime();
+            Ui.textCenter(game.batch, game.fontSmall, backoutNote, Theme.VW / 2f, Theme.VH - 190f, Theme.GOLD);
         }
         cyclerText("Speed",       cfg.speedLabel(),          speedCtrl, true);
         cyclerText("Parallelism", cfg.parallelismLabel(),    paraCtrl,  t.parallel);

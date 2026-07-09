@@ -42,7 +42,22 @@ public final class PhysicsConfig {
      * drops than this reintroduce visible sliding after the pile should be at rest.
      */
     public static final double FRICTION_STATIC  = 0.62;
-    public static final double FRICTION_DYNAMIC = 0.42;
+    public static final double FRICTION_DYNAMIC = 0.40;
+
+    /**
+     * Subtle motion damping applied to every fruit body (never the walls/floor). A small
+     * linear + angular drag so a settling pile "weighs down" and relaxes smoothly into the
+     * gaps around it instead of jittering forever on point contacts, and a fruit that lands
+     * on a slope rotates gently into the pocket beside it and <em>stays</em> there rather
+     * than spinning free. Deliberately tiny — over a fruit's ~0.85 s fall this barely
+     * touches drop speed (a few percent), but across the many contact-resolution steps of a
+     * resting stack it removes the perpetual micro-jostle that made stacks read as restless
+     * and even helped a fast-sim stack never sleep. Applied inside dyn4j's integrator, so it
+     * is fully deterministic and snapshot/replay determinism is preserved. Finetuned to be
+     * felt, not seen: larger values start visibly slowing the drop and dragging merges.
+     */
+    public static final double LINEAR_DAMPING  = 0.04;
+    public static final double ANGULAR_DAMPING = 0.09;
 
     /**
      * Instant-fail toggle. When true the game ends the moment a fruit comes to overflow

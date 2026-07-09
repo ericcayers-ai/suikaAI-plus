@@ -43,7 +43,31 @@ public final class SettingsScreen extends ScreenAdapter {
         /** 0 = use the standard {@link #ROW_H}. Sliders need extra headroom for the
          *  value readout drawn above the bar (see {@link #rowHeight}). */
         float heightOverride = 0f;
+        /** When non-null and {@link GameSettings#customValueEntry} is on, clicking this
+         *  row opens the type-a-number overlay instead of cycling/sliding. */
+        NumericSpec numeric;
     }
+
+    /** Describes how a row's value can be typed exactly in the custom-entry overlay. */
+    private static final class NumericSpec {
+        final double min, max;
+        final boolean integer;
+        final DoubleSupplier current;   // present value, to pre-fill the field
+        final DoubleConsumer apply;     // called with the clamped typed value
+        final String unit;              // e.g. " FPS", "%", "" — shown after the number
+        NumericSpec(double min, double max, boolean integer,
+                    DoubleSupplier current, DoubleConsumer apply, String unit) {
+            this.min = min; this.max = max; this.integer = integer;
+            this.current = current; this.apply = apply; this.unit = unit;
+        }
+    }
+
+    // ---- Type-a-number overlay (opened when Custom values is on) ----
+    private boolean numEntryOpen = false;
+    private Row     numEntryRow;
+    private final StringBuilder numEntryBuf = new StringBuilder();
+    private final Rectangle numOkBtn     = new Rectangle();
+    private final Rectangle numCancelBtn = new Rectangle();
 
     /** Effective row height — sliders get extra vertical room so their value label
      *  (drawn above the bar) never crowds the row above/below it (was the "Max GPU
@@ -107,9 +131,11 @@ public final class SettingsScreen extends ScreenAdapter {
                     game.regenerateFonts(); SettingsPersistence.save(cfg); });
 
         // ---- Graphics ----
-        cycle("GRAPHICS", "Frame rate", () -> cfg.fpsLabel(),
-                () -> { cfg.fpsIndex = wrap(cfg.fpsIndex - 1, GameSettings.FPS_OPTIONS.length); cfg.applyDisplay(); },
-                () -> { cfg.fpsIndex = wrap(cfg.fpsIndex + 1, GameSettings.FPS_OPTIONS.length); cfg.applyDisplay(); });
+        Row fps = cycle("GRAPHICS", "Frame rate", () -> cfg.fpsLabel(),
+                () -> { cfg.customFps = -1; cfg.fpsIndex = wrap(cfg.fpsIndex - 1, GameSettings.FPS_OPTIONS.length); cfg.applyDisplay(); },
+                () -> { cfg.customFps = -1; cfg.fpsIndex = wrap(cfg.fpsIndex + 1, GameSettings.FPS_OPTIONS.length); cfg.applyDisplay(); });
+        fps.numeric = new NumericSpec(0, 500, true,
+                () -> cfg.targetFps(), v -> { cfg.customFps = (int) Math.round(v); cfg.applyDisplay(); }, " FPS");
         toggle(null, "V-Sync", () -> cfg.vsync, () -> { cfg.vsync = !cfg.vsync; cfg.applyDisplay(); });
         toggle(null, "Smooth shading (glossy fruit)", () -> cfg.smoothShading, () -> cfg.smoothShading = !cfg.smoothShading);
         toggle(null, "Merge particles", () -> cfg.particles, () -> cfg.particles = !cfg.particles);
@@ -118,11 +144,16 @@ public final class SettingsScreen extends ScreenAdapter {
         toggle(null, "Screen shake", () -> cfg.screenShake, () -> cfg.screenShake = !cfg.screenShake);
 
         // ---- Simulation ----
-        cycle("SIMULATION", "Drop columns", () -> Integer.toString(cfg.actionBins()),
-                () -> cfg.binIndex = wrap(cfg.binIndex - 1, GameSettings.BIN_OPTIONS.length),
-                () -> cfg.binIndex = wrap(cfg.binIndex + 1, GameSettings.BIN_OPTIONS.length));
-        toggle(null, "Seed", () -> cfg.randomSeed, () -> cfg.randomSeed = !cfg.randomSeed)
-                .value = () -> cfg.randomSeed ? "Random" : "Fixed " + cfg.fixedSeed;
+        Row bins = cycle("SIMULATION", "Drop columns", cfg::binsLabel,
+                () -> { cfg.customBins = -1; cfg.binIndex = wrap(cfg.binIndex - 1, GameSettings.BIN_OPTIONS.length); },
+                () -> { cfg.customBins = -1; cfg.binIndex = wrap(cfg.binIndex + 1, GameSettings.BIN_OPTIONS.length); });
+        bins.numeric = new NumericSpec(8, 256, true,
+                () -> cfg.actionBins(), v -> cfg.customBins = (int) Math.round(v), " cols");
+        Row seed = toggle(null, "Seed", () -> cfg.randomSeed, () -> cfg.randomSeed = !cfg.randomSeed);
+        seed.value = () -> cfg.randomSeed ? "Random" : "Fixed " + cfg.fixedSeed;
+        // Typing a seed implies a fixed seed — the overlay flips randomSeed off on apply.
+        seed.numeric = new NumericSpec(0, Long.MAX_VALUE, true,
+                () -> cfg.fixedSeed, v -> { cfg.fixedSeed = (long) v; cfg.randomSeed = false; }, "");
 
         // ---- Gameplay ----
         cycle("GAMEPLAY", "RT Lab physics", () -> cfg.rt3dPhysics ? "3D (true 3D)" : "2D (classic)",
@@ -141,17 +172,27 @@ public final class SettingsScreen extends ScreenAdapter {
                 () -> PythonSetup.isReady() ? "REINSTALL" : installing ? "WORKING…" : "SETUP",
                 this::startInstall);
 
-        // FIX: Shortened the label slightly to guarantee aesthetic spacing
-        toggle(null, "Prefer GPU (Python techniques)",
-                () -> cfg.preferGpu, () -> { cfg.preferGpu = !cfg.preferGpu; cfg.applyGpuPreference(); SettingsPersistence.save(cfg); })
-                .value = () -> gpuToggleHint();
-
-        toggle(null, "Force JVM CPU-only implementations",
-                () -> cfg.jvmCpuOnly, () -> { cfg.jvmCpuOnly = !cfg.jvmCpuOnly; cfg.applyGpuPreference(); SettingsPersistence.save(cfg); });
-        slider(null, "Max GPU utilization (Python training)",
+        // Single first-class compute-mode selector — GPU (Python/CUDA, app-wide) vs
+        // CPU (JVM). Replaces the old two separate "Prefer GPU" / "Force CPU-only"
+        // toggles; applyComputeMode() derives the legacy flags so nothing downstream
+        // breaks. The value line reports what will actually happen on this machine.
+        cycle(null, "Compute mode", this::computeModeHint,
+                () -> toggleComputeMode(), () -> toggleComputeMode());
+        Row gpuUtil = slider(null, "Max GPU utilization (Python training)",
                 () -> (cfg.gpuUtilPercent - 10) / 90.0,
-                f -> cfg.gpuUtilPercent = (int) (Math.round((10 + clamp01(f) * 90) / 5.0) * 5))
-                .value = () -> cfg.gpuUtilPercent + "%";
+                f -> cfg.gpuUtilPercent = (int) (Math.round((10 + clamp01(f) * 90) / 5.0) * 5));
+        gpuUtil.value = () -> cfg.gpuUtilPercent + "%";
+        gpuUtil.numeric = new NumericSpec(10, 100, true,
+                () -> cfg.gpuUtilPercent, v -> cfg.gpuUtilPercent = (int) Math.round(v), "%");
+
+        // ---- Input / entry ----
+        toggle("INPUT", "Custom values (type exact numbers)",
+                () -> cfg.customValueEntry,
+                () -> { cfg.customValueEntry = !cfg.customValueEntry; SettingsPersistence.save(cfg); })
+                .value = () -> cfg.customValueEntry ? "On — click a number row" : "Off";
+        toggle(null, "Stuck-run watchdog (back out after 10s)",
+                () -> cfg.watchdogEnabled,
+                () -> { cfg.watchdogEnabled = !cfg.watchdogEnabled; SettingsPersistence.save(cfg); });
 
         // ---- Presets ----
         Row calib = button("PRESETS", "Calibrate presets for this machine",
@@ -162,16 +203,58 @@ public final class SettingsScreen extends ScreenAdapter {
         calib.heightOverride = ROW_H + 26f;
 
         // ---- Saves ----
-        cycle("SAVES", "Autosave (AI progress -> slot 1)", cfg::autosaveLabel,
-                () -> { cfg.autosaveIndex = wrap(cfg.autosaveIndex - 1, GameSettings.AUTOSAVE_MINUTES.length); SettingsPersistence.save(cfg); },
-                () -> { cfg.autosaveIndex = wrap(cfg.autosaveIndex + 1, GameSettings.AUTOSAVE_MINUTES.length); SettingsPersistence.save(cfg); });
+        Row autosave = cycle("SAVES", "Autosave (AI progress -> slot 1)", cfg::autosaveLabel,
+                () -> { cfg.customAutosaveMinutes = -1; cfg.autosaveIndex = wrap(cfg.autosaveIndex - 1, GameSettings.AUTOSAVE_MINUTES.length); SettingsPersistence.save(cfg); },
+                () -> { cfg.customAutosaveMinutes = -1; cfg.autosaveIndex = wrap(cfg.autosaveIndex + 1, GameSettings.AUTOSAVE_MINUTES.length); SettingsPersistence.save(cfg); });
+        autosave.numeric = new NumericSpec(0, 240, true,
+                () -> cfg.autosaveMinutes(), v -> { cfg.customAutosaveMinutes = (int) Math.round(v); SettingsPersistence.save(cfg); }, " min");
     }
 
-    private String gpuToggleHint() {
-        if (!cfg.preferGpu) return "Off";
+    private String computeModeHint() {
+        if (!cfg.gpuMode) return "CPU (JVM)";
         Boolean gpu = GpuProbe.available();
-        if (gpu == null) return "On (probing…)";
-        return gpu ? "On (GPU found)" : "On (no GPU found)";
+        String dev = GpuProbe.deviceName();
+        if (gpu == null) return "GPU — probing…";
+        if (Boolean.TRUE.equals(gpu)) return "GPU · " + (dev != null ? fit(dev) : "CUDA");
+        return "GPU — no CUDA, CPU fallback";
+    }
+
+    private void toggleComputeMode() {
+        cfg.gpuMode = !cfg.gpuMode;
+        cfg.applyComputeMode();
+        SettingsPersistence.save(cfg);
+    }
+
+    /** Opens the type-a-number overlay pre-filled with the row's current value. */
+    private void openNumEntry(Row r) {
+        numEntryOpen = true;
+        numEntryRow = r;
+        numEntryBuf.setLength(0);
+        double cur = r.numeric.current.getAsDouble();
+        numEntryBuf.append(r.numeric.integer ? Long.toString((long) cur)
+                : trimFloat(cur));
+    }
+
+    private static String trimFloat(double v) {
+        String s = String.format(java.util.Locale.US, "%.4f", v);
+        // strip trailing zeros / dot so the field reads cleanly
+        if (s.contains(".")) { s = s.replaceAll("0+$", ""); if (s.endsWith(".")) s = s.substring(0, s.length() - 1); }
+        return s;
+    }
+
+    private void commitNumEntry() {
+        if (numEntryRow == null || numEntryRow.numeric == null) { numEntryOpen = false; return; }
+        NumericSpec spec = numEntryRow.numeric;
+        try {
+            double v = Double.parseDouble(numEntryBuf.toString().trim());
+            v = Math.max(spec.min, Math.min(spec.max, v));
+            if (spec.integer) v = Math.round(v);
+            spec.apply.accept(v);
+        } catch (NumberFormatException ignored) {
+            // invalid entry — just close without applying
+        }
+        numEntryOpen = false;
+        numEntryRow = null;
     }
 
     private static String fit(String msg) {
@@ -191,9 +274,8 @@ public final class SettingsScreen extends ScreenAdapter {
                 },
                 () -> {
                     GpuProbe.forceReprobe();
-                    cfg.preferGpu = true;
-                    cfg.jvmCpuOnly = false;
-                    cfg.applyGpuPreference();
+                    cfg.gpuMode = true;
+                    cfg.applyComputeMode();   // sets preferGpu=true, jvmCpuOnly=false
                     SettingsPersistence.save(cfg);
                     installing = false;
                     try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
@@ -225,18 +307,37 @@ public final class SettingsScreen extends ScreenAdapter {
         Gdx.input.setInputProcessor(new InputAdapter() {
             @Override public boolean touchDown(int sx, int sy, int p, int b) {
                 camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
+                if (numEntryOpen) { handleNumEntryClick(touch.x, touch.y); return true; }
                 handleClick(touch.x, touch.y); return true;
             }
             @Override public boolean mouseMoved(int sx, int sy) {
                 camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight()); mx = touch.x; my = touch.y; return false;
             }
             @Override public boolean scrolled(float ax, float ay) {
+                if (numEntryOpen) return true;
                 scroll = Math.max(0f, Math.min(scroll + ay * 46f, maxScroll()));
                 return true;
             }
             @Override public boolean keyDown(int k) {
+                if (numEntryOpen) {
+                    if (k == Input.Keys.ESCAPE) { numEntryOpen = false; numEntryRow = null; return true; }
+                    if (k == Input.Keys.ENTER || k == Input.Keys.NUMPAD_ENTER) { commitNumEntry(); return true; }
+                    if (k == Input.Keys.BACKSPACE && numEntryBuf.length() > 0) {
+                        numEntryBuf.setLength(numEntryBuf.length() - 1); return true;
+                    }
+                    return true; // swallow everything else while typing
+                }
                 if (k == Input.Keys.ESCAPE) { game.setScreen(back.apply(game)); return true; }
                 return false;
+            }
+            @Override public boolean keyTyped(char c) {
+                if (!numEntryOpen) return false;
+                if ((c >= '0' && c <= '9')
+                        || (c == '.' && numEntryBuf.indexOf(".") < 0)
+                        || (c == '-' && numEntryBuf.length() == 0)) {
+                    numEntryBuf.append(c);
+                }
+                return true;
             }
         });
     }
@@ -262,6 +363,9 @@ public final class SettingsScreen extends ScreenAdapter {
         for (Row r : rows) {
             if (!r.area.contains(x, y)) continue;
             if (r.area.y + r.area.height > LIST_TOP || r.area.y < LIST_BOT) continue;
+            // Custom-values mode: a numeric row opens the type-a-number overlay instead
+            // of cycling/sliding (the arrows still work when the mode is off).
+            if (cfg.customValueEntry && r.numeric != null) { openNumEntry(r); return; }
             switch (r.kind) {
                 case TOGGLE -> r.next.run();
                 case CYCLE  -> { if (r.prev != null && x < r.area.x + r.area.width / 2f) r.prev.run(); else if (r.next != null) r.next.run(); }
@@ -270,6 +374,15 @@ public final class SettingsScreen extends ScreenAdapter {
             }
             return;
         }
+    }
+
+    private void handleNumEntryClick(float x, float y) {
+        if (numOkBtn.contains(x, y)) { commitNumEntry(); return; }
+        if (numCancelBtn.contains(x, y)) { numEntryOpen = false; numEntryRow = null; return; }
+        // Click outside the modal card cancels.
+        float mw = 520f, mh = 250f;
+        float m0x = Theme.VW / 2f - mw / 2f, m0y = Theme.VH / 2f - mh / 2f;
+        if (x < m0x || x > m0x + mw || y < m0y || y > m0y + mh) { numEntryOpen = false; numEntryRow = null; }
     }
 
     private static double clamp01(double v) { return Math.max(0, Math.min(1, v)); }
@@ -420,6 +533,51 @@ public final class SettingsScreen extends ScreenAdapter {
         Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
 
         Ui.textCenter(game.batch, game.fontMed, "BACK", Theme.VW / 2f, backBtn.y + 35f, Theme.TEXT);
+        game.batch.end();
+
+        if (numEntryOpen) drawNumEntry();
+    }
+
+    private void drawNumEntry() {
+        if (numEntryRow == null || numEntryRow.numeric == null) { numEntryOpen = false; return; }
+        NumericSpec spec = numEntryRow.numeric;
+        float mw = 520f, mh = 250f;
+        float m0x = Theme.VW / 2f - mw / 2f, m0y = Theme.VH / 2f - mh / 2f;
+        numOkBtn.set(m0x + mw / 2f + 12f, m0y + 24f, 150f, 48f);
+        numCancelBtn.set(m0x + mw / 2f - 162f, m0y + 24f, 150f, 48f);
+        float fieldX = m0x + 30f, fieldY = m0y + mh - 128f, fieldW = mw - 60f, fieldH = 52f;
+
+        ShapeRenderer s = game.shapes;
+        s.begin(ShapeRenderer.ShapeType.Filled);
+        s.setColor(0f, 0f, 0f, 0.82f);
+        s.rect(0, 0, Theme.VW, Theme.VH);
+        s.setColor(0.08f, 0.09f, 0.13f, 1f);
+        Ui.fillRoundRect(s, m0x, m0y, mw, mh, 16);
+        Ui.panel(s, m0x, m0y, mw, mh, 16, Theme.PANEL_DEEP, Theme.PANEL_EDGE);
+        // input field
+        s.setColor(Theme.PANEL_DEEP);
+        Ui.fillRoundRect(s, fieldX, fieldY, fieldW, fieldH, 8);
+        s.setColor(Theme.ACCENT_BLUE);
+        Ui.fillRoundRect(s, fieldX, fieldY, fieldW, 3f, 2f);
+        // buttons
+        s.setColor(numOkBtn.contains(mx, my) ? Theme.ACCENT_2 : Theme.PANEL_EDGE);
+        Ui.fillRoundRect(s, numOkBtn.x, numOkBtn.y, numOkBtn.width, numOkBtn.height, 10);
+        s.setColor(numCancelBtn.contains(mx, my) ? Theme.ACCENT : Theme.PANEL_EDGE);
+        Ui.fillRoundRect(s, numCancelBtn.x, numCancelBtn.y, numCancelBtn.width, numCancelBtn.height, 10);
+        s.end();
+
+        game.batch.begin();
+        Ui.textCenter(game.batch, game.fontMed, numEntryRow.label, Theme.VW / 2f, m0y + mh - 34f, Theme.TEXT);
+        String rangeHint = spec.integer
+                ? String.format(java.util.Locale.US, "range %d – %s", (long) spec.min,
+                        spec.max >= Long.MAX_VALUE ? "∞" : Long.toString((long) spec.max))
+                : String.format(java.util.Locale.US, "range %.2f – %.2f", spec.min, spec.max);
+        Ui.textCenter(game.batch, game.fontSmall, rangeHint, Theme.VW / 2f, m0y + mh - 62f, Theme.TEXT_DIM);
+        String shown = numEntryBuf.length() == 0 ? "_" : numEntryBuf.toString();
+        Ui.text(game.batch, game.fontMed, shown + spec.unit, fieldX + 16f, fieldY + fieldH / 2f + 8f, Theme.TEXT);
+        Ui.textCenter(game.batch, game.fontSmall, "Enter to apply · Esc to cancel", Theme.VW / 2f, fieldY - 18f, Theme.TEXT_FAINT);
+        Ui.textCenter(game.batch, game.fontSmall, "APPLY", numOkBtn.x + numOkBtn.width / 2f, numOkBtn.y + numOkBtn.height / 2f - 5f, Theme.TEXT);
+        Ui.textCenter(game.batch, game.fontSmall, "CANCEL", numCancelBtn.x + numCancelBtn.width / 2f, numCancelBtn.y + numCancelBtn.height / 2f - 5f, Theme.TEXT);
         game.batch.end();
     }
 

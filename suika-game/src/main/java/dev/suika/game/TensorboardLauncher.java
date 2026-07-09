@@ -43,6 +43,44 @@ final class TensorboardLauncher {
         }
     }
 
+    /**
+     * Pushes a saved run's progress curves ({@code graphs}: named float[] series such as
+     * fitness / TD-loss / accuracy) into this technique's TensorBoard log directory as
+     * scalar summaries — one step per array index — so the SAME curves the control center
+     * streams to its LiveCharts are viewable in TensorBoard for any technique that trains
+     * on the JVM (evolution, imitation, DQN, learning ensembles), not just the two Python
+     * scripts. Runs entirely on a daemon thread and never throws: TensorBoard is a nice-to-
+     * have viewer, so a missing venv or a Python hiccup is silently a no-op.
+     */
+    static void exportScalarsAsync(String techniqueId, java.util.Map<String, float[]> graphs) {
+        if (graphs == null || graphs.isEmpty() || !PythonSetup.isReady()) return;
+        Thread t = new Thread(() -> {
+            try {
+                Path dir = logDir(techniqueId);
+                Files.createDirectories(dir);
+                StringBuilder py = new StringBuilder(
+                        "from torch.utils.tensorboard import SummaryWriter\n" +
+                        "w = SummaryWriter(r'" + dir.toAbsolutePath() + "')\n");
+                for (var e : graphs.entrySet()) {
+                    float[] v = e.getValue();
+                    if (v == null || v.length == 0) continue;
+                    String tag = e.getKey().replaceAll("[^A-Za-z0-9_./-]", "_");
+                    StringBuilder arr = new StringBuilder();
+                    for (int i = 0; i < v.length; i++) { if (i > 0) arr.append(','); arr.append(v[i]); }
+                    py.append("for i,x in enumerate([").append(arr).append("]):\n")
+                      .append("    w.add_scalar('progress/").append(tag).append("', x, i)\n");
+                }
+                py.append("w.close()\n");
+                Process p = new ProcessBuilder(PythonSetup.venvPython().toString(), "-c", py.toString())
+                        .redirectErrorStream(true).start();
+                p.getInputStream().readAllBytes();
+                p.waitFor();
+            } catch (Exception ignored) { /* best-effort viewer export */ }
+        }, "tb-scalar-export");
+        t.setDaemon(true);
+        t.start();
+    }
+
     private static void initializeTensorBoardLogs(String techniqueId) {
         try {
             Path dir = logDir(techniqueId);

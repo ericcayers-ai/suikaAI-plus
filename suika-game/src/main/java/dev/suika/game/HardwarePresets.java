@@ -38,6 +38,10 @@ public enum HardwarePresets {
                 : "  ·  uncalibrated");
     }
 
+    /** Discrete rollout / population ladders the presets snap onto (mirror the UI cyclers). */
+    private static final int[] ROLLOUT_STEPS = {40, 80, 150, 300, 600, 1200, 2400};
+    private static final int[] POP_STEPS      = {16, 24, 40, 64, 128, 256, 512, 1000};
+
     private static int nearest(int[] options, double target) {
         int best = options[0];
         for (int o : options) if (Math.abs(o - target) < Math.abs(best - target)) best = o;
@@ -61,16 +65,34 @@ public enum HardwarePresets {
         double scale = baseScale * PresetCalibration.speedFactor();
         AiTechnique t = cfg.technique;
 
-        cfg.rollouts   = nearest(new int[]{40, 80, 150, 300, 600, 1200, 2400}, 150 * scale);
+        // Search depth + think budget scale with the preset for every search technique
+        // (MCTS / AlphaZero and the MCTS-based ensembles). Parallelism stays on Auto so
+        // CPU/GPU utilisation is maximal at every preset — presets trade depth for time,
+        // never thread count.
+        cfg.rollouts   = nearest(ROLLOUT_STEPS, 150 * scale);
         cfg.maxThinkMs = thinkMs;
 
         if (t.family == AiTechnique.Family.EVOLUTION) {
-            cfg.populationSize  = nearest(new int[]{16, 24, 40, 64, 128, 256, 512, 1000}, 40 * scale);
+            // Bigger population + more sims/genome at higher quality: a larger λ explores
+            // more directions per generation, and more sims cut the fitness-estimate noise
+            // (on top of the Common-Random-Numbers fix in the trainers) — together giving
+            // steadier, faster progress. Lower presets trade that for snappier generations.
+            cfg.populationSize  = nearest(POP_STEPS, 40 * scale);
             cfg.simsPerGenIndex = indexOfNearest(PlaygroundConfig.SIMS_PER_GEN_OPTIONS,
-                    Math.max(1, Math.round(2 * scale)));
+                    Math.max(1, (int) Math.round(3 * scale)));
+            // GA-only recombination knobs (ignored by CMA-ES, whose sampling IS the math):
+            // anneal σ at higher quality (broad early, fine late) and keep uniform crossover
+            // on for real recombination; snappy presets hold a fixed, slightly larger σ so
+            // each generation visibly moves.
+            cfg.mutationSigmaIndex = scale >= 2.0 ? 1 : scale >= 0.9 ? 2 : 3;   // 0.05 / 0.10 / 0.20
+            cfg.mutationSigma      = PlaygroundConfig.MUTATION_SIGMA_OPTIONS[cfg.mutationSigmaIndex];
+            cfg.crossover          = true;
+            cfg.sigmaAnneal        = scale >= 2.0;
         }
-        if (t == AiTechnique.DAGGER) {
-            // Deeper presets adapt more gently (lower LR); snappy presets learn faster.
+        // Gradient learners: a lower LR is steadier (higher quality), a higher LR learns
+        // faster but noisier (snappy) — the standard depth/stability trade. DQN's TD error
+        // is Huber-clipped in the trainer, so it tolerates the same ladder as BC/DAgger.
+        if (t == AiTechnique.DAGGER || t == AiTechnique.BC || t == AiTechnique.DQN) {
             cfg.learningRate = scale >= 2.0 ? 1e-3 : scale >= 0.9 ? 3e-3 : 1e-2;
         }
         if (t == AiTechnique.DECISION_TRANSFORMER || t == AiTechnique.ENS_RTG_VERIFIED) {
