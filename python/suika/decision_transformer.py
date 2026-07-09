@@ -101,15 +101,15 @@ class DecisionTransformer(nn.Module if HAS_TORCH else object):
     """
 
     def __init__(
-            self,
-            obs_dim:    int = 584,
-            action_dim: int = 32,
-            ctx_len:    int = 20,
-            d_model:    int = 128,
-            n_heads:    int = 4,
-            n_layers:   int = 3,
-            dropout:    float = 0.1,
-            rtg_scale:  float = 5000.0,
+        self,
+        obs_dim:    int = 584,
+        action_dim: int = 32,
+        ctx_len:    int = 20,
+        d_model:    int = 128,
+        n_heads:    int = 4,
+        n_layers:   int = 3,
+        dropout:    float = 0.1,
+        rtg_scale:  float = 5000.0,
     ) -> None:
         if not HAS_TORCH:
             raise ImportError("PyTorch is required: pip install torch")
@@ -119,11 +119,11 @@ class DecisionTransformer(nn.Module if HAS_TORCH else object):
         self.ctx_len    = ctx_len
         self.rtg_scale  = rtg_scale
 
-        # Position embeddings map to timesteps. Support up to 10k steps.
+        max_seq = ctx_len * 3
         self.embed_rtg    = nn.Linear(1, d_model)
         self.embed_state  = nn.Linear(obs_dim, d_model)
         self.embed_action = nn.Embedding(action_dim, d_model)
-        self.pos_embed    = nn.Embedding(10000, d_model)
+        self.pos_embed    = nn.Embedding(max_seq, d_model)
         self.drop         = nn.Dropout(dropout)
 
         self.blocks = nn.ModuleList([
@@ -142,11 +142,10 @@ class DecisionTransformer(nn.Module if HAS_TORCH else object):
                 nn.init.zeros_(m.bias)
 
     def forward(
-            self,
-            rtg:       "torch.Tensor",   # (B, T)    return-to-go, normalised
-            states:    "torch.Tensor",   # (B, T, obs_dim)
-            actions:   "torch.Tensor",   # (B, T)    integer action indices (0 = pad)
-            timesteps: "torch.Tensor",   # (B, T)    chronological timesteps
+        self,
+        rtg:     "torch.Tensor",   # (B, T)    return-to-go, normalised
+        states:  "torch.Tensor",   # (B, T, obs_dim)
+        actions: "torch.Tensor",   # (B, T)    integer action indices (0 = pad)
     ) -> "torch.Tensor":            # (B, T, action_dim) logits
         B, T = rtg.shape
         device = rtg.device
@@ -159,9 +158,8 @@ class DecisionTransformer(nn.Module if HAS_TORCH else object):
         tokens = torch.stack([e_rtg, e_state, e_action], dim=2)  # B T 3 d
         tokens = tokens.view(B, T * 3, -1)                        # B 3T d
 
-        # Timestep alignment: s_t, a_t, r_t share the same position embedding
-        time_tokens = torch.repeat_interleave(timesteps, 3, dim=1) # B 3T
-        tokens  = self.drop(tokens + self.pos_embed(time_tokens))
+        pos_ids = torch.arange(T * 3, device=device).unsqueeze(0)
+        tokens  = self.drop(tokens + self.pos_embed(pos_ids))
 
         for block in self.blocks:
             tokens = block(tokens)
@@ -178,12 +176,11 @@ class DecisionTransformer(nn.Module if HAS_TORCH else object):
 
     @torch.no_grad()
     def predict(
-            self,
-            obs_history:    list[list[float]],
-            action_history: list[int],
-            rtg_history:    list[float],
-            timesteps:      list[int] | None = None,
-            target_return:  float = 2000.0,
+        self,
+        obs_history:    list[list[float]],
+        action_history: list[int],
+        rtg_history:    list[float],
+        target_return:  float = 2000.0,
     ) -> int:
         """
         Predict the next action given context histories.
@@ -191,7 +188,6 @@ class DecisionTransformer(nn.Module if HAS_TORCH else object):
         :param obs_history:    list of up to ctx_len observations (oldest first)
         :param action_history: list of ctx_len actions (0-padded at start)
         :param rtg_history:    list of ctx_len return-to-go values
-        :param timesteps:      absolute game timesteps corresponding to each step
         :param target_return:  desired cumulative return (affects the last RTG)
         :returns: integer action index
         """
@@ -200,21 +196,16 @@ class DecisionTransformer(nn.Module if HAS_TORCH else object):
         obs_t = torch.zeros(1, T, self.obs_dim)
         act_t = torch.zeros(1, T, dtype=torch.long)
         rtg_t = torch.zeros(1, T)
-        time_t = torch.zeros(1, T, dtype=torch.long)
 
         for i in range(T):
             obs_t[0, i] = torch.tensor(obs_history[-T + i], dtype=torch.float32)
             act_t[0, i] = int(action_history[-T + i]) if i < len(action_history) else 0
             rtg_t[0, i] = rtg_history[-T + i] / self.rtg_scale
-            if timesteps is not None:
-                time_t[0, i] = int(timesteps[-T + i])
-            else:
-                time_t[0, i] = i
 
         # Override the last RTG with the target
         rtg_t[0, -1] = target_return / self.rtg_scale
 
-        logits = self.forward(rtg_t, obs_t, act_t, time_t)  # 1 T action_dim
+        logits = self.forward(rtg_t, obs_t, act_t)  # 1 T action_dim
         return int(logits[0, -1].argmax().item())
 
     # ------------------------------------------------------------------
@@ -289,15 +280,14 @@ class TrajectoryDataset:
         return ds
 
     def sample_batch(
-            self,
-            batch_size: int,
-            ctx_len:    int,
-            gamma:      float = 1.0,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        self,
+        batch_size: int,
+        ctx_len:    int,
+        gamma:      float = 1.0,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         obs_batch = []
         act_batch = []
         rtg_batch = []
-        time_batch = []
 
         for _ in range(batch_size):
             traj  = random.choice(self._trajs)
@@ -309,19 +299,16 @@ class TrajectoryDataset:
             rtg = traj.returns_to_go(gamma)[start:end]
             obs = traj.observations[start:end]
             act = traj.actions[start:end]
-            timesteps = list(range(start, end))
 
             # Pad to ctx_len
             pad = ctx_len - L
             obs_batch.append(np.pad(obs, ((pad, 0), (0, 0))))
             act_batch.append(np.pad(act, (pad, 0)))
             rtg_batch.append(np.pad(rtg, (pad, 0)))
-            time_batch.append(np.pad(timesteps, (pad, 0)))
 
         return (np.array(obs_batch, dtype=np.float32),
                 np.array(act_batch, dtype=np.int64),
-                np.array(rtg_batch, dtype=np.float32),
-                np.array(time_batch, dtype=np.int64))
+                np.array(rtg_batch, dtype=np.float32))
 
 
 # ---------------------------------------------------------------------------
@@ -329,10 +316,15 @@ class TrajectoryDataset:
 # ---------------------------------------------------------------------------
 
 def default_tb_logdir() -> str:
+    """Matches TensorboardLauncher.logDir("dt") on the Java side exactly, so the
+    app's OPEN TensorBoard button can always find these logs."""
     return str(Path.home() / ".suikai" / "tb_logs" / "dt")
 
 
 def resolve_device(device: str = "auto") -> str:
+    """'auto' picks CUDA when torch reports it available, else CPU — matches
+    train_ppo.py's convention so every real training script in this project
+    prefers the GPU by default when one is actually usable."""
     if device != "auto":
         return device
     if HAS_TORCH and torch.cuda.is_available():
@@ -341,22 +333,29 @@ def resolve_device(device: str = "auto") -> str:
 
 
 def train_dt(
-        dt:          DecisionTransformer,
-        dataset:     TrajectoryDataset,
-        epochs:      int   = 50,
-        batch_size:  int   = 128,
-        ctx_len:     int   = 20,
-        lr:          float = 1e-4,
-        device:      str   = "cpu",
-        tb_logdir:   str | None = None,
-        tb_detailed: bool  = False,
+    dt:          DecisionTransformer,
+    dataset:     TrajectoryDataset,
+    epochs:      int   = 50,
+    batch_size:  int   = 128,
+    ctx_len:     int   = 20,
+    lr:          float = 1e-4,
+    device:      str   = "cpu",
+    tb_logdir:   str | None = None,
+    tb_detailed: bool  = False,
 ) -> list[float]:
-    """Train a DecisionTransformer on trajectory data. Returns per-epoch losses."""
+    """Train a DecisionTransformer on trajectory data. Returns per-epoch losses.
+
+    When ``tb_logdir`` is given, per-epoch loss is always written to TensorBoard;
+    with ``tb_detailed`` also on, per-batch loss, the gradient norm, and periodic
+    weight histograms are written too — genuinely more detail, not just the same
+    numbers logged more often.
+    """
     if not HAS_TORCH:
         raise ImportError("PyTorch is required: pip install torch")
 
     device = resolve_device(device)
     dt.to(device)
+    # Plain ASCII only — see train_ppo.py's identical note (Windows console mojibake).
     print(f"Device: {device}" + (f"  |  TensorBoard: {tb_logdir}" if tb_logdir else ""))
 
     writer = None
@@ -365,14 +364,14 @@ def train_dt(
             from torch.utils.tensorboard import SummaryWriter
             writer = SummaryWriter(log_dir=tb_logdir)
         except ImportError:
-            print("Warning: tensorboard not installed — skipping TB logging")
+            print("Warning: tensorboard not installed (pip install tensorboard) — skipping TB logging")
 
     opt    = optim.AdamW(dt.parameters(), lr=lr, weight_decay=1e-4)
     losses = []
     global_step = 0
 
     for epoch in range(epochs):
-        obs_np, act_np, rtg_np, time_np = dataset.sample_batch(
+        obs_np, act_np, rtg_np = dataset.sample_batch(
             batch_size * 4, ctx_len, gamma=1.0)
 
         epoch_loss = 0.0
@@ -382,11 +381,10 @@ def train_dt(
             obs_t = torch.from_numpy(obs_np[start:start+batch_size]).to(device)
             act_t = torch.from_numpy(act_np[start:start+batch_size]).to(device)
             rtg_t = torch.from_numpy(rtg_np[start:start+batch_size]).to(device)
-            time_t = torch.from_numpy(time_np[start:start+batch_size]).to(device)
             rtg_t = rtg_t / dt.rtg_scale
 
             opt.zero_grad()
-            logits = dt(rtg_t, obs_t, act_t, time_t)          # B T action_dim
+            logits = dt(rtg_t, obs_t, act_t)          # B T action_dim
             B, T, A = logits.shape
             loss = nn.functional.cross_entropy(
                 logits.view(B * T, A), act_t.view(B * T))
@@ -421,21 +419,28 @@ def train_dt(
 
 
 def main() -> None:
-    """CLI entry point."""
+    """CLI entry point (previously library-only). Usage::
+
+        python -m suika.decision_transformer --data-dir demos/ --out models/dt.pt
+    """
     import argparse
 
     parser = argparse.ArgumentParser(description="Train a Decision Transformer on Suika demo trajectories")
     parser.add_argument("--data-dir",  type=str, required=True,
-                        help="Directory of .npz trajectory recordings.")
+                         help="Directory of .npz trajectory recordings (see TrajectoryDataset.from_recordings).")
     parser.add_argument("--out",       type=str, default="models/dt.pt")
     parser.add_argument("--epochs",    type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--ctx-len",   type=int, default=20)
     parser.add_argument("--lr",        type=float, default=1e-4)
     parser.add_argument("--rtg-scale", type=float, default=5000.0)
-    parser.add_argument("--device",    type=str, default="auto")
-    parser.add_argument("--tb-logdir", type=str, default=None)
-    parser.add_argument("--tb-detailed", action="store_true")
+    parser.add_argument("--device",    type=str, default="auto",
+                         help="'auto' picks CUDA when available, else CPU; 'cpu' forces CPU-only.")
+    parser.add_argument("--tb-logdir", type=str, default=None,
+                         help="TensorBoard log directory (default: ~/.suikai/tb_logs/dt, "
+                              "matching the app's OPEN TensorBoard button).")
+    parser.add_argument("--tb-detailed", action="store_true",
+                         help="Also log per-batch loss, gradient norm, and periodic weight histograms.")
     args = parser.parse_args()
 
     if not HAS_TORCH:
@@ -443,7 +448,7 @@ def main() -> None:
 
     dataset = TrajectoryDataset.from_recordings(args.data_dir)
     if len(dataset) == 0:
-        raise SystemExit(f"No trajectories found in {args.data_dir}")
+        raise SystemExit(f"No trajectories found in {args.data_dir} (expected .npz recordings)")
 
     dt = DecisionTransformer(rtg_scale=args.rtg_scale, ctx_len=args.ctx_len)
     train_dt(

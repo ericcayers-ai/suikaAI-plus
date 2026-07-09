@@ -126,14 +126,14 @@ class BCTrainer:
     """
 
     def __init__(
-            self,
-            obs_dim:     int   = 584,
-            num_actions: int   = 32,
-            hidden:      int   = 64,
-            lr:          float = 1e-3,
-            batch_size:  int   = 256,
-            seed:        int   = 0,
-            device:      str   = "auto",
+        self,
+        obs_dim:     int   = 584,
+        num_actions: int   = 32,
+        hidden:      int   = 64,
+        lr:          float = 1e-3,
+        batch_size:  int   = 256,
+        seed:        int   = 0,
+        device:      str   = "auto",
     ) -> None:
         self.obs_dim     = obs_dim
         self.num_actions = num_actions
@@ -144,6 +144,9 @@ class BCTrainer:
         self._rng = np.random.default_rng(seed)
 
         if HAS_TORCH:
+            # "auto" prefers CUDA when available — a real backprop training loop
+            # genuinely benefits from the GPU at larger batch sizes, unlike the tiny
+            # forward-only inference this architecture also serves elsewhere.
             if device == "auto":
                 device = "cuda" if torch.cuda.is_available() else "cpu"
             self.device = device
@@ -177,16 +180,10 @@ class BCTrainer:
         return self._model.predict(arr)
 
     def save(self, path: str | Path) -> None:
-        """Save weights with standardized keys for cross-backend compatibility."""
+        """Save weights as a numpy .npz checkpoint."""
         if HAS_TORCH:
-            state = self._model.state_dict()
-            np.savez_compressed(
-                path,
-                W1=state["0.weight"].cpu().numpy(),
-                b1=state["0.bias"].cpu().numpy(),
-                W2=state["2.weight"].cpu().numpy(),
-                b2=state["2.bias"].cpu().numpy()
-            )
+            state = {k: v.cpu().numpy() for k, v in self._model.state_dict().items()}
+            np.savez_compressed(path, **state)
         else:
             params = self._model.param_list()
             np.savez_compressed(path, W1=params[0], b1=params[1],
@@ -215,12 +212,7 @@ class BCTrainer:
         trainer = cls(obs_dim, num_actions, hidden)
         data = np.load(path)
         if HAS_TORCH:
-            state = {
-                "0.weight": torch.from_numpy(data["W1"]),
-                "0.bias": torch.from_numpy(data["b1"]),
-                "2.weight": torch.from_numpy(data["W2"]),
-                "2.bias": torch.from_numpy(data["b2"]),
-            }
+            state = {k: torch.from_numpy(v) for k, v in data.items()}
             trainer._model.load_state_dict(state)
         else:
             m = trainer._model
@@ -266,40 +258,23 @@ class BCTrainer:
         return float(loss.item())
 
     def _numpy_step(self, obs: np.ndarray, actions: np.ndarray) -> float:
-        # Optimized analytical backpropagation step (O(1) instead of slow O(N) finite difference)
-        X = obs # Shape (B, obs_dim)
-        H = np.tanh(X @ self._model.W1.T + self._model.b1) # Shape (B, hidden)
-        logits = H @ self._model.W2.T + self._model.b2 # Shape (B, num_actions)
+        logits = self._model.forward_batch(obs)
+        loss   = self._model.softmax_loss(logits, actions)
 
-        # Loss and softmax probabilities
-        logits_stable = logits - logits.max(axis=1, keepdims=True)
-        exp = np.exp(logits_stable)
-        probs = exp / exp.sum(axis=1, keepdims=True)
-
-        n = actions.shape[0]
-        loss = -np.log(probs[np.arange(n), actions] + 1e-9).mean()
-
-        # Compute gradient wrt outputs (dOut)
-        dOut = probs.copy()
-        dOut[np.arange(n), actions] -= 1.0
-        dOut /= n
-
-        # Layer 2 gradients
-        dW2 = dOut.T @ H
-        db2 = dOut.sum(axis=0)
-
-        # Backpropagate to hidden layer
-        dH = dOut @ self._model.W2
-        dZ1 = dH * (1.0 - H * H) # Tanh gradient
-
-        # Layer 1 gradients
-        dW1 = dZ1.T @ X
-        db1 = dZ1.sum(axis=0)
-
-        # Param updates
-        self._model.W1 -= self.lr * dW1
-        self._model.b1 -= self.lr * db1
-        self._model.W2 -= self.lr * dW2
-        self._model.b2 -= self.lr * db2
-
-        return float(loss)
+        # Finite-difference gradient for numpy path (slow, for fallback use only)
+        eps = 1e-3
+        for param in self._model.param_list():
+            grad = np.zeros_like(param)
+            flat = param.ravel()
+            for k in range(flat.size):
+                old = float(flat[k])
+                flat[k] = old + eps
+                l_plus = self._model.softmax_loss(
+                    self._model.forward_batch(obs), actions)
+                flat[k] = old - eps
+                l_minus = self._model.softmax_loss(
+                    self._model.forward_batch(obs), actions)
+                flat[k] = old
+                grad.ravel()[k] = (l_plus - l_minus) / (2 * eps)
+            param -= self.lr * grad
+        return loss

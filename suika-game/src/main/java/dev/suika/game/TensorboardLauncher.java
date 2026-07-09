@@ -1,6 +1,7 @@
 package dev.suika.game;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -107,29 +108,33 @@ final class TensorboardLauncher {
      */
     static synchronized String launch(String techniqueId) {
         if (!PythonSetup.isReady()) return "Install AI GPU deps first (Settings -> AI ENVIRONMENT)";
-
-        // FIX: Automatically initialize empty TensorBoard runs if none exist yet
-        if (!hasLogs(techniqueId)) {
-            initializeTensorBoardLogs(techniqueId);
-        }
-
+        // Auto-initialize an empty run if none exists yet, so the OPEN button works even
+        // before the first save/train writes scalars (JVM techniques now export their
+        // progress curves here on save — see exportScalarsAsync).
+        if (!hasLogs(techniqueId)) initializeTensorBoardLogs(techniqueId);
         try {
-            boolean needsFreshServer = activeProcess == null || !activeProcess.isAlive() || !techniqueId.equals(activeTechniqueId);
+            boolean needsFreshServer = activeProcess == null || !activeProcess.isAlive()
+                    || !techniqueId.equals(activeTechniqueId);
             if (needsFreshServer) {
                 if (activeProcess != null && activeProcess.isAlive()) activeProcess.destroy();
                 activeProcess = new ProcessBuilder(
-                        PythonSetup.venvPython().toString(), "-c", "import tensorboard.main; import sys; sys.argv=['tensorboard', '--logdir', '" + logDir(techniqueId).toAbsolutePath().toString().replace("\\", "/") + "', '--port', '" + PORT + "', '--reload_interval', '5']; tensorboard.main.run_main()")
+                        PythonSetup.venvPython().toString(), "-m", "tensorboard.main",
+                        "--logdir", logDir(techniqueId).toString(),
+                        "--port", Integer.toString(PORT),
+                        "--reload_interval", "5")
                         .redirectErrorStream(true)
+                        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                         .start();
                 activeTechniqueId = techniqueId;
+                Thread.sleep(1200); // let the local server bind before the browser requests it
             }
-            // Open browser
-            if (java.awt.Desktop.isDesktopSupported()) {
-                java.awt.Desktop.getDesktop().browse(new java.net.URI("http://localhost:" + PORT));
+            if (java.awt.Desktop.isDesktopSupported()
+                    && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.BROWSE)) {
+                java.awt.Desktop.getDesktop().browse(URI.create("http://localhost:" + PORT + "/"));
             }
-            return "TensorBoard opened at http://localhost:" + PORT;
+            return "TensorBoard: http://localhost:" + PORT;
         } catch (Exception e) {
-            return "Failed to open: " + e.getMessage();
+            return "Couldn't launch TensorBoard: " + e.getMessage();
         }
     }
 }
