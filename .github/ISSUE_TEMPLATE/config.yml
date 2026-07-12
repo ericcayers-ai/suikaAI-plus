@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/ericcayers-ai/suikaAI-plus/discussions
+    about: Ask a question, share a trained model, or discuss an idea before filing an issue.
+  - name: Add an AI algorithm (guide)
+    url: https://github.com/ericcayers-ai/suikaAI-plus/blob/main/docs/add-an-algorithm.md
+    about: Step-by-step guide for contributing a new agent or trainer via the plugin registry.

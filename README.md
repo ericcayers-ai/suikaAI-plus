@@ -3,6 +3,10 @@
 A research-grade platform for training, benchmarking, and shipping AI agents that play Suika (Watermelon) Game. Includes a **fully windowed LibGDX game** with Human and AI Watch modes, a curated capability matrix of AI techniques and ensembles, hardware-calibrated quality presets, human-readable model saves, and an experimental **hardware ray-traced RT Lab** — no assets required, all graphics are procedurally generated.
 
 [![CI](https://github.com/ericcayers-ai/suikaAI-plus/actions/workflows/ci.yml/badge.svg)](https://github.com/ericcayers-ai/suikaAI-plus/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ericcayers-ai/suikaAI-plus?sort=semver)](https://github.com/ericcayers-ai/suikaAI-plus/releases/latest)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Java 21](https://img.shields.io/badge/Java-21-orange.svg)](https://adoptium.net/)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 ---
 
@@ -27,14 +31,28 @@ cd suika-app-<version>\bin && suika-app.bat
 
 ---
 
-## What's new in v0.14
+## What's new in v0.17.1
 
-- **Curated capability matrix** — 12 techniques + 5 mechanically-distinct ensembles, each with an infocard that explains what every setting does and how to tune it.
-- **Hardware-calibrated presets** — 5 quality stages (Max Quality → Fastest) that scale each technique's compute to a **measured** sims/second benchmark. Calibrate once in **Settings → PRESETS**; presets stay locked until you do.
-- **GPU inference & CPU-only option** — installing the GPU deps re-probes CUDA live and (unless you tick **Force JVM CPU-only**) plays saved trained nets on the GPU, falling back to the exact JVM forward pass automatically.
-- **Human-readable folder saves** — every slot is a folder of plain-text files (`info.txt`, `progress.txt` with graph history, `model.txt`/`.onnx`, and a `.sav` quickstart manifest) with a **FOLDER** button to reveal it, plus autosave (1/5/10/30 min).
-- **Robust fail detection** — the well can no longer overflow "for free" at high speed, and a board only flashes / reddens the offending fruit once it has genuinely failed.
-- **Ensembles + evolution** — MCTS + Policy Net donors span Neuroevo / CMA-ES / PBT / DAgger / BC / PPO / MuZero with per-slot selection; evolution shows the live leader and selectable selection mathematics with convergence graphs.
+- **MCTS actually plans now.** A latent bug left UCB1's exploration term dwarfing its value
+  term, so the search was close to random. Min-max value normalization + one-ply seeding of
+  every root column fixed it — MCTS jumped from the ~400–650 range to ~1000+.
+- **Survival-aware evaluation (`BoardEval`).** One shared scorer folds realized merges *and*
+  board health (peak/average height, dead-line risk, merge readiness) into the value every
+  simulate-and-pick agent uses, so the planners stop stalemating in the mid-hundreds and
+  clear 1000 on the standard seeds. See [`docs/benchmarking.md`](docs/benchmarking.md).
+- **Keyboard play everywhere.** ←/→ to aim + Space to drop in the 2D game (Down-arrow on the
+  Imitation board), and a full WASD-aim + Space-drop scheme in the RT Lab, both alongside the
+  mouse — never a mode toggle.
+- **TensorBoard runs are distinguishable.** Each save/train writes a uniquely-named
+  `run-<timestamp>` folder, with richer per-run metadata; the OPEN button now serves one
+  dashboard rooted at all techniques so runs *and* techniques are separately selectable.
+- **GPU inference for the MCTS + Policy Net ensemble**, plus honest "GPU" vs "CPU" labelling
+  everywhere else.
+- **Project health** — Apache-2.0 `LICENSE`, `CONTRIBUTING`, `CODE_OF_CONDUCT`, `SECURITY`,
+  issue/PR templates, Dependabot, PR-triggered CI, an automated release workflow, and a
+  [`CHANGELOG`](CHANGELOG.md).
+
+See the full [CHANGELOG](CHANGELOG.md) for every release.
 
 ---
 

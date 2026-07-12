@@ -199,6 +199,15 @@ public final class ControlCenterScreen extends ScreenAdapter {
                     case Input.Keys.R      -> runner.restart();
                     case Input.Keys.EQUALS, Input.Keys.PLUS -> changeSpeed(+1);
                     case Input.Keys.MINUS                   -> changeSpeed(-1);
+                    // Down-arrow drop, pairing with the Left/Right arrow-key aim glide in
+                    // render() below — Space is already the pause toggle here, so arrows-only
+                    // (aim + drop) is the keyboard scheme for techniques that accept human
+                    // input (currently Imitation's "YOU" board recording). Same guards as the
+                    // mouse-click drop paths in handleClick.
+                    case Input.Keys.DOWN -> {
+                        if (runner.acceptsHumanInput() && !hotswapOpen && !slotsOpen && chuteClear())
+                            runner.humanDrop(hoverGameX);
+                    }
                     default -> { return false; }
                 }
                 return true;
@@ -223,6 +232,26 @@ public final class ControlCenterScreen extends ScreenAdapter {
             float[] p = placements(2)[0];                 // YOU = left board
             hoverGameX = clampDropHover((mx - p[0]) / p[2], runner.board());
         }
+    }
+
+    /** Window-widths-per-second glide speed for arrow-key aiming — matches SuikaScreen's
+     *  ARROW_AIM_SPEED so the keyboard aim feels identical between the classic 2D game and
+     *  a technique's human-input board (currently Imitation's "YOU" board). */
+    private static final float ARROW_AIM_SPEED = (float)
+            ((PhysicsConfig.DROP_X_MAX - PhysicsConfig.DROP_X_MIN) * 1.4);
+
+    /** Left/Right arrows glide {@link #hoverGameX} exactly like mouse movement would —
+     *  a keyboard-only alternative to {@link #updateMouse} for any technique that accepts
+     *  human input (Down-arrow drops, see the keyDown handler). Polled every frame rather
+     *  than tracked via press/release, since a human can hold the key across many frames. */
+    private void updateHoverFromArrowKeys(float delta) {
+        if (!runner.acceptsHumanInput() || runner.paused() || hotswapOpen || slotsOpen) return;
+        boolean left  = Gdx.input.isKeyPressed(Input.Keys.LEFT);
+        boolean right = Gdx.input.isKeyPressed(Input.Keys.RIGHT);
+        if (!left && !right) return;
+        float gx = hoverGameX + (right ? 1f : 0f) * ARROW_AIM_SPEED * delta
+                              - (left  ? 1f : 0f) * ARROW_AIM_SPEED * delta;
+        hoverGameX = clampDropHover(gx, runner.board());
     }
 
     /** Clamp a hovered game-x so the previewed/dropped fruit stays fully inside the walls. */
@@ -643,6 +672,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
         tickAutosave(delta);
         if (tbMessageTimer > 0f) tbMessageTimer -= delta;
         int views = viewCount();
+        updateHoverFromArrowKeys(delta);
         if (views == 1 && runner.acceptsHumanInput()) runner.setHover(hoverGameX);
         else if (imitationDual()) runner.setHover(hoverGameX);
         // Merge feedback (particle bursts, score pops) only makes sense in full-board

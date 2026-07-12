@@ -1,0 +1,49 @@
+name: Release
+
+# Builds the cross-platform application distribution and publishes it as a GitHub
+# Release whenever a version tag is pushed (e.g. `git tag v0.17.1 && git push --tags`).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # needed to create the release and upload the zip
+
+jobs:
+  build-and-release:
+    name: Build distribution & publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run tests
+        run: ./gradlew test --parallel
+
+      - name: Build application distribution
+        run: ./gradlew :suika-app:distZip --parallel
+
+      - name: Locate distribution zip
+        id: dist
+        run: echo "zip=$(ls suika-app/build/distributions/suika-app-*.zip | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.dist.outputs.zip }}
+          generate_release_notes: true
+          body: |
+            Download `suika-app-<version>.zip`, extract, and run `bin/suika-app`
+            (`bin/suika-app.bat` on Windows). **Java 21+ must be on your `PATH`.**
+
+            See the [CHANGELOG](https://github.com/ericcayers-ai/suikaAI-plus/blob/main/CHANGELOG.md)
+            for what's new in this release.

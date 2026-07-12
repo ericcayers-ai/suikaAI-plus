@@ -1,0 +1,81 @@
+name: Bug report
+description: Report a problem with the game, an AI technique, training, or the RT Lab
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! Please fill in as much as you can —
+        it makes a fix much faster.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+      placeholder: When I launch CMA-ES and press SAVE, the app...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact sequence that triggers it. A seed helps a lot for sim bugs.
+      placeholder: |
+        1. Main Menu → WATCH AI
+        2. Pick "MCTS", set seed 42
+        3. LAUNCH, wait ~10 drops
+        4. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the app?
+      options:
+        - Game (Human play)
+        - AI Playground / Control Center
+        - A specific AI technique or ensemble
+        - Training (JVM — evolution / DQN / imitation)
+        - Training (Python — PPO / Decision Transformer)
+        - RT Lab (ray tracing)
+        - TensorBoard / saves / GPU
+        - Build / packaging
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown on the main menu, or the release tag / commit SHA.
+      placeholder: v0.17.1
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Java version (`java -version`), GPU (if RT Lab / GPU inference involved).
+      placeholder: |
+        OS: Windows 11
+        Java: Temurin 21.0.3
+        GPU: NVIDIA RTX 4060 (driver 552.x)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack trace
+      description: Console output or a stack trace, if any. This will be formatted as code.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: I'm on the latest release (or a recent `main`).
+          required: false

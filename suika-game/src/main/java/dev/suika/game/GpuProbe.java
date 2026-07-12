@@ -15,7 +15,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * run dyn4j physics and small hand-rolled MLPs on the CPU only — there is no JVM CUDA
  * binding in this project — so their "Parallelism" control always means CPU threads,
  * never the GPU, regardless of what this probe reports. Callers should only surface
- * {@link #available()} where it is actually true (see {@link AiTechnique#gpuAccelerable()}).
+ * {@link #available()} where it is actually true (see {@link #gpuUsableFor}, and for the
+ * separate question of whether a technique's LIVE decision loop genuinely benefits from
+ * that, {@link AiTechnique#gpuInferenceLive()}).
  */
 final class GpuProbe {
 

@@ -120,7 +120,8 @@ public final class ModelSlots {
         //  · standards-compliant model.onnx alongside the raw model.txt weights
         //  · the run's progress curves pushed to TensorBoard so they're viewable there
         exportToOnnxAsync(techniqueId, slot, w);
-        TensorboardLauncher.exportScalarsAsync(techniqueId, extras.graphs());
+        TensorboardLauncher.exportScalarsAsync(techniqueId, slot, score, Map.of("params", (double) w.length),
+                extras.graphs());
     }
 
     public static void saveConfig(String techniqueId, int slot, Map<String, Double> params, double score) {
@@ -135,7 +136,7 @@ public final class ModelSlots {
                 infoLines(techniqueId, slot, KIND_CONFIG, score, "params = " + params.size()),
                 "model.txt", model.toString(), params);
         // Learning ensembles carry real progress curves too — push them to TensorBoard.
-        TensorboardLauncher.exportScalarsAsync(techniqueId, extras.graphs());
+        TensorboardLauncher.exportScalarsAsync(techniqueId, slot, score, params, extras.graphs());
     }
 
     private static List<String> infoLines(String techniqueId, int slot, String kind, double score, String... extra) {

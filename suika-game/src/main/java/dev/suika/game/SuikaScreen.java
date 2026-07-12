@@ -130,6 +130,17 @@ public final class SuikaScreen extends ScreenAdapter {
             @Override public boolean keyDown(int k) {
                 if (k == Input.Keys.ESCAPE) { paused = !paused; return true; }
                 if (k == Input.Keys.R)      { game.setScreen(new SuikaScreen(game, mode)); return true; }
+                if (k == Input.Keys.SPACE && mode == Mode.HUMAN) {
+                    // Keyboard-only drop, completing the arrow-key aim scheme below —
+                    // mirrors touchDown's HUMAN branch exactly (same cooldown/chute/
+                    // pause/game-over guards) so Space is a genuine alternative to
+                    // clicking, not a shortcut that skips the click's safety checks.
+                    if (!paused && !core.isGameOver() && dropCooldown <= 0f && chuteClear()) {
+                        core.spawnDrop(hoverGameX);
+                        dropCooldown = DROP_COOLDOWN;
+                    }
+                    return true;
+                }
                 return false;
             }
         });
@@ -209,8 +220,30 @@ public final class SuikaScreen extends ScreenAdapter {
         if (paused)             drawPauseOverlay();
     }
 
+    /** Window-widths-per-second glide speed for arrow-key aiming — fast enough to cross
+     *  the well in well under a second, slow enough for a precise final nudge. */
+    private static final float ARROW_AIM_SPEED = (float)
+            ((PhysicsConfig.DROP_X_MAX - PhysicsConfig.DROP_X_MIN) * 1.4);
+
+    /** Left/Right arrows glide the hover position exactly like mouse movement would —
+     *  a keyboard-only alternative for aiming (Space drops, see keyDown) so the human
+     *  player never needs the mouse at all. Polled every frame (libGDX's isKeyPressed)
+     *  rather than tracked via press/release events, since a human can hold the key
+     *  down across many frames. */
+    private void updateHoverFromArrowKeys(float delta) {
+        boolean left  = Gdx.input.isKeyPressed(Input.Keys.LEFT);
+        boolean right = Gdx.input.isKeyPressed(Input.Keys.RIGHT);
+        if (!left && !right) return;
+        float radius = core.getState().currentFruitTier() != null
+                ? core.getState().currentFruitTier().radius : 0.5f;
+        float gx = hoverGameX + (right ? 1f : 0f) * ARROW_AIM_SPEED * delta
+                              - (left  ? 1f : 0f) * ARROW_AIM_SPEED * delta;
+        hoverGameX = (float) GameCore.clampDropForRadius(gx, radius);
+    }
+
     private void update(float delta) {
         if (dropCooldown > 0f) dropCooldown -= delta;
+        if (mode == Mode.HUMAN && !paused) updateHoverFromArrowKeys(delta);
 
         // smooth score display — count up toward the real score
         long actual = core.getScore();
@@ -328,7 +361,8 @@ public final class SuikaScreen extends ScreenAdapter {
 
         // mode badge + hints (bottom)
         String badge = mode == Mode.HUMAN ? "HUMAN" : "AI WATCH";
-        Ui.text(game.batch, game.fontSmall, badge + "   ·   ESC pause   ·   R restart",
+        String controls = mode == Mode.HUMAN ? "  ·  ←/→ + SPACE or mouse + click" : "";
+        Ui.text(game.batch, game.fontSmall, badge + controls + "   ·   ESC pause   ·   R restart",
                 48, 44, Theme.TEXT_FAINT);
 
         if (mode == Mode.AI_WATCH) {

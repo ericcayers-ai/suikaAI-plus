@@ -1,11 +1,8 @@
 package dev.suika.ai;
 
-import dev.suika.core.Fruit;
-import dev.suika.core.FruitTier;
 import dev.suika.core.GameCore;
 import dev.suika.core.GameState;
 import dev.suika.core.PhysicsConfig;
-import dev.suika.core.StepResult;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -81,7 +78,19 @@ public final class MctsAgent implements AgentPlugin {
         GameCore liveCore = buildCoreApproximation(state);
 
         MctsNode root = new MctsNode(-1, null);
+        MctsNode.MinMax stats = new MctsNode.MinMax();
         List<Integer> actions = allActions();
+        long rootScore = liveCore.getScore();
+
+        // Seed each column with a grounded one-ply value (see the live-core path for why).
+        root.expand(actions);
+        for (MctsNode child : root.children()) {
+            GameCore fork = liveCore.snapshot();
+            applyAction(fork, child.action);
+            double v = positionValue(fork, rootScore, fork.isGameOver());
+            stats.update(v);
+            child.backup(v);
+        }
 
         for (int r = 0; r < rollouts; r++) {
             GameCore fork = liveCore.snapshot();
@@ -89,7 +98,7 @@ public final class MctsAgent implements AgentPlugin {
             // Selection
             MctsNode node = root;
             while (node.isExpanded() && !node.isLeaf()) {
-                node = node.selectChild(explorationC);
+                node = node.selectChild(explorationC, stats);
                 applyAction(fork, node.action);
                 if (fork.isGameOver()) break;
             }
@@ -97,14 +106,15 @@ public final class MctsAgent implements AgentPlugin {
             // Expansion
             if (!fork.isGameOver() && !node.isExpanded()) {
                 node.expand(actions);
-                node = node.selectChild(explorationC);
+                node = node.selectChild(explorationC, stats);
                 applyAction(fork, node.action);
             }
 
-            // Rollout (random)
-            double value = rollout(fork);
+            // Rollout + evaluate on the shared value scale
+            double value = simulateAndValue(fork, rootScore);
 
             // Backup
+            stats.update(value);
             node.backup(value);
         }
 
@@ -119,7 +129,25 @@ public final class MctsAgent implements AgentPlugin {
     @Override
     public Object selectAction(GameCore liveCore, ActionSpec spec) {
         MctsNode root = new MctsNode(-1, null);
+        MctsNode.MinMax stats = new MctsNode.MinMax();
         List<Integer> actions = allActions();
+        long rootScore = liveCore.getScore();
+
+        // Seed every column with a grounded one-ply evaluation before any rollouts. This is
+        // the single change that makes UCT actually strong at this budget: with only tens of
+        // rollouts over ~32 columns a from-scratch tree spends its whole budget just visiting
+        // each arm once, so the pick is little better than the (weak) exploration order. By
+        // paying one physics settle per column up front — the exact thing the one-ply greedy
+        // does so well — every arm starts from a real value estimate, and the rollouts then
+        // concentrate on refining the promising ones instead of discovering them from zero.
+        root.expand(actions);
+        for (MctsNode child : root.children()) {
+            GameCore fork = liveCore.snapshot();
+            applyAction(fork, child.action);
+            double v = positionValue(fork, rootScore, fork.isGameOver());
+            stats.update(v);
+            child.backup(v);
+        }
 
         long deadline = searchDeadlineNs;   // read once per search
         for (int r = 0; r < rollouts; r++) {
@@ -128,16 +156,18 @@ public final class MctsAgent implements AgentPlugin {
 
             MctsNode node = root;
             while (node.isExpanded() && !node.isLeaf()) {
-                node = node.selectChild(explorationC);
+                node = node.selectChild(explorationC, stats);
                 applyAction(fork, node.action);
                 if (fork.isGameOver()) break;
             }
             if (!fork.isGameOver() && !node.isExpanded()) {
                 node.expand(actions);
-                node = node.selectChild(explorationC);
+                node = node.selectChild(explorationC, stats);
                 applyAction(fork, node.action);
             }
-            node.backup(rollout(fork));
+            double value = simulateAndValue(fork, rootScore);
+            stats.update(value);
+            node.backup(value);
         }
 
         int[] visits = new int[actionBins];
@@ -206,37 +236,42 @@ public final class MctsAgent implements AgentPlugin {
         core.dropAndSettle(x);
     }
 
-    private double rollout(GameCore core) {
-        long scoreBefore = core.getScore();
-        for (int d = 0; d < rolloutDepth && !core.isGameOver(); d++) {
-            // Heuristic-guided (ε-greedy) rollouts: pure-random play almost never merges,
-            // giving a near-zero value signal that leaves UCB1 unable to differentiate
-            // columns. A cheap merge-seeking default policy makes rollouts informative,
-            // which is what lets MCTS concentrate visits and actually plan strongly.
-            int a = (rng.nextDouble() < 0.8) ? heuristicAction(core.getState()) : rng.nextInt(actionBins);
-            applyAction(core, a);
+    /**
+     * Plays a short heuristic-guided rollout from {@code fork}, then scores the whole line
+     * from the root with {@link #positionValue}. ε-greedy over the shared {@link HeuristicAgent}
+     * default policy: pure-random play almost never merges, giving a flat value signal UCB1
+     * can't differentiate on, so a cheap survival-aware default policy makes rollouts
+     * informative — which is what lets the search concentrate on genuinely strong lines.
+     */
+    private double simulateAndValue(GameCore fork, long rootScore) {
+        boolean terminated = fork.isGameOver();
+        for (int d = 0; d < rolloutDepth && !fork.isGameOver(); d++) {
+            int a = (rng.nextDouble() < 0.85) ? heuristicAction(fork.getState()) : rng.nextInt(actionBins);
+            applyAction(fork, a);
+            if (fork.isGameOver()) { terminated = true; break; }
         }
-        return (core.getScore() - scoreBefore) * 0.001; // normalise to ~[0,1]
+        return positionValue(fork, rootScore, terminated);
     }
 
-    /** Cheap merge-seek / low-stack default policy used inside rollouts. */
+    /**
+     * The one value scale shared by the root-column seeds and the rollouts: total merge
+     * points gained since the root plus the board {@link BoardEval#health health} of where
+     * the line ended up, or a large fixed penalty (minus whatever it managed to score first)
+     * if the line died. Putting seeds and rollouts on the same scale is what makes the
+     * min-max normalisation and the visit counts mean the same thing across a search.
+     */
+    private double positionValue(GameCore core, long rootScore, boolean terminated) {
+        double gained = core.getScore() - rootScore;
+        if (terminated) return gained - BoardEval.GAME_OVER_PENALTY;
+        return gained + BoardEval.health(core.getState());
+    }
+
+    /** Cheap merge-seek / low-stack / dead-line-defending default policy used inside
+     *  rollouts — the same rule the {@link HeuristicAgent} baseline plays, so the
+     *  planner's imagined futures are rolled out with a sensible, survival-aware policy
+     *  rather than near-random play. */
     private int heuristicAction(GameState s) {
-        double xMin = PhysicsConfig.DROP_X_MIN, xMax = PhysicsConfig.DROP_X_MAX;
-        FruitTier cur = s.currentFruitTier();
-        int best = actionBins / 2;
-        double bestScore = Double.NEGATIVE_INFINITY;
-        for (int b = 0; b < actionBins; b++) {
-            double x = xMin + b / (double) (actionBins - 1) * (xMax - xMin);
-            double score = 0.0;
-            for (Fruit f : s.fruits()) {
-                double dx = Math.abs(f.x() - x);
-                if (f.tier() == cur && dx < (cur.radius + f.radius()) * 1.2) score += (cur.tier + 1) * 2.0;
-                if (dx < cur.radius * 2.0) score -= f.y() * 0.15;            // prefer lower columns
-                if (dx < cur.radius * 2.0 && s.isAboveDeadline(f)) score -= 6.0;
-            }
-            if (score > bestScore) { bestScore = score; best = b; }
-        }
-        return best;
+        return HeuristicAgent.bestColumn(s, actionBins);
     }
 
     /**

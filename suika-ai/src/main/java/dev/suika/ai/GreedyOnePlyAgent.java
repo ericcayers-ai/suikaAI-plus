@@ -7,10 +7,17 @@ import dev.suika.core.StepResult;
 
 /**
  * Greedy one-ply search: try every discretised drop position, simulate to settle,
- * pick the drop that maximises immediate score delta (ROADMAP §IV.1).
+ * pick the drop that maximises the {@link BoardEval#placement} value (ROADMAP §IV.1).
  *
  * <p>This is the first agent that exploits {@link GameCore#snapshot()} and sets
  * the bar for learned agents.
+ *
+ * <p>It scores each candidate with {@link BoardEval} rather than raw immediate score
+ * delta. Pure "best immediate score" tied on almost every drop (most drops merge
+ * nothing) and quietly piled the well up into an early loss; folding board health
+ * (height, dead-line risk, merge readiness) into the choice keeps it alive long enough
+ * to clear 1000 instead of stalling in the mid-hundreds — while a real merge, weighted
+ * heavily, still always wins when one is on offer.
  */
 public final class GreedyOnePlyAgent implements AgentPlugin {
 
@@ -60,9 +67,9 @@ public final class GreedyOnePlyAgent implements AgentPlugin {
         for (int a = 0; a < actionBins; a++) {
             GameCore fork = liveCore.snapshot();
             double x = binToX(a);
+            long before = fork.getScore();
             StepResult r = fork.dropAndSettle(x);
-            double value = r.observation().score() - state.score();
-            if (r.terminated()) value -= 10.0; // heavy penalty for game-over
+            double value = BoardEval.placement(fork, fork.getScore() - before, r.terminated());
             if (value > bestScore) { bestScore = value; bestAction = a; }
         }
 
@@ -115,14 +122,13 @@ public final class GreedyOnePlyAgent implements AgentPlugin {
         return spec.discrete() ? bestAction : binToX(bestAction);
     }
 
-    /** Simulates columns {@code [lo, hi)} and writes their score-deltas into {@code scores}. */
+    /** Simulates columns {@code [lo, hi)} and writes their {@link BoardEval#placement}
+     *  values into {@code scores}. */
     private void evaluateColumns(GameCore liveCore, long baseScore, double[] scores, int lo, int hi) {
         for (int a = lo; a < hi; a++) {
             GameCore fork = liveCore.snapshot();
             StepResult r  = fork.dropAndSettle(binToX(a));
-            double value = r.observation().score() - baseScore;
-            if (r.terminated()) value -= 10.0;
-            scores[a] = value;
+            scores[a] = BoardEval.placement(fork, fork.getScore() - baseScore, r.terminated());
         }
     }
 

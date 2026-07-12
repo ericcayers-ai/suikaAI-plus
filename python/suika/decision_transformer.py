@@ -26,6 +26,7 @@ Usage::
 
 from __future__ import annotations
 
+import datetime
 import math
 import random
 from dataclasses import dataclass
@@ -321,6 +322,24 @@ def default_tb_logdir() -> str:
     return str(Path.home() / ".suikai" / "tb_logs" / "dt")
 
 
+def new_run_dir(base_logdir: str) -> str:
+    """A fresh, uniquely-named subfolder under ``base_logdir`` for THIS training run.
+
+    Unlike PPO (train_ppo.py), which gets separate-run distinction for free from
+    SB3's auto-incrementing ``tb_log_name``, a bare ``SummaryWriter(log_dir=base_logdir)``
+    here would make every DT training call append to the exact same event file —
+    TensorBoard's run picker keys off immediate-child-of-logdir folder names, so two
+    training runs became visually indistinguishable, one curve silently overwriting/
+    mixing with the last. Matches the JVM side's ``run-<timestamp>-<seq>`` naming
+    (TensorboardLauncher.newRunDir) so JVM and Python runs of the same technique read
+    the same way in the TensorBoard run list.
+    """
+    stamp = datetime.datetime.now().strftime("run-%Y%m%d-%H%M%S")
+    d = Path(base_logdir) / stamp
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d)
+
+
 def resolve_device(device: str = "auto") -> str:
     """'auto' picks CUDA when torch reports it available, else CPU — matches
     train_ppo.py's convention so every real training script in this project
@@ -355,16 +374,31 @@ def train_dt(
 
     device = resolve_device(device)
     dt.to(device)
-    # Plain ASCII only — see train_ppo.py's identical note (Windows console mojibake).
-    print(f"Device: {device}" + (f"  |  TensorBoard: {tb_logdir}" if tb_logdir else ""))
 
     writer = None
+    run_dir = None
     if tb_logdir:
         try:
             from torch.utils.tensorboard import SummaryWriter
-            writer = SummaryWriter(log_dir=tb_logdir)
+            run_dir = new_run_dir(tb_logdir)
+            writer = SummaryWriter(log_dir=run_dir)
+            writer.add_text(
+                "run_info",
+                f"technique: dt  \n"
+                f"started: {datetime.datetime.now()}  \n"
+                f"epochs: {epochs}  \n"
+                f"batch_size: {batch_size}  \n"
+                f"ctx_len: {ctx_len}  \n"
+                f"lr: {lr}  \n"
+                f"device: {device}  \n"
+                f"dataset_size: {len(dataset)}  \n",
+                0,
+            )
         except ImportError:
             print("Warning: tensorboard not installed (pip install tensorboard) — skipping TB logging")
+
+    # Plain ASCII only — see train_ppo.py's identical note (Windows console mojibake).
+    print(f"Device: {device}" + (f"  |  TensorBoard: {run_dir or tb_logdir}" if tb_logdir else ""))
 
     opt    = optim.AdamW(dt.parameters(), lr=lr, weight_decay=1e-4)
     losses = []
@@ -413,6 +447,8 @@ def train_dt(
             print(f"  epoch {epoch+1:4d}/{epochs}  loss={avg:.4f}")
 
     if writer is not None:
+        writer.add_scalar("summary/final_loss", losses[-1], 0)
+        writer.add_scalar("summary/best_loss", min(losses), 0)
         writer.flush()
         writer.close()
     return losses

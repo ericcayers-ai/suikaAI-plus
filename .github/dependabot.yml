@@ -1,0 +1,35 @@
+version: 2
+updates:
+  # Gradle (JVM) dependencies across the multi-module build
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "java"
+    groups:
+      libgdx-lwjgl:
+        patterns:
+          - "com.badlogicgames.gdx:*"
+          - "org.lwjgl:*"
+
+  # Python training stack
+  - package-ecosystem: "pip"
+    directory: "/python"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+
+  # GitHub Actions used by CI
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "ci"

@@ -20,6 +20,7 @@ pointed at this same directory and opens it in the browser.
 from __future__ import annotations
 
 import argparse
+import datetime
 from pathlib import Path
 
 
@@ -37,6 +38,29 @@ def make_env(seed: int = 0, action_bins: int = 32):
         return env
 
     return _init
+
+
+def _make_run_info_callback(hparams: dict):
+    """Writes a ``run_info`` text summary once training starts — the run's hyperparameters
+    and start time, so a run picked out of TensorBoard's list (``ppo/run_3``, thanks to
+    SB3's own auto-incrementing ``tb_log_name``) is identifiable without cross-referencing
+    the app or shell history. Always attached, independent of ``--tb-detailed`` (which only
+    gates the EXTRA per-batch/histogram logging, not baseline identifiability)."""
+    from stable_baselines3.common.callbacks import BaseCallback
+    from stable_baselines3.common.logger import TensorBoardOutputFormat
+
+    class RunInfoCallback(BaseCallback):
+        def _on_training_start(self) -> None:
+            for fmt in self.logger.output_formats:
+                if isinstance(fmt, TensorBoardOutputFormat):
+                    lines = "  \n".join(f"{k}: {v}" for k, v in hparams.items())
+                    fmt.writer.add_text("run_info", f"technique: ppo  \nstarted: {datetime.datetime.now()}  \n{lines}  \n", 0)
+                    break
+
+        def _on_step(self) -> bool:
+            return True
+
+    return RunInfoCallback()
 
 
 def _make_detailed_callback():
@@ -152,11 +176,17 @@ def train(
     print(f"Device: {model.device}  |  TensorBoard: {tb_dir}"
           + ("  |  detailed logging on" if tb_detailed else ""))
 
-    callback = _make_detailed_callback() if tb_detailed else None
+    callbacks = [_make_run_info_callback({
+        "timesteps": timesteps, "action_bins": action_bins, "n_envs": n_envs,
+        "lr": lr, "seed": seed, "device": str(model.device),
+    })]
+    if tb_detailed:
+        callbacks.append(_make_detailed_callback())
+    from stable_baselines3.common.callbacks import CallbackList
     model.learn(total_timesteps=timesteps,
                 progress_bar=True,
                 reset_num_timesteps=True,
-                callback=callback)
+                callback=CallbackList(callbacks))
 
     checkpoint = str(out / "ppo_suika_final")
     model.save(checkpoint)

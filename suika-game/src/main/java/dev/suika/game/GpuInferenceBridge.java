@@ -77,9 +77,25 @@ final class GpuInferenceBridge implements AutoCloseable {
     boolean healthy() { return alive && process != null && process.isAlive(); }
 
     /** Argmax action for one observation, or -1 if the bridge is unhealthy / times out
-     *  (the caller then uses its JVM fallback). Marks the bridge dead on any failure. */
+     *  (the caller then uses its JVM fallback). Marks the bridge dead on any failure.
+     *  First-max-wins on ties, matching {@link dev.suika.ai.MlpPolicy#greedyAction} exactly
+     *  (both scan low-to-high with a strict {@code >}), so a GPU decision never diverges
+     *  from what the identical JVM forward pass would have picked. */
     int argmax(float[] obs) {
-        if (!healthy()) return -1;
+        double[] out = forward(obs);
+        if (out == null) return -1;
+        int best = 0;
+        for (int i = 1; i < out.length; i++) if (out[i] > out[best]) best = i;
+        return best;
+    }
+
+    /** Full output vector (logits / Q-values) for one observation, or {@code null} if the
+     *  bridge is unhealthy / times out (the caller then uses its JVM fallback). Marks the
+     *  bridge dead on any failure. Lets a caller that needs more than the argmax — e.g.
+     *  blending net opinion against another signal, see EnsembleAgents.NetGuidedMcts —
+     *  use the GPU path too, not just plain playback. */
+    double[] forward(float[] obs) {
+        if (!healthy()) return null;
         try {
             StringBuilder line = new StringBuilder();
             for (int i = 0; i < obs.length; i++) { if (i > 0) line.append(' '); line.append(obs[i]); }
@@ -87,11 +103,14 @@ final class GpuInferenceBridge implements AutoCloseable {
             stdin.write(line.toString());
             stdin.flush();
             String out = readLineTimed(2, TimeUnit.SECONDS);
-            if (out == null) { alive = false; return -1; }
-            return Integer.parseInt(out.trim());
+            if (out == null) { alive = false; return null; }
+            String[] parts = out.trim().split(" +");
+            double[] result = new double[parts.length];
+            for (int i = 0; i < parts.length; i++) result[i] = Double.parseDouble(parts[i]);
+            return result;
         } catch (Throwable t) {
             alive = false;
-            return -1;
+            return null;
         }
     }
 
@@ -159,5 +178,5 @@ final class GpuInferenceBridge implements AutoCloseable {
                     "    x=torch.tensor([float(v) for v in line.split()],dtype=torch.float32,device=device)\n" +
                     "    h=torch.tanh(W1@x + b1)\n" +
                     "    y=W2@h + b2\n" +
-                    "    sys.stdout.write(str(int(torch.argmax(y).item()))+'\\n'); sys.stdout.flush()\n";
+                    "    sys.stdout.write(' '.join(str(v) for v in y.tolist())+'\\n'); sys.stdout.flush()\n";
 }

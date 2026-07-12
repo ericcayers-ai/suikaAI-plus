@@ -207,6 +207,31 @@ public enum AiTechnique {
     }
 
     /**
+     * True only for techniques whose LIVE control-center decision loop genuinely runs a
+     * net query through the GPU bridge when GPU inference is active — i.e. where showing
+     * "GPU" next to the Parallelism control ({@link PlaygroundConfig#parallelismLabel()})
+     * is actually true right now, not just plausible because the technique happens to
+     * involve a net somewhere.
+     *
+     * <p>{@link #netBased()} is broader and deliberately includes techniques where that
+     * would be dishonest in live play: AlphaZero/MuZero's live JVM view is a pure search
+     * surrogate that never calls a net at all (the real net only exists in the separate
+     * Python trainer — see their {@code liveHint()}); Evolution/Imitation/DQN query their
+     * net many times a second across up to 16 live boards, a frequency where the GPU
+     * bridge's ~1ms IPC round-trip is a severe regression, not a speedup, so their live
+     * loop stays JVM-CPU by design (see {@link GpuInferenceBridge}'s class doc) — GPU only
+     * ever helps THOSE techniques on the separate load-once/infer-many playback path
+     * ({@link AiSlotPlayer#load}), which this method intentionally does not cover since
+     * {@link PlaygroundConfig} is never shown there.
+     *
+     * <p>{@link #ENS_MCTS_NET} is different: its donor net is queried exactly ONCE per
+     * move (see {@code EnsembleAgents.NetGuidedMcts}), a cadence where GPU offload is a
+     * genuine, safe win even in live play — so it's the one technique this returns true
+     * for.
+     */
+    public boolean gpuInferenceLive() { return this == ENS_MCTS_NET; }
+
+    /**
      * A plain-English, no-prior-knowledge explanation of the technique, already split
      * into short lines for the infocard. Think "explain it to a friend", not a paper.
      */

@@ -126,14 +126,18 @@ final class EnsembleAgents {
         return range > 1e-9 ? (v[i] - min) / range : 0.5;
     }
 
+    /** Exact one-ply value of dropping into {@code bin}: the shared survival-aware
+     *  {@link dev.suika.ai.BoardEval} score of the settled board (realized merges plus
+     *  board health), so the tiebreak / verifier ensembles rank placements the same way
+     *  the greedy and MCTS agents do — keeping the well alive, not just chasing the
+     *  biggest immediate merge. */
     private static double quickEval(GameCore core, int actionBins, int bin) {
         GameCore fork = core.snapshot();
         double x = PhysicsConfig.DROP_X_MIN
                 + bin / (double) (actionBins - 1) * (PhysicsConfig.DROP_X_MAX - PhysicsConfig.DROP_X_MIN);
+        long before = fork.getScore();
         StepResult r = fork.dropAndSettle(x);
-        double v = r.observation().score() - core.getScore();
-        if (r.terminated()) v -= 10.0;
-        return v;
+        return dev.suika.ai.BoardEval.placement(fork, fork.getScore() - before, r.terminated());
     }
 
     // -------------------------------------------------------------------------
@@ -151,6 +155,15 @@ final class EnsembleAgents {
         private final StateObservationEncoder encoder = new StateObservationEncoder();
         private volatile int[] lastVisits = new int[0];
 
+        // The donor net is queried exactly ONCE per move (not once per rollout — MCTS's
+        // own search stays pure-JVM, see mcts.selectAction above), so unlike a training
+        // eval loop this is a safe, worthwhile cadence for the GPU bridge's ~1ms IPC —
+        // see GpuInferenceBridge's class doc for why the hotter loops deliberately don't
+        // do this. Never affects the decision, only where the arithmetic runs (same
+        // guarantee GpuNeuralAgent gives the playback path).
+        private final GpuInferenceBridge gpuBridge;
+        private volatile boolean gpuUsable;
+
         NetGuidedMcts(int rollouts, int actionBins, AiTechnique donor, int donorSlot, double netWeight) {
             this.mcts = new MctsAgent(rollouts, Math.sqrt(2), 6, actionBins);
             this.donor = donor;
@@ -158,12 +171,24 @@ final class EnsembleAgents {
             this.donorTrained = donorTrained(donor, donorSlot);
             this.net = loadOrFreshPolicy(donor, donorSlot, 101L);
             this.netWeight = netWeight;
+            GpuInferenceBridge b = null;
+            if (GpuProbe.gpuInferenceActive()) {
+                b = GpuInferenceBridge.start(StateObservationEncoder.TOTAL, ModelSlots.HIDDEN_SIZE,
+                        ModelSlots.OUTPUT_BINS, net.getWeights(), "cuda");
+                if (!b.healthy()) { b.close(); b = null; }
+            }
+            this.gpuBridge = b;
+            this.gpuUsable = b != null;
         }
         @Override public String id()          { return "ens-mcts-net"; }
         @Override public String displayName() {
             return "MCTS + Policy Net (" + donor.display + (donorSlot >= 1 ? " slot " + donorSlot : "") + ")";
         }
         @Override public MctsAgent mctsCore()  { return mcts; }
+
+        /** True when this ensemble's donor net is genuinely being queried on the GPU right
+         *  now — mirrors {@link GpuNeuralAgent#onGpu()} for the same live-status use. */
+        boolean netOnGpu() { return gpuUsable && gpuBridge != null && gpuBridge.healthy(); }
 
         @Override public Object selectAction(GameState state, ActionSpec spec) {
             return blend(mcts.selectAction(state, spec), state, spec);
@@ -178,7 +203,7 @@ final class EnsembleAgents {
             if (!spec.discrete() || visits.length == 0) return mctsAction;
             int maxVisit = 0; for (int v : visits) maxVisit = Math.max(maxVisit, v);
             if (maxVisit == 0) return mctsAction;
-            double[] logits = net.forward(encoder.encode(state));
+            double[] logits = netForward(state);
             int best = ((Number) mctsAction).intValue();
             double bestScore = Double.NEGATIVE_INFINITY;
             for (int b = 0; b < spec.bins() && b < visits.length; b++) {
@@ -188,6 +213,15 @@ final class EnsembleAgents {
                 if (score > bestScore) { bestScore = score; best = b; }
             }
             return best;
+        }
+        private double[] netForward(GameState state) {
+            float[] obs = encoder.encode(state);
+            if (netOnGpu()) {
+                double[] out = gpuBridge.forward(obs);
+                if (out != null) return out;
+                gpuUsable = false; // bridge died — fall back to JVM for the rest of the session
+            }
+            return net.forward(obs);
         }
     }
 

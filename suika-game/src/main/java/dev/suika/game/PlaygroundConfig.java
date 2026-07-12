@@ -32,11 +32,14 @@ public final class PlaygroundConfig {
 
     /**
      * Display label for the Parallelism cycler. Honest about compute: only
-     * {@link AiTechnique#gpuCapableTraining()} (currently just PPO's real
-     * {@code --device} flag) shows "GPU" when {@link GpuProbe} has detected one — every
-     * other technique's parallel work (evolution eval pool, root-parallel MCTS,
-     * column-parallel Greedy, the ensembles' inner-agent pool) runs on the JVM with
-     * dyn4j physics, which has no CUDA path, so those always read as a CPU
+     * {@link AiTechnique#gpuCapableTraining()} (PPO's real {@code --device} flag) and
+     * {@link AiTechnique#gpuInferenceLive()} (ENS_MCTS_NET's once-per-move donor-net
+     * query — see that method's doc for why it, and only it, is safe/genuine in live
+     * play) show "GPU" when {@link GpuProbe} has detected one. Every other technique's
+     * parallel work (evolution eval pool, root-parallel MCTS, column-parallel Greedy,
+     * the ensembles' inner-agent pool, DQN/Evolution/Imitation's per-frame net queries)
+     * runs on the JVM with dyn4j physics — or, for those net queries, at a frequency the
+     * GPU bridge's IPC round-trip would only slow down — so those always read as a CPU
      * thread/core count regardless of GPU presence.
      */
     public String parallelismLabel() {
@@ -45,7 +48,7 @@ public final class PlaygroundConfig {
         //    on, not forced CPU-only). No CPU thread fan-out is used then.
         //  · N envs — PPO's parallel TRAINING environments (--n-envs), a Python concept.
         //  · N cores — the JVM CPU thread pool for search / evolution eval.
-        boolean gpuInfer = GpuProbe.gpuInferenceActive() && technique.netBased();
+        boolean gpuInfer = GpuProbe.gpuInferenceActive() && technique.gpuInferenceLive();
         if (parallelism > 0) {
             if (technique.gpuCapableTraining()) return parallelism + " envs";
             return parallelism + " threads";

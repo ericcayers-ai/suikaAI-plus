@@ -46,3 +46,10 @@ suika-assets/src/main/resources/audio/
 *.arrow
 runs/
 experiments/
+
+# Local tooling / agent artifacts (not part of the project source)
+.claude/
+graphify-out/
+.graphify_hook_installed
+.graphifyignore
+.graphifyignore.legacy

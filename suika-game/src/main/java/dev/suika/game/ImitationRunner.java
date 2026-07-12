@@ -259,7 +259,8 @@ public final class ImitationRunner extends LiveBoardRunner {
                 "training live and plays its OWN game on the RIGHT,",
                 "copying your style as it learns.",
                 "",
-                "Click in the left well to drop and begin.",
+                "Move the mouse to aim + click to drop, or use ←/→ to",
+                "aim + Down arrow to drop. Click/press Down to begin.",
         };
     }
 

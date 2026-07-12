@@ -37,9 +37,13 @@ import static org.lwjgl.vulkan.VK12.*;
  * <p>This is REAL gameplay, not a tech demo: a full game runs inside the window —
  * fruits dropped into a cylindrical glass jar standing on a pine-wood table in a
  * brightly lit tan studio (the wall sits past the focal plane and melts into
- * bokeh). Move the mouse to aim, click to drop, R restarts. The denoiser is
- * always on. The score and next fruit live in the window title (rendering crisp
- * text through a raw Vulkan RT pipeline isn't worth the complexity for a lab).
+ * bokeh). Two fully independent, always-live control schemes: move the mouse to
+ * aim and click to drop, OR use WASD to aim and Space to drop — never a mode
+ * toggle to pick between them, both write through the same aim/drop calls so a
+ * player can mix them freely (e.g. mouse to rough-aim, Space to drop) or stick
+ * to one exclusively. R restarts, Esc pauses. The denoiser is always on. The
+ * score and next fruit live in the window title (rendering crisp text through a
+ * raw Vulkan RT pipeline isn't worth the complexity for a lab).
  *
  * <p>Physics is selectable at launch: the classic 2D engine presented as a slice
  * through the jar, or true 3D physics ({@link Jar3DPhysics}) where the mouse aims
@@ -238,6 +242,15 @@ public final class RtLabLauncher {
                         session.reset();
                     } else if (key == GLFW_KEY_ESCAPE) {
                         paused[0] = !paused[0];
+                    } else if (key == GLFW_KEY_SPACE) {
+                        // Completes the keyboard-only control scheme: WASD aims (see the
+                        // per-frame glide below), SPACE drops — fully independent of the
+                        // mouse, exactly mirroring what a left-click does for the
+                        // mouse-aim scheme. The two schemes never conflict since they
+                        // write through the same session.setPointer/drop() calls; a
+                        // player can freely mix them (touch the mouse to fine-aim, then
+                        // drop with Space) or stick to one exclusively.
+                        if (aiDriver == null && !paused[0]) session.drop();
                     }
                 });
                 glfwSetCursorPosCallback(window.handle, (win, cx, cy) -> {
