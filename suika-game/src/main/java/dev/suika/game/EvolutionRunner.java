@@ -436,6 +436,7 @@ public final class EvolutionRunner extends AgentRunner {
         if (ga  != null) ga.close();
         if (cma != null) cma.close();
         ghostPool.shutdownNow();
+        super.dispose();
     }
 
     // -------------------------------------------------------------------------

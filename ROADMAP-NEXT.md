@@ -1,5 +1,12 @@
 # 🍉 Suika AI Sandbox — Next Roadmap (post-0.10.0)
 
+> **Status (v0.17.x):** Most of §1–§12 below shipped across **v0.11.0 → v0.17.2**
+> (RT shell, cinematic pipeline, merge FX, global display, playground ensembles,
+> landscape control center, pixels perception, debug-matrix CI job). Keep this file
+> as the historical work plan; treat unchecked boxes as *likely done unless you
+> verify otherwise against the live code / CHANGELOG*, and prefer
+> [`ROADMAP.md`](ROADMAP.md) + [`CHANGELOG.md`](CHANGELOG.md) for what remains.
+>
 > A focused, execution-oriented roadmap for the arc from **v0.10.0 → v1.0**. Unlike
 > the north-star [`ROADMAP.md`](ROADMAP.md) (which frames the whole vision), this
 > document is a **work plan**: every item is something concrete to build, grouped so

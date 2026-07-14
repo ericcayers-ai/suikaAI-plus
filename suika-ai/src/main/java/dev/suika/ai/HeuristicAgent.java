@@ -53,7 +53,7 @@ public final class HeuristicAgent implements AgentPlugin {
      */
     public static int bestColumn(GameState state, int bins) {
         FruitTier cur = state.currentFruitTier();
-        double dangerY = PhysicsConfig.DEADLINE_Y - 1.5;
+        double dangerY = PhysicsConfig.DEADLINE_Y - BoardEval.DANGER_BAND;
         double midX = (PhysicsConfig.DROP_X_MIN + PhysicsConfig.DROP_X_MAX) / 2.0;
 
         // Stage 1: merge-seek onto the nearest-to-centre reachable, safe same-tier fruit.

@@ -3,30 +3,24 @@ package dev.suika.game;
 /**
  * The curated AI capability matrix surfaced in the AI Playground.
  *
- * <p>v0.12 cull: the old 21-entry list is trimmed to the 10 most important
- * techniques plus the 5 strongest, mechanically-distinct ensembles. Selection
- * rationale (per family, strongest representatives kept):
+ * <p>Shipping matrix (v0.14+): <b>13 techniques + 5 ensembles</b>. The v0.12 cull
+ * trimmed an earlier 21-technique / 10-ensemble sprawl; a few of those drops
+ * (DQN, PBT, Behavioral Cloning) were later restored as first-class entries because
+ * they teach distinct paradigms and have live JVM training loops. Selection rationale:
  * <ul>
  *   <li><b>Planning</b>: MCTS (canonical search), AlphaZero (search + learned
- *       guidance), Greedy One-Ply (exact one-step evaluation — strong AND the
- *       building block several ensembles verify with).</li>
- *   <li><b>Deep RL</b>: PPO — the field's default policy-gradient baseline and the
- *       one technique here with a real GPU training path. DQN/SAC dropped: same
- *       niche, weaker fit for this discrete drop-column game.</li>
- *   <li><b>Model-based</b>: MuZero (subsumes Dreamer for a game with cheap exact
- *       simulation; keeps the pixels-perception panel).</li>
- *   <li><b>Evolution</b>: Neuroevolution GA (transparent, teachable, now with
- *       selectable selection mathematics) and CMA-ES (the strongest practical
- *       gradient-free optimizer). PBT dropped — a meta-strategy, not a learner.</li>
- *   <li><b>Imitation</b>: DAgger (strictly dominates plain BC — it fixes BC's
- *       compounding-error problem).</li>
- *   <li><b>Offline</b>: Decision Transformer (return-conditioned sequence modeling;
- *       covers the offline niche with a livelier knob than CQL/IQL).</li>
+ *       guidance), Greedy One-Ply (exact survival-aware one-step evaluation — strong
+ *       AND the building block several ensembles verify with).</li>
+ *   <li><b>Deep RL</b>: PPO (Python/SB3 + GPU training) and DQN (live JVM Q-learning).</li>
+ *   <li><b>Model-based</b>: MuZero (latent dynamics; keeps the pixels-perception panel).</li>
+ *   <li><b>Evolution</b>: Neuroevolution GA, CMA-ES, and PBT (population meta-training).</li>
+ *   <li><b>Imitation</b>: DAgger and Behavioral Cloning (human-playstyle cloning).</li>
+ *   <li><b>Offline</b>: Decision Transformer (return-conditioned sequence modeling).</li>
  *   <li><b>Baseline</b>: Heuristic — the scripted floor every learner must beat,
  *       and a real committee member inside two ensembles.</li>
  * </ul>
- * Dropped: DQN, SAC, Dreamer, PBT, BC, GAIL, Offline RL, Diffusion, Flow,
- * Racing Self-Play, Random — plus the 5 weaker/duplicative ensembles (Voting
+ * Retired permanently: SAC, Dreamer, GAIL, Offline RL (CQL/IQL), Diffusion, Flow,
+ * Racing Self-Play, Random — plus weaker/duplicative ensembles (plain Voting
  * Committee superseded by Adaptive Voting; Evolved-Net MCTS folded into
  * MCTS + Policy Net's selectable donor; Greedy Guard, Imitation Blend and
  * Generative Filter retired).
@@ -44,7 +38,7 @@ public enum AiTechnique {
             "MCTS guided by a policy-value net. Search core JVM, net trains in Python."),
     GREEDY("greedy", "Greedy One-Ply", "Planning", "state", "planning", Family.PLANNING,
             true, false, true, true, 78,
-            "Simulates every column for real, picks the best immediate score. Fast and solid."),
+            "Simulates every column for real, picks the BoardEval-best placement (merges + board health). Fast and solid."),
 
     // ---- Deep RL ----
     PPO("ppo", "PPO", "Deep RL", "either", "learning", Family.PYTHON,

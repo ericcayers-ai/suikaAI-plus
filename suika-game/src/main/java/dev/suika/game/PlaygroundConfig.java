@@ -101,14 +101,13 @@ public final class PlaygroundConfig {
     // ---- Ensemble customization (see EnsembleAgents) ----
 
     /** Which trained save the MCTS + Policy Net ensemble sources its donor net from.
-     *  Evolution (Neuroevo/CMA-ES/PBT) and Imitation (DAgger/BC) all save a compatible
-     *  {@link dev.suika.ai.MlpPolicy}; PPO and MuZero are offered too — when GPU inference
-     *  is active and a real exported model exists they route through the Python/ONNX path,
-     *  otherwise the ensemble honestly shows them as untrained. */
+     *  Evolution (Neuroevo/CMA-ES/PBT), Imitation (DAgger/BC), and DQN all save a
+     *  compatible {@link dev.suika.ai.MlpPolicy} weight file. PPO/MuZero are omitted here
+     *  because their exports are ONNX/SB3 checkpoints — the ensemble loader only reads
+     *  MlpPolicy slots today ({@link EnsembleAgents#loadOrFreshPolicy}). */
     public static final AiTechnique[] ENSEMBLE_DONORS = {
             AiTechnique.NEUROEVO, AiTechnique.CMA_ES, AiTechnique.PBT,
-            AiTechnique.DAGGER, AiTechnique.BC, AiTechnique.DQN,
-            AiTechnique.PPO, AiTechnique.MUZERO };
+            AiTechnique.DAGGER, AiTechnique.BC, AiTechnique.DQN };
     public int ensembleDonorIndex = 0;
     public AiTechnique ensembleDonor() { return ENSEMBLE_DONORS[ensembleDonorIndex]; }
 

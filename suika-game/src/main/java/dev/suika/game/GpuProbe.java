@@ -87,7 +87,11 @@ final class GpuProbe {
 
     private static void probe() {
         try {
-            String python = PythonSetup.isReady() ? PythonSetup.venvPython().toString() : findSystemPython();
+            String python = null;
+            // Only probe the managed venv — GpuInferenceBridge / train scripts use that
+            // interpreter. Falling back to system Python could report CUDA while the
+            // venv couldn't actually run GPU inference.
+            if (PythonSetup.isReady()) python = PythonSetup.venvPython().toString();
             if (python == null) { available = false; return; }
             Process p = new ProcessBuilder(python, "-c",
                     "import torch;" +
@@ -109,15 +113,5 @@ final class GpuProbe {
         } catch (Exception e) {
             available = false;
         }
-    }
-
-    private static String findSystemPython() {
-        for (String exe : new String[]{"python", "python3", "py"}) {
-            try {
-                Process p = new ProcessBuilder(exe, "--version").redirectErrorStream(true).start();
-                if (p.waitFor() == 0) return exe;
-            } catch (Exception ignored) { /* try next */ }
-        }
-        return null;
     }
 }

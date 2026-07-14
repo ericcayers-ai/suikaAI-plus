@@ -19,7 +19,7 @@ import dev.suika.env.StateObservationEncoder;
  * decisions are identical; this wrapper only changes WHERE the arithmetic runs, never the
  * result — so a bridge failure downgrades performance, never correctness.
  */
-final class GpuNeuralAgent implements AgentPlugin {
+final class GpuNeuralAgent implements AgentPlugin, AutoCloseable {
 
     private static final int IN = StateObservationEncoder.TOTAL, HID = ModelSlots.HIDDEN_SIZE, OUT = ModelSlots.OUTPUT_BINS;
 
@@ -61,5 +61,11 @@ final class GpuNeuralAgent implements AgentPlugin {
         if (!spec.discrete()) return a;
         int bins = spec.bins();
         return Math.max(0, Math.min(bins - 1, a));
+    }
+
+    @Override
+    public void close() {
+        gpuUsable = false;
+        if (bridge != null) bridge.close();
     }
 }

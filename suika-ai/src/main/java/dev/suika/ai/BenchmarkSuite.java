@@ -45,11 +45,14 @@ public final class BenchmarkSuite {
         List<Double> all = new ArrayList<>();
 
         for (long seed : seeds) {
+            // Re-run the SAME seed episodesPerSeed times. Agents with internal RNG
+            // (MCTS rollouts) still vary across episodes; the physics/RNG seed of the
+            // game itself stays fixed so averages cut agent-stochastic variance rather
+            // than silently expanding the seed set.
             for (int ep = 0; ep < episodesPerSeed; ep++) {
-                GameCore game = new GameCore(seed + ep);
+                GameCore game = new GameCore(seed);
                 int steps = 0;
                 while (!game.isGameOver() && steps < maxSteps) {
-                    // FIX: Pass live GameCore directly
                     Object action = agent.selectAction(game, spec);
                     double x = spec.toDropX(action,
                             PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);

@@ -7,6 +7,28 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-07-14
+
+### Fixed
+- MCTS / auto-drop / ensembles now share the full `BoardEval.placement` scale (not raw
+  score + health for search, or raw Δscore for auto-drop refinement).
+- Headless `dev.suika.game.Bench` restored; `BenchmarkSuite` averages true per-seed
+  re-runs (`-Deps`) instead of silently shifting the seed each episode.
+- Fruit radii re-synced across `FruitTier`, `FruitLadder`, `fruits.json`, and
+  `python/suika/env.py`.
+- PPO ONNX export now includes SB3's `action_net` head (logits shape = action bins).
+- CI capture job passes `-Dsuika.capture.*` via `JAVA_OPTS`; PR CI also runs
+  `:suika-game:test` / `:suika-assets:test`; release workflow verifies tag ↔ Gradle version.
+- Think-time budget and root-parallelism reach MCTS *ensembles*; GPU inference bridges
+  are closed on soft startup failure and technique teardown.
+- Control Center: no human drops while paused; ESC closes the SAVES modal first.
+- Greedy continuous actions return `[-1,1]` as `ActionSpec.toDropX` expects.
+- Ensemble donor picker no longer offers PPO/MuZero (ONNX path was never wired).
+
+### Changed
+- Heuristic danger band matches `BoardEval.DANGER_BAND`; AiTechnique docs match the
+  shipping 13+5 matrix; menu / README keyboard hints updated.
+
 ## [0.17.1] — 2026-07-12
 
 ### Fixed
@@ -100,7 +122,8 @@ Frontend rebuild: crisp fonts, live physics, settings, AI selection.
 ## [0.2.0] — 2026
 Initial public foundation.
 
-[Unreleased]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.17.1...HEAD
+[Unreleased]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.17.2...HEAD
+[0.17.2]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.17.1...v0.17.2
 [0.17.1]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.15.0...v0.16.0

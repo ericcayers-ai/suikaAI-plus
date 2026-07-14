@@ -186,6 +186,7 @@ public final class DqnRunner extends AgentRunner {
         epoch.incrementAndGet();
         if (worker != null) worker.interrupt();
         if (dqn != null) dqn.close();
+        super.dispose();
     }
 
     // -------------------------------------------------------------------------

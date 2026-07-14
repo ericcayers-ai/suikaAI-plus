@@ -51,6 +51,12 @@ jobs:
       - name: Run suika-ai unit tests
         run: ./gradlew :suika-ai:test --parallel
 
+      - name: Run suika-game unit tests
+        run: ./gradlew :suika-game:test --parallel
+
+      - name: Run suika-assets unit tests
+        run: ./gradlew :suika-assets:test --parallel
+
       - name: Run suika-dash unit tests
         run: ./gradlew :suika-dash:test --parallel
 
@@ -112,29 +118,33 @@ jobs:
         run: ./gradlew :suika-app:installDist --parallel
 
       - name: Run the matrix capture (bounded axes) — portrait
+        env:
+          JAVA_OPTS: >-
+            -Dsuika.capture.dir=${{ github.workspace }}/capture-out/portrait
+            -Dsuika.capture.mode=matrix
+            -Dsuika.capture.techniques=mcts,neuroevo,dagger,ppo
+            -Dsuika.capture.columns=32
+            -Dsuika.capture.speeds=1
+            -Dsuika.capture.durations=4
+            -Dsuika.capture.max=40
         run: |
           xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" \
-            suika-app/build/install/suika-app/bin/suika-app \
-            -Dsuika.capture.dir="$PWD/capture-out/portrait" \
-            -Dsuika.capture.mode=matrix \
-            -Dsuika.capture.techniques=mcts,neuroevo,dagger,ppo \
-            -Dsuika.capture.columns=32 \
-            -Dsuika.capture.speeds=1 \
-            -Dsuika.capture.durations=4 \
-            -Dsuika.capture.max=40
+            suika-app/build/install/suika-app/bin/suika-app
 
       - name: Run the matrix capture (bounded axes) — landscape
+        env:
+          JAVA_OPTS: >-
+            -Dsuika.capture.dir=${{ github.workspace }}/capture-out/landscape
+            -Dsuika.capture.land=true
+            -Dsuika.capture.mode=matrix
+            -Dsuika.capture.techniques=mcts,neuroevo
+            -Dsuika.capture.columns=32
+            -Dsuika.capture.speeds=1
+            -Dsuika.capture.durations=4
+            -Dsuika.capture.max=20
         run: |
           xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" \
-            suika-app/build/install/suika-app/bin/suika-app \
-            -Dsuika.capture.dir="$PWD/capture-out/landscape" \
-            -Dsuika.capture.land=true \
-            -Dsuika.capture.mode=matrix \
-            -Dsuika.capture.techniques=mcts,neuroevo \
-            -Dsuika.capture.columns=32 \
-            -Dsuika.capture.speeds=1 \
-            -Dsuika.capture.durations=4 \
-            -Dsuika.capture.max=20
+            suika-app/build/install/suika-app/bin/suika-app
 
       - name: Fail on any reported anomaly
         run: |

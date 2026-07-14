@@ -6,18 +6,28 @@ of seeds and reports the mean final score.
 
 ## Running it
 
-The bench lives in the test/dev harness (`dev.suika.game.Bench`). The quickest path:
+The bench entry point is [`dev.suika.game.Bench`](../suika-game/src/main/java/dev/suika/game/Bench.java).
+It evaluates through [`BenchmarkSuite`](../suika-ai/src/main/java/dev/suika/ai/BenchmarkSuite.java)
+(canonical seeds, live-core `selectAction`). Quickest path:
 
 ```bash
-# Build the AI jar the bench evaluates against
-./gradlew :suika-ai:jar :suika-game:compileJava
+# Assemble the runtime classpath
+./gradlew :suika-app:installDist
 
-# Then run Bench on the assembled runtime classpath with, e.g.:
-#   -Dsteps=500      max drops per game
-#   -Drollouts=80    MCTS/ensemble rollout budget
-#   -Deps=3          episodes averaged per seed (cuts stochastic-agent variance)
-#   -Donly=MCTS,Greedy   restrict to named techniques
+# On Windows PowerShell (use ; as the path separator; : on Linux/macOS):
+java -Dsteps=500 -Drollouts=80 -Deps=3 "-Donly=MCTS,Greedy" `
+  -cp "suika-app/build/install/suika-app/lib/*" `
+  dev.suika.game.Bench
 ```
+
+System properties:
+
+| Flag | Default | Meaning |
+|---|---:|---|
+| `-Dsteps` | 500 | max drops per game |
+| `-Drollouts` | 80 | MCTS/ensemble rollout budget |
+| `-Deps` | 3 | episodes averaged **per seed** (cuts stochastic-agent variance; same `GameCore(seed)` each time) |
+| `-Donly` | *(all benchable)* | comma-separated technique names/ids (`MCTS`, `Greedy`, `ens-mcts-net`, …) |
 
 Seeds are fixed (`{1, 42, 137, 999, 31415}`) so runs are comparable. `GameCore(seed)`
 reproduces a game exactly, but agents that use their own RNG (MCTS rollouts) are
@@ -37,14 +47,15 @@ Two families of technique behave very differently, and it's worth being explicit
 ### Simulate-and-pick (planning) techniques
 
 These evaluate candidate drops against the real physics (`GameCore.dropAndSettle`) using the
-shared survival-aware [`BoardEval`](../suika-ai/src/main/java/dev/suika/ai/BoardEval.java).
+shared survival-aware [`BoardEval`](../suika-ai/src/main/java/dev/suika/ai/BoardEval.java)
+(including MCTS root seeds / rollouts and the auto-drop refinement pass).
 With the v0.17.1 MCTS search fix (min-max value normalization + one-ply root seeding) and
 the `BoardEval` tuning, they clear — or sit right at — 1000, and climb further at higher
 rollout budgets:
 
 | Technique | Mean | Notes |
 |---|---:|---|
-| AlphaZero (surrogate) | ~1025 | search + heuristic guidance |
+| AlphaZero (surrogate) | ~1025 | search + heuristic guidance (live path is MCTS-shaped) |
 | Return-Conditioned + MCTS Verify | ~1015 | proposal sanity-checked by search |
 | Greedy One-Ply | ~900–1000 | exact one-step evaluation; deterministic |
 | MCTS | ~950–1100 | stochastic; strengthens with more rollouts |

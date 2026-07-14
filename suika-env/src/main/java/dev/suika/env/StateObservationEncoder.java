@@ -59,7 +59,7 @@ public final class StateObservationEncoder implements ObservationEncoder {
                 out[fi + 4] = (float) (f.angle() / ANGLE_SCALE);
                 out[fi + 5] = (float) (f.angularVelocity() / VEL_SCALE);
                 out[fi + 6] = f.tier().tier / 11.0f;
-                out[fi + 7] = (float) (f.radius() / 4.0);   // headroom above WATERMELON's 3.52 radius
+                out[fi + 7] = (float) (f.radius() / 4.0);   // headroom above WATERMELON's 3.80 radius
                 out[fi + 8] = f.asleep() ? 1.0f : 0.0f;
             }
             // else: zero-padded (array is already zeroed from construction)

@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="suika-ai-sandbox",
-    version="0.1.0",
+    version="0.17.2",
     description="Gymnasium environment and training toolkit for the Suika AI Sandbox",
     long_description=open("../README.md", encoding="utf-8").read()
         if __import__("pathlib").Path("../README.md").exists() else "",

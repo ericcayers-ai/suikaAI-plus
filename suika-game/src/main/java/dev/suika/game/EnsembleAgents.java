@@ -145,7 +145,7 @@ final class EnsembleAgents {
     //    final pick among visited columns. Donor save (Neuroevo / CMA-ES / DAgger)
     //    and blend weight are user-selectable.
     // -------------------------------------------------------------------------
-    static final class NetGuidedMcts implements AgentPlugin, HasMctsCore {
+    static final class NetGuidedMcts implements AgentPlugin, HasMctsCore, AutoCloseable {
         private final MctsAgent mcts;
         private final MlpPolicy net;
         private final double netWeight;
@@ -222,6 +222,12 @@ final class EnsembleAgents {
                 gpuUsable = false; // bridge died — fall back to JVM for the rest of the session
             }
             return net.forward(obs);
+        }
+
+        @Override
+        public void close() {
+            gpuUsable = false;
+            if (gpuBridge != null) gpuBridge.close();
         }
     }
 

@@ -208,9 +208,12 @@ def _export_onnx(model, path: Path, obs_dim: int) -> None:
             self.policy = policy
 
         def forward(self, obs):
-            return self.policy.mlp_extractor.policy_net(
-                self.policy.features_extractor(obs)
-            )
+            # SB3 Discrete PPO: features → mlp latent_pi → action_net → action logits.
+            # Returning only policy_net's latent (common mistake) yields shape
+            # (batch, latent_dim) instead of (batch, n_actions).
+            features = self.policy.extract_features(obs)
+            latent_pi, _ = self.policy.mlp_extractor(features)
+            return self.policy.action_net(latent_pi)
 
     # ONNX export always happens on CPU — the tiny policy net doesn't benefit from
     # GPU for a single dummy forward pass, and it keeps the exported graph

@@ -1,7 +1,6 @@
 package dev.suika.ai;
 
 import dev.suika.core.GameCore;
-import dev.suika.core.GameState;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -12,8 +11,7 @@ class PlanningTest {
     void greedyOnePlySelectsValidAction() {
         GreedyOnePlyAgent agent = new GreedyOnePlyAgent(8);
         GameCore core = new GameCore(5L);
-        GameState state = core.getState();
-        Object action = agent.selectAction(state, ActionSpec.discrete(8));
+        Object action = agent.selectAction(core, ActionSpec.discrete(8));
         int a = ((Number) action).intValue();
         assertTrue(a >= 0 && a < 8, "Action must be in [0, bins)");
     }
@@ -23,17 +21,24 @@ class PlanningTest {
         GreedyOnePlyAgent agent = new GreedyOnePlyAgent(16);
         GameCore core = new GameCore(22L);
         for (int i = 0; i < 5; i++) core.dropAndSettle(5.0);
-        // Now board has fruits — greedy agent should still work
-        Object action = agent.selectAction(core.getState(), ActionSpec.discrete(16));
+        Object action = agent.selectAction(core, ActionSpec.discrete(16));
         assertNotNull(action);
     }
 
     @Test
+    void greedyContinuousActionIsNormalizedNotWorldX() {
+        GreedyOnePlyAgent agent = new GreedyOnePlyAgent(8);
+        GameCore core = new GameCore(5L);
+        Object action = agent.selectAction(core, ActionSpec.continuous(-1, 1));
+        double a = ((Number) action).doubleValue();
+        assertTrue(a >= -1.0 && a <= 1.0, "continuous action must be in [-1,1]; was " + a);
+    }
+
+    @Test
     void mctsSelectsValidActionOnFreshBoard() {
-        // Small rollout count to keep test fast
         MctsAgent agent = new MctsAgent(5, Math.sqrt(2), 3, 8);
         GameCore core = new GameCore(9L);
-        Object action = agent.selectAction(core.getState(), ActionSpec.discrete(8));
+        Object action = agent.selectAction(core, ActionSpec.discrete(8));
         int a = ((Number) action).intValue();
         assertTrue(a >= 0 && a < 8);
     }

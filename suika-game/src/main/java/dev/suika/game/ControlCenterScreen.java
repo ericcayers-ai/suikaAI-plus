@@ -193,6 +193,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
                 switch (k) {
                     case Input.Keys.ESCAPE -> {
                         if (hotswapOpen) { hotswapOpen = false; return true; }
+                        if (slotsOpen) { slotsOpen = false; return true; }
                         game.setScreen(new AiPlaygroundScreen(game, cfg));
                     }
                     case Input.Keys.SPACE  -> runner.setPaused(!runner.paused());
@@ -205,7 +206,8 @@ public final class ControlCenterScreen extends ScreenAdapter {
                     // input (currently Imitation's "YOU" board recording). Same guards as the
                     // mouse-click drop paths in handleClick.
                     case Input.Keys.DOWN -> {
-                        if (runner.acceptsHumanInput() && !hotswapOpen && !slotsOpen && chuteClear())
+                        if (!runner.paused() && runner.acceptsHumanInput()
+                                && !hotswapOpen && !slotsOpen && chuteClear())
                             runner.humanDrop(hoverGameX);
                     }
                     default -> { return false; }
@@ -343,7 +345,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
         // guard, which this dispatch was previously missing, letting a fast clicker stack
         // fruit in the chute above the well instead of one drop settling before the next.
         if (viewCount() == 1 && runner.acceptsHumanInput()) {
-            if (chuteClear()) runner.humanDrop(hoverGameX);
+            if (!runner.paused() && chuteClear()) runner.humanDrop(hoverGameX);
             return;
         }
         // Imitation dual view: only the YOU board (left) accepts drops.
@@ -352,7 +354,8 @@ public final class ControlCenterScreen extends ScreenAdapter {
             float wallT = (float) PhysicsConfig.WALL_THICKNESS * p[2];
             float left  = p[0] - wallT;
             float right = p[0] + (float) PhysicsConfig.CONTAINER_WIDTH * p[2] + wallT;
-            if (x >= left && x <= right && y > 70f && chuteClear()) runner.humanDrop(hoverGameX);
+            if (!runner.paused() && x >= left && x <= right && y > 70f && chuteClear())
+                runner.humanDrop(hoverGameX);
         }
     }
 

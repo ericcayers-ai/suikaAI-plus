@@ -45,6 +45,9 @@ final class GpuInferenceBridge implements AutoCloseable {
         GpuInferenceBridge b = new GpuInferenceBridge();
         try {
             b.boot(inputSize, hiddenSize, outputSize, weights, device);
+            // Soft failures (venv missing, READY timeout) leave alive=false without throwing —
+            // still tear down any partial process / temp weights so they don't leak.
+            if (!b.healthy()) b.close();
         } catch (Throwable t) {
             b.alive = false;
             b.close();

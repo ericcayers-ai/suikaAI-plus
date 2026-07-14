@@ -31,28 +31,19 @@ cd suika-app-<version>\bin && suika-app.bat
 
 ---
 
-## What's new in v0.17.1
+## What's new in v0.17.2
 
-- **MCTS actually plans now.** A latent bug left UCB1's exploration term dwarfing its value
-  term, so the search was close to random. Min-max value normalization + one-ply seeding of
-  every root column fixed it — MCTS jumped from the ~400–650 range to ~1000+.
-- **Survival-aware evaluation (`BoardEval`).** One shared scorer folds realized merges *and*
-  board health (peak/average height, dead-line risk, merge readiness) into the value every
-  simulate-and-pick agent uses, so the planners stop stalemating in the mid-hundreds and
-  clear 1000 on the standard seeds. See [`docs/benchmarking.md`](docs/benchmarking.md).
-- **Keyboard play everywhere.** ←/→ to aim + Space to drop in the 2D game (Down-arrow on the
-  Imitation board), and a full WASD-aim + Space-drop scheme in the RT Lab, both alongside the
-  mouse — never a mode toggle.
-- **TensorBoard runs are distinguishable.** Each save/train writes a uniquely-named
-  `run-<timestamp>` folder, with richer per-run metadata; the OPEN button now serves one
-  dashboard rooted at all techniques so runs *and* techniques are separately selectable.
-- **GPU inference for the MCTS + Policy Net ensemble**, plus honest "GPU" vs "CPU" labelling
-  everywhere else.
-- **Project health** — Apache-2.0 `LICENSE`, `CONTRIBUTING`, `CODE_OF_CONDUCT`, `SECURITY`,
-  issue/PR templates, Dependabot, PR-triggered CI, an automated release workflow, and a
-  [`CHANGELOG`](CHANGELOG.md).
+Post-v0.17.1 quality pass — evaluator alignment, benchmarks, fruit radii, CI, and GPU teardown:
+
+- **Shared `BoardEval.placement`** for MCTS, auto-drop refinement, and ensembles (full survival-aware scale).
+- **Headless `Bench` restored**; `BenchmarkSuite` averages true per-seed re-runs (`-Deps`).
+- **Fruit radii re-synced** across Java ladder, `fruits.json`, and `python/suika/env.py`.
+- **PPO ONNX** exports include SB3 `action_net`; CI `JAVA_OPTS` for capture; release tag↔Gradle check.
+- **MCTS ensembles** honor think-time / root parallelism; GPU bridges close on soft failure and teardown.
+- Control Center pause/ESC fixes; greedy continuous actions; ensemble donor picker cleanup.
 
 See the full [CHANGELOG](CHANGELOG.md) for every release.
+
 
 ---
 
@@ -62,7 +53,7 @@ See the full [CHANGELOG](CHANGELOG.md) for every release.
 |---|---|
 | **Main Menu** | Title + **PLAY** / **WATCH AI** / **SETTINGS** / **QUIT**, ambient backdrop |
 | **Settings** | Live graphics (FPS 30–240/unlimited, V-Sync, shading, particles, guide, labels, shake), simulation (drop columns, seed), and AI-watch knobs |
-| **Game (Human)** | Real-time physics — aim with the mouse, click to drop, watch fruit fall and settle. HUD with score, best, next-fruit preview |
+| **Game (Human)** | Real-time physics — aim with the mouse or ←/→, click or Space to drop, watch fruit fall and settle. HUD with score, best, next-fruit preview |
 | **AI Playground** | The curated capability-matrix browser (12 techniques + 5 ensembles); pick one, configure it via the drawer (preset, speed, parallelism, per-technique + per-ensemble knobs), read its infocard, **LAUNCH** |
 | **Control Center** | Per-technique diagnostics — live board(s), score/fitness/loss/diversity charts, MCTS search-tree + perception panels, SAVES/SETUP modals, runtime controls (pause, speed, restart) |
 | **RT Lab** | Experimental raw-Vulkan hardware ray-traced game in its own window, with an in-window pause menu of live graphics settings (bloom / denoise / depth-of-field / accumulation) |

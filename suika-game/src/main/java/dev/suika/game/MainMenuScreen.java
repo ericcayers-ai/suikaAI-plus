@@ -175,7 +175,8 @@ public final class MainMenuScreen extends ScreenAdapter {
         }
 
         Ui.textCenter(game.batch, game.fontSmall,
-                "Click / drag to aim · ESC pauses · R restarts", CX, 250, Theme.TEXT_FAINT);
+                "Mouse or ←/→ · click / Space to drop · ESC pauses · R restarts",
+                CX, 250, Theme.TEXT_FAINT);
         Ui.text(game.batch, game.fontSmall, "v" + Theme.VERSION, 14, 30, Theme.TEXT_FAINT);
         Ui.textRight(game.batch, game.fontSmall,
                 AiTechnique.values().length + " AI techniques · " + game.settings.fpsLabel(),

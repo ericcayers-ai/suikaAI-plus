@@ -254,16 +254,13 @@ public final class MctsAgent implements AgentPlugin {
     }
 
     /**
-     * The one value scale shared by the root-column seeds and the rollouts: total merge
-     * points gained since the root plus the board {@link BoardEval#health health} of where
-     * the line ended up, or a large fixed penalty (minus whatever it managed to score first)
-     * if the line died. Putting seeds and rollouts on the same scale is what makes the
-     * min-max normalisation and the visit counts mean the same thing across a search.
+     * The one value scale shared by the root-column seeds and the rollouts — identical to
+     * {@link BoardEval#placement}, so Greedy, MCTS, and the ensembles all rank candidate
+     * boards the same way. Putting seeds and rollouts on that shared scale is what makes
+     * the min-max normalisation and the visit counts mean the same thing across a search.
      */
     private double positionValue(GameCore core, long rootScore, boolean terminated) {
-        double gained = core.getScore() - rootScore;
-        if (terminated) return gained - BoardEval.GAME_OVER_PENALTY;
-        return gained + BoardEval.health(core.getState());
+        return BoardEval.placement(core, core.getScore() - rootScore, terminated);
     }
 
     /** Cheap merge-seek / low-stack / dead-line-defending default policy used inside

@@ -57,8 +57,10 @@ public final class BoardEval {
     private static final double RISK_WEIGHT    = dbl("suika.eval.risk",   4.0);   // defend the dead-line band hard
     private static final double READY_WEIGHT   = dbl("suika.eval.ready",  2.5);   // reward setting up future merges
 
-    /** Height of the danger band below the dead-line that the risk term watches. */
-    private static final double DANGER_BAND = dbl("suika.eval.band", 2.5);
+    /** Height of the danger band below the dead-line that the risk term watches.
+     *  Shared with {@link HeuristicAgent}'s merge-seek guard so the default policy and
+     *  the evaluator agree about what counts as "too close to losing". */
+    public static final double DANGER_BAND = dbl("suika.eval.band", 2.5);
 
     private static double dbl(String key, double def) {
         String v = System.getProperty(key);

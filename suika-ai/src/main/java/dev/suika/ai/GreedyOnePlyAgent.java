@@ -73,7 +73,7 @@ public final class GreedyOnePlyAgent implements AgentPlugin {
             if (value > bestScore) { bestScore = value; bestAction = a; }
         }
 
-        return spec.discrete() ? bestAction : binToX(bestAction);
+        return actionForSpec(bestAction, spec);
     }
 
     /** Exact path: snapshot the live core and try every drop for real. */
@@ -119,7 +119,15 @@ public final class GreedyOnePlyAgent implements AgentPlugin {
         }
         lastBinScores = norm;
 
-        return spec.discrete() ? bestAction : binToX(bestAction);
+        return actionForSpec(bestAction, spec);
+    }
+
+    /** Discrete → bin index; continuous → {@code [-1, 1]} as {@link ActionSpec#toDropX} expects
+     *  (returning world X here was remapped twice and pinned near {@code DROP_X_MAX}). */
+    private Object actionForSpec(int bestAction, ActionSpec spec) {
+        if (spec.discrete()) return bestAction;
+        double t = bestAction / (double) (actionBins - 1);
+        return t * 2.0 - 1.0;
     }
 
     /** Simulates columns {@code [lo, hi)} and writes their {@link BoardEval#placement}

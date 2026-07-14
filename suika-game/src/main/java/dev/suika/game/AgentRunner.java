@@ -80,8 +80,21 @@ public abstract class AgentRunner extends LiveBoardRunner {
      */
     @Override
     public void restart() {
+        closeAgent(this.agent);
         this.agent = Agents.build(cfg);
         newGame();
+    }
+
+    @Override
+    public void dispose() {
+        closeAgent(this.agent);
+        this.agent = null;
+    }
+
+    private static void closeAgent(AgentPlugin a) {
+        if (a instanceof AutoCloseable c) {
+            try { c.close(); } catch (Exception ignored) { }
+        }
     }
 
     protected float baseDelay() { return Math.max(0.05f, 0.6f / Math.max(0.1f, speed)); }
@@ -141,23 +154,24 @@ public abstract class AgentRunner extends LiveBoardRunner {
         // whole waiting window and genuinely strategize deeper — "think in the timespans
         // of waiting". moveTimer holds the time remaining until the next drop is allowed.
         // maxThinkMs == 0 keeps the original "unlimited" meaning.
+        final MctsAgent mctsCore = mctsCoreOf(a);
         final long deadlineNs;
-        if (a instanceof MctsAgent && cfg.maxThinkMs > 0) {
+        if (mctsCore != null && cfg.maxThinkMs > 0) {
             long windowNs = (long) (Math.max(0f, moveTimer) * 1_000_000_000L);
             long budgetNs = Math.max(cfg.maxThinkMs * 1_000_000L, windowNs);
             deadlineNs = System.nanoTime() + budgetNs;
         } else {
             deadlineNs = 0L;
         }
-        if (a instanceof MctsAgent m && deadlineNs > 0) m.setSearchDeadline(deadlineNs);
+        if (mctsCore != null && deadlineNs > 0) mctsCore.setSearchDeadline(deadlineNs);
         Thread t = new Thread(() -> {
             long t0 = System.nanoTime();
             Object act;
-            if (a instanceof MctsAgent m0 && cfg.technique.parallel && cfg.evalThreads() > 1) {
-                act = parallelMctsSelect(m0, snap, deadlineNs);
+            if (mctsCore != null && cfg.technique.parallel && cfg.evalThreads() > 1) {
+                act = parallelMctsSelect(mctsCore, snap, deadlineNs);
             } else {
                 act = a.selectAction(snap, spec);
-                if (a instanceof MctsAgent) parallelVisits = null; // show this lone tree's own visits
+                if (mctsCore != null) parallelVisits = null; // show this lone tree's own visits
                 parallelWorkers = 1;
             }
             double x = spec.toDropX(act, PhysicsConfig.DROP_X_MIN, PhysicsConfig.DROP_X_MAX);
@@ -222,9 +236,14 @@ public abstract class AgentRunner extends LiveBoardRunner {
         GameCore fork = snap.snapshot();
         long before = fork.getScore();
         var r = fork.dropAndSettle(x);
-        double v = fork.getScore() - before;
-        if (r.terminated()) v -= 1000.0;
-        return v;
+        return dev.suika.ai.BoardEval.placement(fork, fork.getScore() - before, r.terminated());
+    }
+
+    /** Inner MCTS of a plain or ensemble agent — null for non-search techniques. */
+    private static MctsAgent mctsCoreOf(AgentPlugin a) {
+        if (a instanceof MctsAgent m) return m;
+        if (a instanceof EnsembleAgents.HasMctsCore h) return h.mctsCore();
+        return null;
     }
 
     /**
