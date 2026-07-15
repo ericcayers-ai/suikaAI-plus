@@ -50,7 +50,7 @@ body:
     attributes:
       label: Version
       description: Shown on the main menu, or the release tag / commit SHA.
-      placeholder: v0.17.2
+      placeholder: v0.18.1
     validations:
       required: true
   - type: textarea

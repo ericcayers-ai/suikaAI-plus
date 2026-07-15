@@ -1,7 +1,7 @@
 name: Release
 
 # Builds the cross-platform application distribution and publishes it as a GitHub
-# Release whenever a version tag is pushed (e.g. `git tag v0.17.2 && git push --tags`).
+# Release whenever a version tag is pushed (e.g. `git tag v0.18.1 && git push --tags`).
 on:
   push:
     tags:

@@ -10,7 +10,7 @@ final class SuikaVersion {
     private SuikaVersion() {}
 
     /** Fallback only — production builds overwrite via resource generation. */
-    static final String FALLBACK = "0.18.0";
+    static final String FALLBACK = "0.18.1";
 
     static String current() {
         try (var in = SuikaVersion.class.getResourceAsStream("/suika-version.properties")) {

@@ -55,5 +55,5 @@ def make_vec(num_envs: int = 8, **kwargs) -> list[SuikaEnv]:
     return [make(seed=i, **kwargs) for i in range(num_envs)]
 
 
-__version__ = "0.18.0"
+__version__ = "0.18.1"
 __all__ = ["SuikaEnv", "make", "make_vec"]

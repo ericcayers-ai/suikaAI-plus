@@ -40,6 +40,8 @@ suika-assets/src/main/resources/audio/
 
 # Trained models and datasets (too large for git)
 *.onnx
+# Keep tiny ORT fixtures used by BridgeTest / OnnxDeployPathTest
+!suika-bridge/src/test/resources/**/*.onnx
 *.pt
 *.ckpt
 *.parquet

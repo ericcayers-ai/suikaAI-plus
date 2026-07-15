@@ -31,14 +31,14 @@ cd suika-app-<version>\bin && suika-app.bat
 
 ---
 
-## What's new in v0.18.0
+## What's new in v0.18.1
 
-Complete systems / UI overhaul — truth gates, UI foundation, workflow redesign, bridge+ONNX
-deploy, research Lab Hub, and hardening:
+**v0.18.1** ships CI/release gates for the **v0.18.0** complete systems / UI overhaul
+(truth gates, UI foundation, workflow redesign, bridge+ONNX deploy, research Lab Hub):
 
 - **Contracts & gates** — `docs/contracts.md`, PrefsKeys, stamped `Theme.VERSION`, golden physics, CI/Python/bench floors.
 - **Workflow UI** — searchable Playground (Explorer/Researcher), experiment import/export, status rail, Control Center layout splits, Settings sections with drag sliders + reset, durable prefs, keyboard-first menu/game-over, actionable RT failures.
-- **Bridge / ONNX** — JVM `BridgeServer`, ONNX Runtime playback without Python at play time.
+- **Bridge / ONNX** — JVM `BridgeServer`, ONNX Runtime playback without Python at play time; tiny ORT fixtures committed for CI.
 - **Research Lab** — Reward Studio, DashboardRegistry panel, in-app bounded bench + durable leaderboard, replay scrub, physics golden rebless tooling, PluginRegistry browser; **MuZero** marked demonstration/surrogate.
 - **Docs** — budgets (`docs/budgets.md`), roadmap wrap, community templates retained (Apache-2.0 LICENSE, CoC, CONTRIBUTING, issue/PR templates).
 

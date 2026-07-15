@@ -7,6 +7,15 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-07-15
+
+### Fixed
+- Commit tiny ORT test fixtures (`tiny_policy.onnx`, `bad_action_head.onnx`) and whitelist
+  them in `.gitignore` so `BridgeTest` / `OnnxDeployPathTest` pass when natives are present.
+- Remove unused `pytest` import that failed `ruff check` in CI.
+- Align `python/setup.py` version with Gradle / `__version__` / `SuikaVersion.FALLBACK`
+  (was stuck at 0.17.2 and would fail the release workflow gate).
+
 ## [0.18.0] - 2026-07-15
 
 ### Added
@@ -141,7 +150,9 @@ Frontend rebuild: crisp fonts, live physics, settings, AI selection.
 ## [0.2.0] — 2026
 Initial public foundation.
 
-[Unreleased]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.17.2...HEAD
+[Unreleased]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.18.0...v0.18.1
+[0.18.0]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.17.2...v0.18.0
 [0.17.2]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.17.1...v0.17.2
 [0.17.1]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.16.0...v0.17.0
