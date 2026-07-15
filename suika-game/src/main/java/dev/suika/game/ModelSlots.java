@@ -3,6 +3,7 @@ package dev.suika.game;
 import dev.suika.ai.AgentPlugin;
 import dev.suika.ai.MlpPolicy;
 import dev.suika.ai.NeuralAgent;
+import dev.suika.bridge.OnnxPolicyRunner;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -40,6 +41,12 @@ public final class ModelSlots {
 
     static final String KIND_WEIGHTS = "weights";
     static final String KIND_CONFIG  = "config";
+
+    /** Folder / legacy kind string for trained weight slots — frozen contract. */
+    public static String kindWeights() { return KIND_WEIGHTS; }
+
+    /** Folder / legacy kind string for hyperparameter-only slots — frozen contract. */
+    public static String kindConfig() { return KIND_CONFIG; }
 
     /** A freshly-constructed policy with the exact architecture every save uses. */
     public static MlpPolicy newCompatiblePolicy() {
@@ -350,6 +357,13 @@ public final class ModelSlots {
             cfg.selectDefaultsFor(t);
 
             // FIX: Qualified isWeightBearing method call to target AiSlotPlayer
+            if (AiSlotPlayer.isOnnxPlayable(t) && Files.exists(savFile.getParent().resolve("model.onnx"))) {
+                OnnxAgent onnx = OnnxAgent.tryLoad(
+                        savFile.getParent().resolve("model.onnx"),
+                        cfg.actionBins,
+                        techniqueId);
+                if (onnx != null) return onnx;
+            }
             if (AiSlotPlayer.isWeightBearing(t)) {
                 MlpPolicy policy = newCompatiblePolicy();
                 Path modelFile = savFile.getParent().resolve("model.txt");
@@ -373,6 +387,9 @@ public final class ModelSlots {
                     }
                 }
                 if (!loaded && Files.exists(onnxFile)) {
+                    // Prefer JVM ORT inference over Python weight extract when possible.
+                    OnnxAgent onnx = OnnxAgent.tryLoad(onnxFile, ModelSlots.OUTPUT_BINS, techniqueId);
+                    if (onnx != null) return onnx;
                     double[] w = extractWeightsFromOnnxPath(onnxFile, policy.paramCount());
                     if (w != null && w.length == policy.paramCount()) {
                         policy.setWeights(w);
@@ -479,6 +496,58 @@ public final class ModelSlots {
     /** True when a slot holds loadable trained WEIGHTS (not just a config save). */
     public static boolean hasWeights(String techniqueId, int slot) {
         return KIND_WEIGHTS.equals(slotKind(techniqueId, slot));
+    }
+
+    /** Path to {@code model.onnx} in a slot folder (may not exist). */
+    public static Path onnxPath(String techniqueId, int slot) {
+        return slotDir(techniqueId, slot).resolve("model.onnx");
+    }
+
+    /** True when the slot folder contains a {@code model.onnx} file. */
+    public static boolean hasOnnx(String techniqueId, int slot) {
+        return Files.isRegularFile(onnxPath(techniqueId, slot));
+    }
+
+    /**
+     * True when the slot has a playable trained policy without needing a Python extract:
+     * either classic weight kind ({@code model.txt} / legacy) or a present {@code model.onnx}.
+     */
+    public static boolean hasPlayablePolicy(String techniqueId, int slot) {
+        return hasWeights(techniqueId, slot) || hasOnnx(techniqueId, slot);
+    }
+
+    /**
+     * Load {@code model.onnx} via ONNX Runtime (no Python). Returns {@code null} when the
+     * file is missing, natives fail, or the action head width mismatches {@code actionBins}.
+     */
+    public static OnnxAgent tryLoadOnnxAgent(String techniqueId, int slot, int actionBins) {
+        Path onnx = onnxPath(techniqueId, slot);
+        if (!Files.isRegularFile(onnx)) return null;
+        return OnnxAgent.tryLoad(onnx, actionBins, techniqueId);
+    }
+
+    /**
+     * Same as {@link #tryLoadOnnxAgent} but returns the raw loaded runner (caller owns close).
+     */
+    public static OnnxPolicyRunner tryLoadOnnxRunner(String techniqueId, int slot, int actionBins) {
+        Path onnx = onnxPath(techniqueId, slot);
+        if (!Files.isRegularFile(onnx)) return null;
+        OnnxPolicyRunner runner = OnnxPolicyRunner.create(actionBins);
+        try {
+            runner.load(dev.suika.bridge.BridgeConfig.onnx(onnx.toAbsolutePath().toString()));
+            return runner;
+        } catch (RuntimeException e) {
+            try { runner.close(); } catch (Exception ignored) {}
+            return null;
+        }
+    }
+
+    /** First slot (1..{@link #SLOT_COUNT}) with {@code model.onnx}, or {@code 0} if none. */
+    public static int firstOnnxSlot(String techniqueId) {
+        for (int s = 1; s <= SLOT_COUNT; s++) {
+            if (hasOnnx(techniqueId, s)) return s;
+        }
+        return 0;
     }
 
     private static String readKind(Path dir) {

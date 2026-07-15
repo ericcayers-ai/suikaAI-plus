@@ -102,12 +102,13 @@ public final class PlaygroundConfig {
 
     /** Which trained save the MCTS + Policy Net ensemble sources its donor net from.
      *  Evolution (Neuroevo/CMA-ES/PBT), Imitation (DAgger/BC), and DQN all save a
-     *  compatible {@link dev.suika.ai.MlpPolicy} weight file. PPO/MuZero are omitted here
-     *  because their exports are ONNX/SB3 checkpoints — the ensemble loader only reads
-     *  MlpPolicy slots today ({@link EnsembleAgents#loadOrFreshPolicy}). */
+     *  compatible {@link dev.suika.ai.MlpPolicy} weight file. PPO is included when
+     *  a slot {@code model.onnx} is present — {@link EnsembleAgents} prefers ONNX
+     *  Runtime for that donor (no Python at play time). MuZero stays omitted until
+     *  it has a tested train→ONNX path. */
     public static final AiTechnique[] ENSEMBLE_DONORS = {
             AiTechnique.NEUROEVO, AiTechnique.CMA_ES, AiTechnique.PBT,
-            AiTechnique.DAGGER, AiTechnique.BC, AiTechnique.DQN };
+            AiTechnique.DAGGER, AiTechnique.BC, AiTechnique.DQN, AiTechnique.PPO };
     public int ensembleDonorIndex = 0;
     public AiTechnique ensembleDonor() { return ENSEMBLE_DONORS[ensembleDonorIndex]; }
 
@@ -118,22 +119,22 @@ public final class PlaygroundConfig {
     public String ensembleDonorSlotLabel() { return ensembleDonorSlot == 0 ? "Auto" : "Slot " + ensembleDonorSlot; }
 
     /** How much of the MCTS + Policy Net final score comes from the net (vs search visits). */
-    public static final double[] NET_WEIGHT_OPTIONS = {0.1, 0.3, 0.5, 0.7, 0.9};
+    public static final double[] NET_WEIGHT_OPTIONS = dev.suika.ai.HyperparamSchema.NET_WEIGHT;
     public int netWeightIndex = 1;   // default 0.3
     public double ensembleNetWeight() { return NET_WEIGHT_OPTIONS[netWeightIndex]; }
 
     /** Visit-share threshold below the top that still counts as "tied" for the tiebreak. */
-    public static final double[] TIE_THRESHOLD_OPTIONS = {0.70, 0.85, 0.95};
+    public static final double[] TIE_THRESHOLD_OPTIONS = dev.suika.ai.HyperparamSchema.TIE_THRESHOLD;
     public int tieThresholdIndex = 1;   // default 0.85
     public double ensembleTieThreshold() { return TIE_THRESHOLD_OPTIONS[tieThresholdIndex]; }
 
     /** UCB1 exploration constant for the bandit meta-controller. */
-    public static final double[] UCB_C_OPTIONS = {0.7, 1.4, 2.0};
+    public static final double[] UCB_C_OPTIONS = dev.suika.ai.HyperparamSchema.UCB_C;
     public int ucbCIndex = 1;   // default 1.4 (the textbook √2-ish value)
     public double ensembleUcbC() { return UCB_C_OPTIONS[ucbCIndex]; }
 
     /** Multiplicative-weights learning rate for the adaptive voting committee. */
-    public static final double[] ADAPT_LR_OPTIONS = {0.02, 0.08, 0.20};
+    public static final double[] ADAPT_LR_OPTIONS = dev.suika.ai.HyperparamSchema.ADAPT_LR;
     public int adaptLrIndex = 1;   // default 0.08
     public double ensembleAdaptLr() { return ADAPT_LR_OPTIONS[adaptLrIndex]; }
 
@@ -168,7 +169,7 @@ public final class PlaygroundConfig {
      *  focusing search as the population converges. */
     public boolean sigmaAnneal = false;
 
-    public static final double[] MUTATION_SIGMA_OPTIONS = {0.02, 0.05, 0.10, 0.20, 0.30};
+    public static final double[] MUTATION_SIGMA_OPTIONS = dev.suika.ai.HyperparamSchema.MUTATION_SIGMA;
     public int mutationSigmaIndex = 2;
 
     /**
@@ -184,7 +185,7 @@ public final class PlaygroundConfig {
      * sims = less noisy fitness, but more compute. They run <em>simultaneously</em>,
      * not one after another — see {@link dev.suika.ai.GeneticTrainer}.
      */
-    public static final int[] SIMS_PER_GEN_OPTIONS = {1, 2, 3, 5, 8, 16};
+    public static final int[] SIMS_PER_GEN_OPTIONS = dev.suika.ai.HyperparamSchema.SIMS_PER_GEN;
     public int simsPerGenIndex = 0;       // default 1
 
     /**
@@ -192,7 +193,7 @@ public final class PlaygroundConfig {
      * the oldest are culled and restarted on the freshest elite. Higher = watch more of
      * the population's lineage diverge before it's replaced.
      */
-    public static final int[] GHOST_CULL_OPTIONS = {1, 2, 3, 5, 8, 12};
+    public static final int[] GHOST_CULL_OPTIONS = dev.suika.ai.HyperparamSchema.GHOST_CULL;
     public int ghostCullIndex = 1;        // default 2 generations
 
     /**
@@ -200,7 +201,7 @@ public final class PlaygroundConfig {
      * this generation's top offspring (CMA-ES). The grid auto-arranges into
      * {@code ceil(sqrt(n))} columns for whatever count is chosen.
      */
-    public static final int[] ELITE_VIEW_OPTIONS = {1, 2, 3, 4, 6, 8, 10, 12, 16};
+    public static final int[] ELITE_VIEW_OPTIONS = dev.suika.ai.HyperparamSchema.ELITE_VIEWS;
     public int eliteViewIndex = 3;        // default 4 (existing champion + 3 elites)
 
     public int simsPerGen()     { return SIMS_PER_GEN_OPTIONS[simsPerGenIndex]; }

@@ -104,6 +104,7 @@ public final class SettingsScreen extends ScreenAdapter {
     private static final float LIST_TOP = TOP;
     private static final float LIST_BOT = 170f;
     private float scroll = 0f;
+    private Row draggingSlider = null;
 
     public SettingsScreen(SuikaGame game, Function<SuikaGame, Screen> back) {
         this.game = game;
@@ -116,7 +117,7 @@ public final class SettingsScreen extends ScreenAdapter {
     }
 
     private void buildRows() {
-        // ---- Display (§VI: resolution/fullscreen/UI scale, persisted across launches) ----
+        // ---- Display ----
         cycle("DISPLAY", "Window height", () -> cfg.windowHeight() + "p",
                 () -> { cfg.resHeightIndex = wrap(cfg.resHeightIndex - 1, GameSettings.RES_HEIGHTS.length);
                     cfg.applyWindowMode(); SettingsPersistence.save(cfg); },
@@ -132,60 +133,73 @@ public final class SettingsScreen extends ScreenAdapter {
 
         // ---- Graphics ----
         Row fps = cycle("GRAPHICS", "Frame rate", () -> cfg.fpsLabel(),
-                () -> { cfg.customFps = -1; cfg.fpsIndex = wrap(cfg.fpsIndex - 1, GameSettings.FPS_OPTIONS.length); cfg.applyDisplay(); },
-                () -> { cfg.customFps = -1; cfg.fpsIndex = wrap(cfg.fpsIndex + 1, GameSettings.FPS_OPTIONS.length); cfg.applyDisplay(); });
+                () -> { cfg.customFps = -1; cfg.fpsIndex = wrap(cfg.fpsIndex - 1, GameSettings.FPS_OPTIONS.length);
+                    cfg.applyDisplay(); SettingsPersistence.save(cfg); },
+                () -> { cfg.customFps = -1; cfg.fpsIndex = wrap(cfg.fpsIndex + 1, GameSettings.FPS_OPTIONS.length);
+                    cfg.applyDisplay(); SettingsPersistence.save(cfg); });
         fps.numeric = new NumericSpec(0, 500, true,
-                () -> cfg.targetFps(), v -> { cfg.customFps = (int) Math.round(v); cfg.applyDisplay(); }, " FPS");
-        toggle(null, "V-Sync", () -> cfg.vsync, () -> { cfg.vsync = !cfg.vsync; cfg.applyDisplay(); });
-        toggle(null, "Smooth shading (glossy fruit)", () -> cfg.smoothShading, () -> cfg.smoothShading = !cfg.smoothShading);
-        toggle(null, "Merge particles", () -> cfg.particles, () -> cfg.particles = !cfg.particles);
-        toggle(null, "Drop guide line", () -> cfg.showGuide, () -> cfg.showGuide = !cfg.showGuide);
-        toggle(null, "Tier number labels", () -> cfg.tierLabels, () -> cfg.tierLabels = !cfg.tierLabels);
-        toggle(null, "Screen shake", () -> cfg.screenShake, () -> cfg.screenShake = !cfg.screenShake);
+                () -> cfg.targetFps(), v -> { cfg.customFps = (int) Math.round(v); cfg.applyDisplay(); SettingsPersistence.save(cfg); }, " FPS");
+        toggle(null, "V-Sync", () -> cfg.vsync,
+                () -> { cfg.vsync = !cfg.vsync; cfg.applyDisplay(); SettingsPersistence.save(cfg); });
+        toggle(null, "Smooth shading (glossy fruit)", () -> cfg.smoothShading,
+                () -> { cfg.smoothShading = !cfg.smoothShading; SettingsPersistence.save(cfg); });
+        toggle(null, "Merge particles", () -> cfg.particles,
+                () -> { cfg.particles = !cfg.particles; SettingsPersistence.save(cfg); });
+        toggle(null, "Drop guide line", () -> cfg.showGuide,
+                () -> { cfg.showGuide = !cfg.showGuide; SettingsPersistence.save(cfg); });
+        toggle(null, "Tier number labels", () -> cfg.tierLabels,
+                () -> { cfg.tierLabels = !cfg.tierLabels; SettingsPersistence.save(cfg); });
+        toggle(null, "Screen shake", () -> cfg.screenShake,
+                () -> { cfg.screenShake = !cfg.screenShake; SettingsPersistence.save(cfg); });
 
         // ---- Simulation ----
         Row bins = cycle("SIMULATION", "Drop columns", cfg::binsLabel,
-                () -> { cfg.customBins = -1; cfg.binIndex = wrap(cfg.binIndex - 1, GameSettings.BIN_OPTIONS.length); },
-                () -> { cfg.customBins = -1; cfg.binIndex = wrap(cfg.binIndex + 1, GameSettings.BIN_OPTIONS.length); });
+                () -> { cfg.customBins = -1; cfg.binIndex = wrap(cfg.binIndex - 1, GameSettings.BIN_OPTIONS.length);
+                    SettingsPersistence.save(cfg); },
+                () -> { cfg.customBins = -1; cfg.binIndex = wrap(cfg.binIndex + 1, GameSettings.BIN_OPTIONS.length);
+                    SettingsPersistence.save(cfg); });
         bins.numeric = new NumericSpec(8, 256, true,
-                () -> cfg.actionBins(), v -> cfg.customBins = (int) Math.round(v), " cols");
-        Row seed = toggle(null, "Seed", () -> cfg.randomSeed, () -> cfg.randomSeed = !cfg.randomSeed);
+                () -> cfg.actionBins(), v -> { cfg.customBins = (int) Math.round(v); SettingsPersistence.save(cfg); }, " cols");
+        Row seed = toggle(null, "Seed", () -> cfg.randomSeed,
+                () -> { cfg.randomSeed = !cfg.randomSeed; SettingsPersistence.save(cfg); });
         seed.value = () -> cfg.randomSeed ? "Random" : "Fixed " + cfg.fixedSeed;
-        // Typing a seed implies a fixed seed — the overlay flips randomSeed off on apply.
         seed.numeric = new NumericSpec(0, Long.MAX_VALUE, true,
-                () -> cfg.fixedSeed, v -> { cfg.fixedSeed = (long) v; cfg.randomSeed = false; }, "");
-
-        // ---- Gameplay ----
-        cycle("GAMEPLAY", "RT Lab physics", () -> cfg.rt3dPhysics ? "3D (true 3D)" : "2D (classic)",
-                () -> cfg.rt3dPhysics = !cfg.rt3dPhysics,
-                () -> cfg.rt3dPhysics = !cfg.rt3dPhysics);
-
-        // ---- Experimental gameplay variants ----
-        toggle("EXPERIMENTAL", "Instant fail (no safety delay)",
-                () -> cfg.immediateDeadline, () -> { cfg.immediateDeadline = !cfg.immediateDeadline; cfg.applyPhysics(); });
+                () -> cfg.fixedSeed, v -> { cfg.fixedSeed = (long) v; cfg.randomSeed = false; SettingsPersistence.save(cfg); }, "");
+        toggle(null, "Instant fail (no safety delay)",
+                () -> cfg.immediateDeadline,
+                () -> { cfg.immediateDeadline = !cfg.immediateDeadline; cfg.applyPhysics(); SettingsPersistence.save(cfg); });
         toggle(null, "Bouncy fruit (no instant settle)",
-                () -> cfg.bounceEnabled, () -> { cfg.bounceEnabled = !cfg.bounceEnabled; cfg.applyPhysics(); });
+                () -> cfg.bounceEnabled,
+                () -> { cfg.bounceEnabled = !cfg.bounceEnabled; cfg.applyPhysics(); SettingsPersistence.save(cfg); });
 
-        // ---- AI Environment ----
-        cycle("AI ENVIRONMENT", "Python env", () -> installStatus, null, null);
+        // ---- AI ----
+        cycle("AI", "Python env", () -> installStatus, null, null);
         button(null, "Download AI GPU deps",
                 () -> PythonSetup.isReady() ? "REINSTALL" : installing ? "WORKING…" : "SETUP",
                 this::startInstall);
-
-        // Single first-class compute-mode selector — GPU (Python/CUDA, app-wide) vs
-        // CPU (JVM). Replaces the old two separate "Prefer GPU" / "Force CPU-only"
-        // toggles; applyComputeMode() derives the legacy flags so nothing downstream
-        // breaks. The value line reports what will actually happen on this machine.
         cycle(null, "Compute mode", this::computeModeHint,
                 () -> toggleComputeMode(), () -> toggleComputeMode());
         Row gpuUtil = slider(null, "Max GPU utilization (Python training)",
                 () -> (cfg.gpuUtilPercent - 10) / 90.0,
-                f -> cfg.gpuUtilPercent = (int) (Math.round((10 + clamp01(f) * 90) / 5.0) * 5));
+                f -> { cfg.gpuUtilPercent = (int) (Math.round((10 + clamp01(f) * 90) / 5.0) * 5);
+                    SettingsPersistence.save(cfg); });
         gpuUtil.value = () -> cfg.gpuUtilPercent + "%";
         gpuUtil.numeric = new NumericSpec(10, 100, true,
-                () -> cfg.gpuUtilPercent, v -> cfg.gpuUtilPercent = (int) Math.round(v), "%");
+                () -> cfg.gpuUtilPercent, v -> { cfg.gpuUtilPercent = (int) Math.round(v); SettingsPersistence.save(cfg); }, "%");
+        cycle(null, "Watch AI agent",
+                () -> WatchAgents.get(cfg.agentIndex).name(),
+                () -> { cfg.agentIndex = wrap(cfg.agentIndex - 1, WatchAgents.count()); SettingsPersistence.save(cfg); },
+                () -> { cfg.agentIndex = wrap(cfg.agentIndex + 1, WatchAgents.count()); SettingsPersistence.save(cfg); });
+        Row delay = cycle(null, "AI move delay",
+                () -> String.format(java.util.Locale.US, "%.2f s", cfg.aiMoveDelay),
+                () -> { cfg.setAiMoveDelayClamped(cfg.aiMoveDelay - 0.1); SettingsPersistence.save(cfg); },
+                () -> { cfg.setAiMoveDelayClamped(cfg.aiMoveDelay + 0.1); SettingsPersistence.save(cfg); });
+        delay.numeric = new NumericSpec(0.05, 5.0, false,
+                () -> cfg.aiMoveDelay, v -> { cfg.setAiMoveDelayClamped(v); SettingsPersistence.save(cfg); }, " s");
+        toggle(null, "Show thinking overlay", () -> cfg.showThinking,
+                () -> { cfg.showThinking = !cfg.showThinking; SettingsPersistence.save(cfg); });
 
-        // ---- Input / entry ----
+        // ---- Input ----
         toggle("INPUT", "Custom values (type exact numbers)",
                 () -> cfg.customValueEntry,
                 () -> { cfg.customValueEntry = !cfg.customValueEntry; SettingsPersistence.save(cfg); })
@@ -193,21 +207,39 @@ public final class SettingsScreen extends ScreenAdapter {
         toggle(null, "Stuck-run watchdog (back out after 10s)",
                 () -> cfg.watchdogEnabled,
                 () -> { cfg.watchdogEnabled = !cfg.watchdogEnabled; SettingsPersistence.save(cfg); });
+        toggle(null, "Reduced motion",
+                () -> cfg.reducedMotion,
+                () -> { cfg.reducedMotion = !cfg.reducedMotion; SettingsPersistence.save(cfg); });
 
-        // ---- Presets ----
-        Row calib = button("PRESETS", "Calibrate presets for this machine",
+        // ---- RT Lab ----
+        cycle("RT LAB", "RT Lab physics", () -> cfg.rt3dPhysics ? "3D (true 3D)" : "2D (classic)",
+                () -> { cfg.rt3dPhysics = !cfg.rt3dPhysics; SettingsPersistence.save(cfg); },
+                () -> { cfg.rt3dPhysics = !cfg.rt3dPhysics; SettingsPersistence.save(cfg); });
+        Row calib = button(null, "Calibrate presets for this machine",
                 () -> PresetCalibration.running() ? PresetCalibration.progressPct() + "%"
                         : PresetCalibration.calibrated() ? "RECALIBRATE" : "CALIBRATE",
                 () -> { if (!PresetCalibration.running()) PresetCalibration.calibrateAsync(); });
         calib.value2 = PresetCalibration::statusLabel;
         calib.heightOverride = ROW_H + 26f;
 
-        // ---- Saves ----
-        Row autosave = cycle("SAVES", "Autosave (AI progress -> slot 1)", cfg::autosaveLabel,
+        // ---- Data ----
+        Row autosave = cycle("DATA", "Autosave (AI progress -> slot 1)", cfg::autosaveLabel,
                 () -> { cfg.customAutosaveMinutes = -1; cfg.autosaveIndex = wrap(cfg.autosaveIndex - 1, GameSettings.AUTOSAVE_MINUTES.length); SettingsPersistence.save(cfg); },
                 () -> { cfg.customAutosaveMinutes = -1; cfg.autosaveIndex = wrap(cfg.autosaveIndex + 1, GameSettings.AUTOSAVE_MINUTES.length); SettingsPersistence.save(cfg); });
         autosave.numeric = new NumericSpec(0, 240, true,
                 () -> cfg.autosaveMinutes(), v -> { cfg.customAutosaveMinutes = (int) Math.round(v); SettingsPersistence.save(cfg); }, " min");
+        button(null, "Reset all settings to defaults",
+                () -> "RESET",
+                () -> {
+                    SettingsPersistence.resetToDefaults(cfg);
+                    cfg.applyDisplay();
+                    cfg.applyWindowMode();
+                    cfg.applyPhysics();
+                    game.regenerateFonts();
+                    rows.clear();
+                    buildRows();
+                    installStatus = PythonSetup.isReady() ? "Ready  ·  venv" : "Not installed";
+                });
     }
 
     private String computeModeHint() {
@@ -267,17 +299,24 @@ public final class SettingsScreen extends ScreenAdapter {
         installStatus = "Starting… 0%";
         PythonSetup.installAsync(
                 msg -> {
+                    int pct = PythonSetup.installPct();
                     boolean done = msg.startsWith("Error")
                             || msg.startsWith("Warning") || msg.startsWith("Python not found");
-                    installStatus = done ? fit(msg) : "[" + PythonSetup.installPct() + "%] " + fit(msg);
-                    if (done) installing = false;
+                    if (done) {
+                        installStatus = fit(msg);
+                        installing = false;
+                    } else {
+                        // Non-disruptive progress: percent + short status, never blank the list.
+                        installStatus = pct + "%  ·  " + fit(msg);
+                    }
                 },
                 () -> {
                     GpuProbe.forceReprobe();
                     cfg.gpuMode = true;
-                    cfg.applyComputeMode();   // sets preferGpu=true, jvmCpuOnly=false
+                    cfg.applyComputeMode();
                     SettingsPersistence.save(cfg);
                     installing = false;
+                    installStatus = "Ready  ·  restarting…";
                     try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
                     AppRestart.restart();
                 });
@@ -308,14 +347,29 @@ public final class SettingsScreen extends ScreenAdapter {
             @Override public boolean touchDown(int sx, int sy, int p, int b) {
                 camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
                 if (numEntryOpen) { handleNumEntryClick(touch.x, touch.y); return true; }
+                draggingSlider = beginSliderDrag(touch.x, touch.y);
+                if (draggingSlider != null) return true;
                 handleClick(touch.x, touch.y); return true;
+            }
+            @Override public boolean touchDragged(int sx, int sy, int p) {
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
+                mx = touch.x; my = touch.y;
+                if (draggingSlider != null && draggingSlider.setFrac != null) {
+                    draggingSlider.setFrac.accept(clamp01((touch.x - draggingSlider.area.x) / draggingSlider.area.width));
+                    return true;
+                }
+                return false;
+            }
+            @Override public boolean touchUp(int sx, int sy, int p, int b) {
+                draggingSlider = null;
+                return false;
             }
             @Override public boolean mouseMoved(int sx, int sy) {
                 camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight()); mx = touch.x; my = touch.y; return false;
             }
             @Override public boolean scrolled(float ax, float ay) {
                 if (numEntryOpen) return true;
-                scroll = Math.max(0f, Math.min(scroll + ay * 46f, maxScroll()));
+                scroll = Math.max(0f, Math.min(scroll + ay * Theme.SCROLL_STEP, maxScroll()));
                 return true;
             }
             @Override public boolean keyDown(int k) {
@@ -328,6 +382,10 @@ public final class SettingsScreen extends ScreenAdapter {
                     return true; // swallow everything else while typing
                 }
                 if (k == Input.Keys.ESCAPE) { game.setScreen(back.apply(game)); return true; }
+                // Keyboard scroll for the settings list (mirrors wheel).
+                UiScroll s = new UiScroll(contentHeight(), LIST_TOP - LIST_BOT);
+                s.offset = scroll;
+                if (s.key(k)) { scroll = s.offset; return true; }
                 return false;
             }
             @Override public boolean keyTyped(char c) {
@@ -340,6 +398,19 @@ public final class SettingsScreen extends ScreenAdapter {
                 return true;
             }
         });
+    }
+
+    /** Starts a drag on a slider row; returns the row or null. */
+    private Row beginSliderDrag(float x, float y) {
+        for (Row r : rows) {
+            if (r.kind != Kind.SLIDER || r.setFrac == null) continue;
+            if (!r.area.contains(x, y)) continue;
+            if (r.area.y + r.area.height > LIST_TOP || r.area.y < LIST_BOT) continue;
+            if (cfg.customValueEntry && r.numeric != null) return null;
+            r.setFrac.accept(clamp01((x - r.area.x) / r.area.width));
+            return r;
+        }
+        return null;
     }
 
     private float contentHeight() {

@@ -3,7 +3,7 @@ package dev.suika.game;
 import com.badlogic.gdx.graphics.Color;
 
 /**
- * Centralised colour palette and layout constants for the windowed game.
+ * Centralised colour palette and layout tokens for the windowed game.
  *
  * <p>The look is a deliberate "watermelon laboratory" identity rather than a generic dark
  * dashboard: a warm plum-ink backdrop (not the usual blue-grey), panels lit with a faint
@@ -11,19 +11,26 @@ import com.badlogic.gdx.graphics.Color;
  * gold — pulled straight from the thing you're actually stacking. Tuned to stay legible
  * against the colour-blind-safe fruit labels and to read the same in the 2D game, the
  * control center, and the RT Lab HUD.
+ *
+ * <p>v0.18 UI foundation adds semantic state colours, spacing/radius/motion tokens,
+ * responsive profile helpers, and minimum interactive target sizes shared by every
+ * immediate-mode screen.
  */
 public final class Theme {
 
     private Theme() {}
 
-    /** Single source of truth for the displayed app version (keep in sync with build.gradle.kts). */
-    public static final String VERSION = "0.17.1";
+    /** Displayed app version — derived from Gradle via {@link SuikaVersion}. */
+    public static final String VERSION = SuikaVersion.current();
 
     // --- Virtual canvas (all rendering happens in this fixed pixel space) ---
     public static final float VW   = 720f;
     public static final float VH   = 1280f;
     public static final float VW_L = 1280f;  // landscape virtual width
     public static final float VH_L = 720f;   // landscape virtual height
+
+    /** Landscape is detected when window width exceeds height × this factor. */
+    public static final float LANDSCAPE_RATIO = 1.3f;
 
     // --- Backdrop (warm plum-ink, faintly purple — the signature away from generic navy) ---
     public static final Color BG_TOP    = new Color(0.12f, 0.10f, 0.17f, 1f);
@@ -57,9 +64,63 @@ public final class Theme {
     public static final Color TEXT_DIM    = new Color(0.66f, 0.67f, 0.80f, 1f);
     public static final Color TEXT_FAINT  = new Color(0.44f, 0.45f, 0.58f, 1f);
 
+    // --- Semantic states (shared by focus rings, toasts, disabled controls, forms) ---
+    public static final Color SUCCESS   = new Color(0.30f, 0.82f, 0.46f, 1f);
+    public static final Color WARNING   = new Color(0.99f, 0.80f, 0.30f, 1f);
+    public static final Color ERROR     = new Color(0.98f, 0.34f, 0.44f, 1f);
+    public static final Color INFO      = new Color(0.36f, 0.66f, 0.99f, 1f);
+    public static final Color FOCUS     = new Color(0.99f, 0.80f, 0.30f, 1f);
+    public static final Color DISABLED  = new Color(0.28f, 0.28f, 0.36f, 1f);
+    public static final Color OVERLAY   = new Color(0f, 0f, 0f, 0.62f);
+    public static final Color TOAST_BG  = new Color(0.14f, 0.13f, 0.20f, 0.96f);
+
     // --- Dead-line ---
     public static final Color DEADLINE      = new Color(0.98f, 0.34f, 0.44f, 0.55f);
     public static final Color DEADLINE_WARN = new Color(1.00f, 0.28f, 0.30f, 0.95f);
+
+    // --- Spacing / radius / motion tokens ---
+    public static final float SPACE_XS = 4f;
+    public static final float SPACE_SM = 8f;
+    public static final float SPACE_MD = 16f;
+    public static final float SPACE_LG = 24f;
+    public static final float SPACE_XL = 40f;
+
+    public static final float RADIUS_SM = 8f;
+    public static final float RADIUS_MD = 12f;
+    public static final float RADIUS_LG = 16f;
+    public static final float RADIUS_PILL = 999f;
+
+    /** WCAG-ish interactive floor in virtual pixels (buttons, cyclers, toggles). */
+    public static final float MIN_TARGET = 44f;
+
+    public static final float MOTION_FAST = 0.12f;
+    public static final float MOTION_MED  = 0.22f;
+    public static final float MOTION_SLOW = 0.40f;
+
+    /** Toast default visibility in seconds. */
+    public static final float TOAST_SECONDS = 3.2f;
+
+    /** Scroll wheel / keyboard step in virtual pixels. */
+    public static final float SCROLL_STEP = 46f;
+    public static final float SCROLL_PAGE = 220f;
+
+    // -------------------------------------------------------------------------
+
+    /** True when the live window should use the landscape virtual canvas. */
+    public static boolean isLandscapeWindow(int width, int height) {
+        return width > height * LANDSCAPE_RATIO;
+    }
+
+    /** Virtual canvas width for the given orientation. */
+    public static float virtualW(boolean landscape) { return landscape ? VW_L : VW; }
+
+    /** Virtual canvas height for the given orientation. */
+    public static float virtualH(boolean landscape) { return landscape ? VH_L : VH; }
+
+    /** Duration scaled by reduced-motion preference (0 when motion is disabled). */
+    public static float motion(float seconds, boolean reducedMotion) {
+        return reducedMotion ? 0f : seconds;
+    }
 
     /** Linear interpolate two colours into {@code out} (not allocating). */
     public static Color lerp(Color a, Color b, float t, Color out) {

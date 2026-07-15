@@ -22,7 +22,8 @@ import java.util.Map;
  * {@link ActionSpec#toDropX(Object, double, double)}.
  *
  * <p>To declare hyperparameters for the Researcher settings panel, pair this agent
- * with a {@code HyperparamSchema} list in the suika-app layer.
+ * with a {@link HyperparamSchema} list (schemas live in this module so the game UI
+ * and CLI share one source).
  */
 public abstract class ByoaTemplate implements AgentPlugin {
 

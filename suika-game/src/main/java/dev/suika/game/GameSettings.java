@@ -4,9 +4,12 @@ import com.badlogic.gdx.Gdx;
 
 /**
  * Mutable, in-memory game configuration edited from the {@link SettingsScreen} and
- * read by every other screen. Covers the configurability the ROADMAP calls for in
- * §VII (graphics, simulation, and AI-watch knobs) without persisting to disk —
- * settings live for the duration of the session.
+ * read by every other screen. Covers graphics, simulation, and AI-watch knobs.
+ *
+ * <p>Display, graphics, simulation, AI-environment, RT Lab, and input prefs round-trip
+ * via {@link SettingsPersistence} / {@link PrefsKeys}. Custom numeric overrides
+ * ({@link #customFps}, {@link #customBins}, {@link #customAutosaveMinutes}) stay
+ * session-only.
  */
 public final class GameSettings {
 
@@ -166,6 +169,13 @@ public final class GameSettings {
      *  other screens to read; not wired by the settings screen itself. Persisted. */
     public boolean watchdogEnabled = true;
 
+    /** Prefer reduced / zero-duration motion (focus pulses, toast fades, shake).
+     *  Persisted. Screens consult {@link Theme#motion(float, boolean)}. */
+    public boolean reducedMotion = false;
+
+    /** Main-menu first-run help overlay has been dismissed. Persisted. */
+    public boolean firstRunHelpSeen = false;
+
     // Typed overrides shadow the preset arrays. Sentinel -1 = "no override, use the
     // array index"; any value >= 0 is a live custom value (so 0 = unlimited FPS / OFF
     // autosave are both reachable). Session-only, like the indices they shadow.
@@ -226,5 +236,43 @@ public final class GameSettings {
     /** Resolves the seed to use for a new game, honouring the random/fixed choice. */
     public long resolveSeed() {
         return randomSeed ? System.nanoTime() : fixedSeed;
+    }
+
+    /**
+     * Restores in-memory fields to factory defaults (does not touch Preferences —
+     * call {@link SettingsPersistence#resetToDefaults} for a durable reset).
+     */
+    public void applyFactoryDefaults() {
+        fpsIndex = 1;
+        vsync = true;
+        smoothShading = true;
+        particles = true;
+        showGuide = true;
+        tierLabels = true;
+        screenShake = true;
+        binIndex = 1;
+        randomSeed = true;
+        fixedSeed = 42L;
+        immediateDeadline = false;
+        bounceEnabled = false;
+        resHeightIndex = 3;
+        fullscreen = false;
+        uiScaleIndex = 1;
+        rt3dPhysics = false;
+        agentIndex = WatchAgents.DEFAULT_INDEX;
+        aiMoveDelay = 0.6f;
+        showThinking = true;
+        gpuUtilPercent = 100;
+        preferGpu = false;
+        jvmCpuOnly = false;
+        gpuMode = false;
+        applyComputeMode();
+        customValueEntry = false;
+        watchdogEnabled = true;
+        reducedMotion = false;
+        firstRunHelpSeen = false;
+        clearCustomOverrides();
+        autosaveIndex = 0;
+        applyPhysics();
     }
 }

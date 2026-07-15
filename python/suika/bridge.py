@@ -1,7 +1,7 @@
 """
-Java↔Python bridge client (ROADMAP §II.4).
+Java↔Python bridge client (ROADMAP §II.4 / ADR-0003).
 
-Connects to the Java suika-bridge sidecar over TCP using the same
+Connects to the Java {@code BridgeServer} sidecar over TCP using the same
 length-prefixed float32 wire format as ObservationCodec.java.
 
 Usage::
@@ -9,7 +9,7 @@ Usage::
     bridge = BridgeClient(host="localhost", port=50052)
     bridge.connect()
     obs = bridge.reset(seed=42)
-    action_vec = bridge.step(0.5)   # returns [x_drop]
+    obs, reward, terminated, truncated, info = bridge.step(16)
     bridge.close()
 
 Start the Java sidecar with::
@@ -24,17 +24,28 @@ import struct
 from typing import Any
 
 
+# Must match BridgeServer.CMD_* on the JVM side.
+CMD_RESET = 0.0
+CMD_STEP = 1.0
+CMD_CLOSE = 2.0
+
+
 class BridgeClient:
     """
     TCP client for the Java sidecar that wraps GymBridge.java.
 
     Wire protocol (both directions):
         [int32 length][float32 × length]  little-endian
+
+    Commands:
+        reset → [0, seed]
+        step  → [1, action]
+        close → [2]
     """
 
     def __init__(self, host: str = "localhost", port: int = 50052, timeout: float = 30.0):
-        self.host    = host
-        self.port    = port
+        self.host = host
+        self.port = port
         self.timeout = timeout
         self._sock: socket.socket | None = None
 
@@ -45,6 +56,10 @@ class BridgeClient:
     def close(self) -> None:
         if self._sock is not None:
             try:
+                try:
+                    self._send_floats([CMD_CLOSE])
+                except Exception:
+                    pass
                 self._sock.close()
             finally:
                 self._sock = None
@@ -58,20 +73,22 @@ class BridgeClient:
 
     def reset(self, seed: int = 0) -> list[float]:
         """Send reset command; return initial observation as float list."""
-        self._send_floats([float(seed)])
+        self._send_floats([CMD_RESET, float(seed)])
         return self._recv_floats()
 
     def step(self, action: float) -> tuple[list[float], float, bool, bool, dict]:
         """Send action; return (obs, reward, terminated, truncated, info)."""
-        self._send_floats([float(action)])
+        self._send_floats([CMD_STEP, float(action)])
         payload = self._recv_floats()
         # Protocol: [obs... | reward | terminated | truncated | merges_this_step]
         n_obs = len(payload) - 4
-        obs        = payload[:n_obs]
-        reward     = payload[n_obs]
+        if n_obs < 1:
+            raise ValueError(f"Step payload too short: {len(payload)}")
+        obs = payload[:n_obs]
+        reward = payload[n_obs]
         terminated = bool(payload[n_obs + 1] > 0.5)
-        truncated  = bool(payload[n_obs + 2] > 0.5)
-        merges     = int(payload[n_obs + 3])
+        truncated = bool(payload[n_obs + 2] > 0.5)
+        merges = int(payload[n_obs + 3])
         return obs, reward, terminated, truncated, {"merges": merges}
 
     # ------------------------------------------------------------------
@@ -112,22 +129,41 @@ class JavaBackedSuikaEnv:
     the exact physics of the shipped game.
     """
 
-    def __init__(self, host: str = "localhost", port: int = 50052):
-        self._client = BridgeClient(host, port)
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 50052,
+        action_bins: int = 32,
+        action_space_type: str = "discrete",
+        timeout: float = 30.0,
+    ):
+        self._client = BridgeClient(host, port, timeout=timeout)
         self._connected = False
+        self.action_bins = action_bins
+        self.action_space_type = action_space_type
+        self._obs_dim = 584
 
     def connect(self) -> None:
         self._client.connect()
         self._connected = True
 
     def reset(self, seed: int = 0) -> tuple[list[float], dict]:
+        if not self._connected:
+            self.connect()
         obs = self._client.reset(seed)
+        self._obs_dim = len(obs)
         return obs, {}
 
     def step(self, action: Any) -> tuple[list[float], float, bool, bool, dict]:
+        if not self._connected:
+            raise RuntimeError("Not connected; call reset() or connect() first")
         a = float(action) if not hasattr(action, "__float__") else float(action)
         return self._client.step(a)
 
     def close(self) -> None:
         self._client.close()
         self._connected = False
+
+    @property
+    def observation_dim(self) -> int:
+        return self._obs_dim

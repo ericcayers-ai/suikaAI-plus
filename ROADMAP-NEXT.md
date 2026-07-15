@@ -1,12 +1,37 @@
 # 🍉 Suika AI Sandbox — Next Roadmap (post-0.10.0)
 
-> **Status (v0.17.x):** Most of §1–§12 below shipped across **v0.11.0 → v0.17.2**
-> (RT shell, cinematic pipeline, merge FX, global display, playground ensembles,
-> landscape control center, pixels perception, debug-matrix CI job). Keep this file
-> as the historical work plan; treat unchecked boxes as *likely done unless you
-> verify otherwise against the live code / CHANGELOG*, and prefer
-> [`ROADMAP.md`](ROADMAP.md) + [`CHANGELOG.md`](CHANGELOG.md) for what remains.
+> **Status (v0.18.0):** The **Complete Systems Overhaul** plan is implemented end-to-end:
+> truth-gates → UI foundation → workflow redesign → bridge/ONNX deploy → research surfaces
+> → hardening. This file remains a **historical work plan** for §1–§12 (v0.11→v0.17) plus
+> the overhaul wrap below. Prefer [`docs/contracts.md`](docs/contracts.md) for frozen
+> surfaces, [`docs/budgets.md`](docs/budgets.md) for performance budgets, and
+> [`CHANGELOG.md`](CHANGELOG.md) for what actually shipped.
 >
+> Unchecked boxes in older sections are **not** claims of remaining work unless confirmed
+> in live code — many were delivered under different headings.
+
+---
+
+## §Overhaul — Complete Systems / UI (v0.18) — DONE
+
+| Phase | Status | What landed |
+|---|---|---|
+| **truth-gates** | Done | `docs/contracts.md`, PrefsKeys, SuikaVersion stamp, golden/sync/bench/Python/CI/release gates |
+| **ui-foundation** | Done | Theme/Ui tokens; UiViewport/Scroll/Focus/Modal/Toast/Keys/Layout; TechniqueConfigPanel |
+| **bridge-deploy** | Done | BridgeServer `--bridge-port`, OrtOnnxPolicyRunner, OnnxAgent, ModelSlots ONNX playback |
+| **workflow-redesign** | Done | Playground search/Explorer·Researcher/presets/IO/rail; Control Center splits; Settings sections + drag sliders + durable prefs; menu/GO/RT polish |
+| **research-surfaces** | Done | Lab Hub: Reward Studio, Dashboard registry panel, in-app bench + durable leaderboard, replay scrub, physics golden tooling, PluginRegistry view; MuZero marked demonstration |
+| **hardening-release** | Done | Focused tests, CaptureHarness Lab shot, budgets doc, version 0.18.0, docs honesty |
+
+### Intentional leftovers (honest debt)
+
+- Full ImGui / rich chart dashboard chrome beyond the Lab Hub tab (ConsoleExporter retained).
+- Full MuZero train→ONNX path (entry is an honest **demonstration surrogate**).
+- Complete e2e capture-matrix on every PR (smoke + opt-in matrix remain).
+- Reactive-net upgrades stay behind versioned model kinds when/if expanded.
+
+---
+
 > A focused, execution-oriented roadmap for the arc from **v0.10.0 → v1.0**. Unlike
 > the north-star [`ROADMAP.md`](ROADMAP.md) (which frames the whole vision), this
 > document is a **work plan**: every item is something concrete to build, grouped so
@@ -17,9 +42,11 @@
 > lives / how to approach it). Sections are ordered roughly by dependency, then by
 > value. Milestones at the end bundle sections into shippable releases.
 
-**Baseline:** v0.10.0 — physics/threading fixes, MCTS search-tree viz, 10 ensemble
-agents, scrollable diagnostics panel, RT Lab HUD overlay + caustics, parallel
+**Baseline:** v0.10.0 — physics/threading fixes, MCTS search-tree viz, ensemble agents,
+scrollable diagnostics panel, RT Lab HUD overlay + caustics, parallel
 evolution ghosts, and the selectable config-matrix debug harness.
+Shipping Playground matrix today: **13 techniques + 5 ensembles** (Dreamer and several
+older ensembles are retired).
 
 ---
 

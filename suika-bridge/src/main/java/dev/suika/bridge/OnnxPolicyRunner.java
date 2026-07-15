@@ -4,14 +4,23 @@ package dev.suika.bridge;
  * The no-Python deployment seam (ROADMAP §II.4): run an exported policy on the JVM.
  *
  * <p>Workflow: train in Python → export to ONNX (see {@code OnnxExportConfig} in
- * suika-app) → load here via DJL / ONNX Runtime → run inference in the shipped game
- * with no Python dependency for the end-user.
+ * suika-app) → load here via ONNX Runtime → run inference in the shipped game with
+ * no Python dependency for the end-user.
  *
- * <p>{@link StubOnnxPolicyRunner} provides a deterministic, dependency-free
- * implementation so the deploy path is exercised in headless tests; the real
- * implementation binds DJL's {@code ai.djl.inference.Predictor}.
+ * <p>{@link OrtOnnxPolicyRunner} is the shipping implementation (lazy native load,
+ * action-head shape checks, CUDA→CPU fallback). {@link StubOnnxPolicyRunner} remains
+ * for dependency-free headless tests when natives are unavailable.
  */
 public interface OnnxPolicyRunner extends AutoCloseable {
+
+    /**
+     * Preferred factory: real ORT when natives load, otherwise the deterministic stub.
+     *
+     * @param numActions expected {@code policy_logits} width (usually 32 bins)
+     */
+    static OnnxPolicyRunner create(int numActions) {
+        return OrtOnnxPolicyRunner.create(numActions);
+    }
 
     /** Policy network output: per-action logits and an optional state value. */
     record Output(float[] policyLogits, float value) {

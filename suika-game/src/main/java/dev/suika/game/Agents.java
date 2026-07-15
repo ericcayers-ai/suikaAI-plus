@@ -8,9 +8,9 @@ import dev.suika.ai.ReturnConditionedAgent;
 
 /**
  * Builds a JVM-native {@link AgentPlugin} for a technique. For techniques whose
- * full training lives in Python (PPO/MuZero) this returns the closest JVM-native
- * surrogate so the control center always has a live policy to play and graph while
- * the Python sidecar trains the real one.
+ * full training lives in Python (PPO/MuZero) this prefers a slot {@code model.onnx}
+ * via {@link OnnxAgent} (no Python at play time); otherwise returns an honest
+ * JVM surrogate so the control center still has something to watch while training.
  */
 public final class Agents {
 
@@ -26,7 +26,7 @@ public final class Agents {
             case ALPHAZERO, MUZERO ->
                     new MctsAgent(Math.max(40, cfg.rollouts), c, 7, bins); // planning surrogate
             case DECISION_TRANSFORMER -> new ReturnConditionedAgent(cfg.targetReturn);
-            case PPO        -> new HeuristicAgent(); // JVM surrogate until ONNX is loaded
+            case PPO        -> loadOnnxOrHeuristic(cfg, bins);
 
             // ---- Ensembles: composed agents (see EnsembleAgents.java), each wired to
             // its PlaygroundConfig customization knobs ----
@@ -42,5 +42,18 @@ public final class Agents {
 
             default -> new HeuristicAgent();
         };
+    }
+
+    /**
+     * PPO play path: first present {@code model.onnx} in the technique's slots, else
+     * {@link HeuristicAgent} (surrogate — training still requires Python).
+     */
+    private static AgentPlugin loadOnnxOrHeuristic(PlaygroundConfig cfg, int bins) {
+        int slot = ModelSlots.firstOnnxSlot(cfg.technique.id);
+        if (slot >= 1) {
+            OnnxAgent onnx = ModelSlots.tryLoadOnnxAgent(cfg.technique.id, slot, bins);
+            if (onnx != null) return onnx;
+        }
+        return new HeuristicAgent();
     }
 }

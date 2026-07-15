@@ -1,6 +1,7 @@
 package dev.suika.app;
 
 import dev.suika.ai.*;
+import dev.suika.bridge.BridgeServer;
 import dev.suika.core.GameCore;
 import dev.suika.core.StepResult;
 import dev.suika.dash.ConsoleExporter;
@@ -14,12 +15,15 @@ import java.util.Map;
  * Application entry point.
  *
  * <ul>
- *   <li>Default (no args or no {@code --headless}): launches the full LibGDX windowed game.</li>
- *   <li>{@code --headless}: runs the CLI training demo (Explorer mode, GA, no display required).</li>
+ *   <li>Default (no args): launches the full LibGDX windowed game.</li>
+ *   <li>{@code --headless}: runs the CLI training demo (Explorer mode, GA).</li>
+ *   <li>{@code --bridge-port N}: starts the JVM Gym bridge sidecar for
+ *       {@code suika.make(backend="java")} (blocks; no GUI).</li>
  * </ul>
  *
- * Run the GUI:   {@code ./gradlew :suika-app:run}
- * Run headless:  {@code ./gradlew :suika-app:run --args="--headless"}
+ * Run the GUI:    {@code ./gradlew :suika-app:run}
+ * Run headless:   {@code ./gradlew :suika-app:run --args="--headless"}
+ * Run bridge:     {@code ./gradlew :suika-app:run --args="--bridge-port 50052"}
  */
 public class SuikaApplication {
 
@@ -33,7 +37,23 @@ public class SuikaApplication {
         // struct chains involved in ray-tracing pipeline/acceleration-structure setup.
         System.setProperty("org.lwjgl.system.stackSize", String.valueOf(dev.suika.game.rtlab.RtContext.STACK_SIZE_KB));
         minimizeConsole();
-        boolean headless = args.length > 0 && "--headless".equals(args[0]);
+
+        BridgeServer bridge = BridgeServer.fromArgs(args);
+        if (bridge != null) {
+            System.out.println("=== Suika AI Sandbox — v" + dev.suika.game.Theme.VERSION
+                    + " — Java Gym bridge ===");
+            System.out.println("Listening on port " + bridge.port());
+            System.out.println("Python:  env = suika.make(backend=\"java\", port="
+                    + bridge.port() + ")");
+            Runtime.getRuntime().addShutdownHook(new Thread(bridge::close, "bridge-shutdown"));
+            bridge.serveBlocking();
+            return;
+        }
+
+        boolean headless = false;
+        for (String a : args) {
+            if ("--headless".equals(a)) { headless = true; break; }
+        }
         if (!headless) {
             DesktopLauncher.launch();
             return;

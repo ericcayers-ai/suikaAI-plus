@@ -6,6 +6,8 @@ dependencies {
     implementation(project(":suika-assets"))
     implementation(project(":suika-env"))
     implementation(project(":suika-ai"))
+    implementation(project(":suika-bridge"))
+    implementation(project(":suika-dash"))
     implementation("com.badlogicgames.gdx:gdx:${libgdxVersion}")
     implementation("com.badlogicgames.gdx:gdx-backend-lwjgl3:${libgdxVersion}")
     implementation("com.badlogicgames.gdx:gdx-platform:${libgdxVersion}:natives-desktop")
@@ -22,4 +24,13 @@ dependencies {
     runtimeOnly("org.lwjgl:lwjgl-shaderc:${lwjglVersion}:natives-linux")
     runtimeOnly("org.lwjgl:lwjgl-shaderc:${lwjglVersion}:natives-macos")
     runtimeOnly("org.lwjgl:lwjgl-shaderc:${lwjglVersion}:natives-macos-arm64")
+}
+
+// Stamp the Gradle version into suika-version.properties so Theme.VERSION cannot drift.
+tasks.named<ProcessResources>("processResources") {
+    val ver = version.toString()
+    inputs.property("suikaVersion", ver)
+    filesMatching("suika-version.properties") {
+        filter { line: String -> line.replace("@VERSION@", ver) }
+    }
 }

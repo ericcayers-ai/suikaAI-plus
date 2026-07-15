@@ -148,7 +148,7 @@ public final class PythonRunner extends AgentRunner {
             s.add("tb logdir   " + TensorboardLauncher.logDir(cfg.technique.id));
             s.add("tb button   SETUP -> TensorBoard toggle + OPEN (below)");
         }
-        s.add("deploy      export ONNX -> OnnxPolicyRunner");
+        s.add("deploy      model.onnx → OnnxPolicyRunner (ORT, no Python at play)");
         s.add(PythonSetup.isReady()
                 ? "env ready   GPU stack linked"
                 : "env setup   Settings -> AI ENVIRONMENT");

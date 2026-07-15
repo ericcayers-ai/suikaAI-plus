@@ -1,5 +1,6 @@
 package dev.suika.app;
 
+import dev.suika.ai.HyperparamSchema;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;

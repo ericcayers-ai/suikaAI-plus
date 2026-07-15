@@ -17,9 +17,18 @@ public final class BenchmarkSuite {
     /** Canonical seeds — never change these to keep historic results comparable. */
     public static final List<Long> STANDARD_SEEDS = List.of(1L, 42L, 137L, 999L, 31415L);
 
-    private static final int EPISODES_PER_SEED = 3;
-    private static final int MAX_STEPS         = 500;
-    private static final int ACTION_BINS        = 32;
+    /** Default episodes per seed — part of the frozen leaderboard contract. */
+    public static final int DEFAULT_EPISODES_PER_SEED = 3;
+
+    /** Default max steps per episode — part of the frozen leaderboard contract. */
+    public static final int DEFAULT_MAX_STEPS = 500;
+
+    /** Discrete bins used by the standard suite — aligned with ModelSlots.OUTPUT_BINS. */
+    public static final int DEFAULT_ACTION_BINS = 32;
+
+    private static final int EPISODES_PER_SEED = DEFAULT_EPISODES_PER_SEED;
+    private static final int MAX_STEPS         = DEFAULT_MAX_STEPS;
+    private static final int ACTION_BINS        = DEFAULT_ACTION_BINS;
 
     private final List<Long> seeds;
     private final int        episodesPerSeed;

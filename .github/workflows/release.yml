@@ -1,7 +1,7 @@
 name: Release
 
 # Builds the cross-platform application distribution and publishes it as a GitHub
-# Release whenever a version tag is pushed (e.g. `git tag v0.17.1 && git push --tags`).
+# Release whenever a version tag is pushed (e.g. `git tag v0.17.2 && git push --tags`).
 on:
   push:
     tags:
@@ -26,18 +26,47 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Verify tag matches project version
+      - name: Verify all version surfaces match the tag
         run: |
+          set -euo pipefail
           TAG="${GITHUB_REF_NAME#v}"
-          VER=$(grep -E '^\s*version\s*=' build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-          echo "tag=$TAG  gradle.version=$VER"
-          if [ "$TAG" != "$VER" ]; then
-            echo "::error::Tag v$TAG does not match build.gradle.kts version $VER"
+          GRADLE=$(grep -E '^\s*version\s*=' build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          PY=$(grep -E '^__version__\s*=' python/suika/__init__.py | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          SETUP=$(grep -E '^\s*version\s*=' python/setup.py | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          FALLBACK=$(grep -E 'FALLBACK\s*=' suika-game/src/main/java/dev/suika/game/SuikaVersion.java | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "tag=$TAG gradle=$GRADLE python=$PY setup.py=$SETUP SuikaVersion.FALLBACK=$FALLBACK"
+          if [ "$TAG" != "$GRADLE" ]; then
+            echo "::error::Tag v$TAG does not match build.gradle.kts version $GRADLE"
+            exit 1
+          fi
+          if [ "$TAG" != "$PY" ]; then
+            echo "::error::Tag v$TAG does not match python/suika/__init__.py __version__ $PY"
+            exit 1
+          fi
+          if [ "$TAG" != "$SETUP" ]; then
+            echo "::error::Tag v$TAG does not match python/setup.py version $SETUP"
+            exit 1
+          fi
+          if [ "$TAG" != "$FALLBACK" ]; then
+            echo "::error::Tag v$TAG does not match SuikaVersion.FALLBACK $FALLBACK (bump when releasing)"
             exit 1
           fi
 
       - name: Run tests
         run: ./gradlew test --parallel
+
+      - name: Confirm stamped Theme.VERSION resource
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          PROP=$(./gradlew :suika-game:processResources -q && \
+            cat suika-game/build/resources/main/suika-version.properties | \
+            grep -E '^version=' | cut -d= -f2)
+          echo "stamped suika-version.properties version=$PROP"
+          if [ "$TAG" != "$PROP" ]; then
+            echo "::error::Generated suika-version.properties ($PROP) does not match tag $TAG"
+            exit 1
+          fi
 
       - name: Build application distribution
         run: ./gradlew :suika-app:distZip --parallel
@@ -54,6 +83,9 @@ jobs:
           body: |
             Download `suika-app-<version>.zip`, extract, and run `bin/suika-app`
             (`bin/suika-app.bat` on Windows). **Java 21+ must be on your `PATH`.**
+
+            Platform artifact: the single JVM distribution zip above (Windows / Linux / macOS
+            with a local JDK). Compatibility contracts: see `docs/contracts.md`.
 
             See the [CHANGELOG](https://github.com/ericcayers-ai/suikaAI-plus/blob/main/CHANGELOG.md)
             for what's new in this release.

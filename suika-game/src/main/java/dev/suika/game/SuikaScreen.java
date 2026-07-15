@@ -128,7 +128,7 @@ public final class SuikaScreen extends ScreenAdapter {
                 return false;
             }
             @Override public boolean keyDown(int k) {
-                if (k == Input.Keys.ESCAPE) { paused = !paused; return true; }
+                if (k == Input.Keys.ESCAPE || UiKeys.isPause(k)) { paused = !paused; return true; }
                 if (k == Input.Keys.R)      { game.setScreen(new SuikaScreen(game, mode)); return true; }
                 if (k == Input.Keys.SPACE && mode == Mode.HUMAN) {
                     // Keyboard-only drop, completing the arrow-key aim scheme below —

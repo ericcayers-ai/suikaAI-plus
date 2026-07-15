@@ -6,6 +6,11 @@ import dev.suika.env.RewardConfig;
 import dev.suika.env.SuikaEnv;
 import org.junit.jupiter.api.Test;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.file.Path;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -111,5 +116,92 @@ class BridgeTest {
         assertEquals(0, out.argmaxAction());
         runner.close();
         assertFalse(runner.isLoaded());
+    }
+
+    @Test
+    void onnxFactoryFallsBackToStubOrOrt() {
+        OnnxPolicyRunner runner = OnnxPolicyRunner.create(32);
+        assertNotNull(runner);
+        runner.close();
+    }
+
+    @Test
+    void actionHeadShapeValidation() {
+        OrtOnnxPolicyRunner.validateActionHeadShapes(new long[]{-1, 32}, 32);
+        OrtOnnxPolicyRunner.validateActionHeadShapes(new long[]{1, 32}, 32);
+        assertThrows(IllegalStateException.class,
+                () -> OrtOnnxPolicyRunner.validateActionHeadShapes(new long[]{1, 16}, 32));
+        assertThrows(IllegalStateException.class,
+                () -> OrtOnnxPolicyRunner.validateActionHeadShapes(new long[]{}, 32));
+    }
+
+    @Test
+    void ortLoadsFixtureWhenNativesAvailable() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(OrtOnnxPolicyRunner.nativesAvailable(),
+                "ONNX Runtime natives not available");
+        var url = BridgeTest.class.getResource("/dev/suika/bridge/tiny_policy.onnx");
+        assertNotNull(url, "tiny_policy.onnx fixture missing");
+        Path model = Path.of(url.toURI());
+        OrtOnnxPolicyRunner runner = new OrtOnnxPolicyRunner(32);
+        runner.load(BridgeConfig.onnx(model.toString()));
+        assertTrue(runner.isLoaded());
+        assertTrue(runner.backendUsed().equals("cpu") || runner.backendUsed().equals("cuda"));
+        float[] obs = new float[584];
+        OnnxPolicyRunner.Output out = runner.run(obs);
+        assertEquals(32, out.policyLogits().length);
+        runner.close();
+    }
+
+    @Test
+    void ortRejectsWrongActionHead() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(OrtOnnxPolicyRunner.nativesAvailable(),
+                "ONNX Runtime natives not available");
+        var url = BridgeTest.class.getResource("/dev/suika/bridge/bad_action_head.onnx");
+        assertNotNull(url);
+        Path model = Path.of(url.toURI());
+        OrtOnnxPolicyRunner runner = new OrtOnnxPolicyRunner(32);
+        assertThrows(IllegalStateException.class,
+                () -> runner.load(BridgeConfig.onnx(model.toString())));
+        runner.close();
+    }
+
+    @Test
+    void bridgeServerRoundTrip() throws Exception {
+        int port;
+        try (ServerSocket probe = new ServerSocket(0)) {
+            port = probe.getLocalPort();
+        }
+        try (BridgeServer server = new BridgeServer(port)) {
+            server.start();
+            assertTrue(server.isRunning());
+
+            try (Socket sock = new Socket("127.0.0.1", port)) {
+                sock.setTcpNoDelay(true);
+                DataOutputStream out = new DataOutputStream(sock.getOutputStream());
+                DataInputStream in = new DataInputStream(sock.getInputStream());
+
+                // reset
+                BridgeServer.writeFrame(out, new float[]{BridgeServer.CMD_RESET, 42f});
+                float[] obs = BridgeServer.readFrame(in);
+                assertEquals(584, obs.length);
+
+                // step (discrete bin 16)
+                BridgeServer.writeFrame(out, new float[]{BridgeServer.CMD_STEP, 16f});
+                float[] step = BridgeServer.readFrame(in);
+                assertEquals(584 + 4, step.length);
+                assertTrue(Float.isFinite(step[584]));
+
+                BridgeServer.writeFrame(out, new float[]{BridgeServer.CMD_CLOSE});
+            }
+        }
+    }
+
+    @Test
+    void bridgeServerFromArgs() {
+        assertNull(BridgeServer.fromArgs(new String[]{"--headless"}));
+        BridgeServer s = BridgeServer.fromArgs(new String[]{"--bridge-port", "50123"});
+        assertNotNull(s);
+        assertEquals(50123, s.port());
+        s.close();
     }
 }

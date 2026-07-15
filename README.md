@@ -22,7 +22,7 @@ cd suika-app-<version>/bin && ./suika-app
 cd suika-app-<version>\bin && suika-app.bat
 ```
 
-**Java 21+ must be on your `PATH`.** The ZIP bundles all JVM dependencies — no Python or GPU required for the game. GPU-accelerated Python training/inference is optional and installed on demand from **Settings → AI ENVIRONMENT**.
+**Java 21+ must be on your `PATH`.** The ZIP bundles all JVM dependencies — no Python or GPU required for the game. GPU-accelerated Python training/inference is optional and installed on demand from **Settings → AI**.
 
 > **Headless / training mode**
 > ```bash
@@ -31,16 +31,16 @@ cd suika-app-<version>\bin && suika-app.bat
 
 ---
 
-## What's new in v0.17.2
+## What's new in v0.18.0
 
-Post-v0.17.1 quality pass — evaluator alignment, benchmarks, fruit radii, CI, and GPU teardown:
+Complete systems / UI overhaul — truth gates, UI foundation, workflow redesign, bridge+ONNX
+deploy, research Lab Hub, and hardening:
 
-- **Shared `BoardEval.placement`** for MCTS, auto-drop refinement, and ensembles (full survival-aware scale).
-- **Headless `Bench` restored**; `BenchmarkSuite` averages true per-seed re-runs (`-Deps`).
-- **Fruit radii re-synced** across Java ladder, `fruits.json`, and `python/suika/env.py`.
-- **PPO ONNX** exports include SB3 `action_net`; CI `JAVA_OPTS` for capture; release tag↔Gradle check.
-- **MCTS ensembles** honor think-time / root parallelism; GPU bridges close on soft failure and teardown.
-- Control Center pause/ESC fixes; greedy continuous actions; ensemble donor picker cleanup.
+- **Contracts & gates** — `docs/contracts.md`, PrefsKeys, stamped `Theme.VERSION`, golden physics, CI/Python/bench floors.
+- **Workflow UI** — searchable Playground (Explorer/Researcher), experiment import/export, status rail, Control Center layout splits, Settings sections with drag sliders + reset, durable prefs, keyboard-first menu/game-over, actionable RT failures.
+- **Bridge / ONNX** — JVM `BridgeServer`, ONNX Runtime playback without Python at play time.
+- **Research Lab** — Reward Studio, DashboardRegistry panel, in-app bounded bench + durable leaderboard, replay scrub, physics golden rebless tooling, PluginRegistry browser; **MuZero** marked demonstration/surrogate.
+- **Docs** — budgets (`docs/budgets.md`), roadmap wrap, community templates retained (Apache-2.0 LICENSE, CoC, CONTRIBUTING, issue/PR templates).
 
 See the full [CHANGELOG](CHANGELOG.md) for every release.
 
@@ -51,13 +51,14 @@ See the full [CHANGELOG](CHANGELOG.md) for every release.
 
 | Screen | What you see |
 |---|---|
-| **Main Menu** | Title + **PLAY** / **WATCH AI** / **SETTINGS** / **QUIT**, ambient backdrop |
-| **Settings** | Live graphics (FPS 30–240/unlimited, V-Sync, shading, particles, guide, labels, shake), simulation (drop columns, seed), and AI-watch knobs |
-| **Game (Human)** | Real-time physics — aim with the mouse or ←/→, click or Space to drop, watch fruit fall and settle. HUD with score, best, next-fruit preview |
-| **AI Playground** | The curated capability-matrix browser (12 techniques + 5 ensembles); pick one, configure it via the drawer (preset, speed, parallelism, per-technique + per-ensemble knobs), read its infocard, **LAUNCH** |
-| **Control Center** | Per-technique diagnostics — live board(s), score/fitness/loss/diversity charts, MCTS search-tree + perception panels, SAVES/SETUP modals, runtime controls (pause, speed, restart) |
-| **RT Lab** | Experimental raw-Vulkan hardware ray-traced game in its own window, with an in-window pause menu of live graphics settings (bloom / denoise / depth-of-field / accumulation) |
-| **Game Over** | Final score, highest fruit, fruit-on-board, seed; **PLAY AGAIN** / **MAIN MENU** |
+| **Main Menu** | Title + **PLAY** / **WATCH AI** / **SETTINGS** / **LAB** / **QUIT**, first-run help, RT CTAs |
+| **Settings** | Display / Graphics / Simulation / AI / Input / RT Lab / Data — drag sliders, reduced motion, reset defaults |
+| **Game (Human)** | Real-time physics — aim with the mouse or ←/→, click or Space to drop. HUD with score, best, next-fruit preview |
+| **AI Playground** | Searchable capability matrix (13+5); Explorer/Researcher; hardware presets; experiment IO; status rail; **LAUNCH** |
+| **Control Center** | Live boards, diagnostics, run controls, ONNX-aware slots, hotswap; experiment status rail |
+| **Research Lab** | Reward Studio, dashboard runs, bounded bench, replay scrub, physics golden tools, plugins |
+| **RT Lab** | Experimental Vulkan ray-traced game (own window); failures offer Retry / Settings |
+| **Game Over** | Score / fruit / seed; **PLAY AGAIN** / **EXPORT SUMMARY** / **MAIN MENU** |
 
 Crisp anti-aliased text (bundled Apache-2.0 DroidSans via FreeType), glossy depth-shaded
 fruit, rounded glass container, merge particles — all procedural, **no external art files**.
@@ -65,7 +66,7 @@ fruit, rounded glass container, merge particles — all procedural, **no externa
 ### AI Playground & Control Center
 
 Pressing **WATCH AI** opens the **AI Playground** — a self-contained browser of the
-entire [capability matrix](#ai-algorithms-suika-ai--100-jvm-native-no-python-required)
+entire [capability matrix](#ai-algorithms-suika-ai)
 (every technique, JVM and JVM+Python). Select a technique, tune its knobs
 (**speed**, **parallelism**, and a family-specific hyper-parameter), and **LAUNCH** its
 specialised control center:
@@ -83,7 +84,9 @@ specialised control center:
 - **Model-based / Deep-RL** (MuZero, PPO, Decision Transformer) — probes for the managed
   Python venv, shows the exact training command and (when GPU deps are installed) the CUDA
   device, and runs a JVM-native surrogate live so the board and charts are always
-  populated. Train in Python → export ONNX → deploy with `OnnxPolicyRunner`.
+  populated. Train in Python → export ONNX → play with `OrtOnnxPolicyRunner` / `OnnxAgent`
+  (no Python at play time; stub kept for tests). Live GPU inference can still use the
+  PyTorch worker bridge when enabled.
 - **Ensembles** (Adaptive Voting Committee, Bandit Meta-Controller, MCTS + Policy Net,
   MCTS + Greedy Tiebreak, Return-Conditioned + MCTS Verify) — each composes real
   building-block agents, declares its members explicitly, and exposes its own knobs
@@ -109,28 +112,34 @@ specialised control center:
 - Moddable fruit ladders and physics constants via JSON config (`ModConfig`)
 - Replay logging with full deterministic reconstruction
 
-### AI Algorithms (suika-ai) — 100% JVM-native
+### AI Algorithms (suika-ai)
 
-> The AI Playground surfaces a **curated** set (12 techniques + 5 ensembles). The
-> `suika-ai` library below is the full JVM-native toolbox those are built from; every
-> algorithm runs without Python. Optional GPU acceleration (Settings → AI ENVIRONMENT)
-> routes Python-backed training and saved-net inference to CUDA when available.
+> The AI Playground surfaces a **curated** set (**13 techniques + 5 ensembles**).
+> The table below is the broader JVM toolbox those are built from — including
+> **library-only / retired-from-matrix** helpers that are not Playground entries.
+> Optional GPU acceleration (Settings → AI ENVIRONMENT) routes Python-backed
+> training and saved-net inference to CUDA when available.
 
-| Algorithm | Class | Notes |
+| Algorithm | Class | Status |
 |---|---|---|
-| Random baseline | `RandomAgent` | Uniform drop |
-| Greedy one-ply | `GreedyOnePlyAgent` | Maximise immediate merge score |
-| MCTS | `MctsAgent` | UCB1, configurable rollouts |
-| AlphaZero-style MCTS | `MctsAgent` + `PolicyValueNetwork` | Policy-value net guides search |
-| Neuroevolution (GA) | `GeneticTrainer` | Tournament + Gaussian mutation |
-| CMA-ES | `CmaEsTrainer` | Separable CMA for faster evolution |
-| Behavioral Cloning | `BehavioralCloningTrainer` | Supervised imitation from demos |
-| DAgger | `DAggerTrainer` | MCTS-as-expert iterative imitation |
-| Return-conditioned | `ReturnConditionedAgent` | DT-style RTG conditioning (JVM) |
-| Generative model | `GenerativeModelBridge` | Board-aware softmax sampling (JVM) |
-| Adversarial curriculum | `AdversarialSequenceSetter` | Random / greedy-worst / look-ahead |
-| Population-based training | `PopulationBasedTraining` | Hyperparameter evolution |
-| Self-play / league | `RacingSelfPlay` | Two-player seeded racing |
+| Greedy one-ply | `GreedyOnePlyAgent` | Playground |
+| MCTS | `MctsAgent` | Playground |
+| AlphaZero-style MCTS | `MctsAgent` + `PolicyValueNetwork` | Playground |
+| Heuristic | `HeuristicAgent` | Playground |
+| Neuroevolution (GA) | `GeneticTrainer` | Playground |
+| CMA-ES | `CmaEsTrainer` | Playground |
+| Population-based training | `PopulationBasedTraining` | Playground |
+| Behavioral Cloning | `BehavioralCloningTrainer` | Playground |
+| DAgger | `DAggerTrainer` | Playground |
+| DQN | (JVM Q-learning loop) | Playground |
+| Return-conditioned | `ReturnConditionedAgent` | Building block / ensemble |
+| Random baseline | `RandomAgent` | Library only (retired from matrix) |
+| Generative model | `GenerativeModelBridge` | Library / stub sampling |
+| Adversarial curriculum | `AdversarialSequenceSetter` | Library helper |
+| Self-play / league | `RacingSelfPlay` | Library only (retired from matrix) |
+
+Python scripts `diffusion_policy.py` / `flow_matching.py` exist for research but are
+**not** Playground matrix techniques.
 
 ### Python Training (python/suika)
 | Module | What it provides |
@@ -150,25 +159,30 @@ specialised control center:
 - Gymnasium-compatible `ActionSpace.Discrete` / `ActionSpace.Continuous`
 
 ### Java↔Python Bridge (suika-bridge)
-- `BridgeTransport` interface with `InProcessTransport` and stubs for JEP / gRPC / shared-memory sidecar
-- `ObservationCodec` — length-prefixed little-endian float32 wire format
-- `GymBridge` — Gymnasium `(obs, reward, terminated, truncated, info)` contract on the JVM
-- `PettingZooBridge` — two-player racing adapter for competitive training
-- `OnnxPolicyRunner` + `StubOnnxPolicyRunner` — no-Python inference deploy path
+- `BridgeServer` — TCP Gym sidecar (`--bridge-port N`); Python `suika.make(backend="java")`
+- `BridgeTransport` — **shipping:** `InProcessTransport` + TCP `BridgeServer`.
+  JEP / GraalPy / gRPC / shared-memory remain enum/contract placeholders.
+- `ObservationCodec` — length-prefixed little-endian float32 wire format (opcodes reset/step/close)
+- `GymBridge` / `PettingZooBridge` — Gymnasium-shaped JVM adapters
+- `OnnxPolicyRunner` — **`OrtOnnxPolicyRunner`** (ONNX Runtime, lazy natives, shape checks,
+  CUDA→CPU fallback) + **`StubOnnxPolicyRunner`** for dependency-free tests
 
 ### Dashboard & Telemetry (suika-dash)
-- `DashboardRegistry` with pluggable metric publishers
-- `EvolutionMetricsLogger` — per-generation best/mean fitness
-- `RewardDecompositionTracker` — per-reward-term breakdown
-- `ActionHeatmap` — drop-position heatmap across episodes
-- `ConsoleExporter` — human-readable terminal output
+- Headless telemetry helpers: `DashboardRegistry`, `EvolutionMetricsLogger`,
+  `RewardDecompositionTracker`, `ActionHeatmap`, `ConsoleExporter`
+- In-app dashboard / ImGui viewer and Reward Studio UI are **not** shipping yet
+  (contracts only; see `docs/architecture.md`)
 
 ### Extensibility
 - `AgentPlugin` / `TrainerPlugin` SPI — discovered via `java.util.ServiceLoader`
 - `PluginRegistry` — runtime registration and lookup
-- Schema-driven hyperparameter UI (`HyperparamSchema`) for Explorer / Researcher modes
-- `AgentPreset` (Quick Learner, Competitive, Researcher) for one-click configuration
-- ONNX export config (`OnnxExportConfig`) for model shipping
+- Schema-driven hyperparameter helpers (`HyperparamSchema`) and `AgentPreset` for headless/CLI;
+  full Explorer / Researcher LibGDX UX is planned, not the current Settings/Playground redesign surface
+- ONNX export config (`OnnxExportConfig`) for Python→file shipping; JVM load via `OrtOnnxPolicyRunner` / `OnnxAgent`
+
+### Compatibility contracts
+Frozen save / encoder / benchmark / prefs surfaces are documented in
+[`docs/contracts.md`](docs/contracts.md) and gated in CI.
 
 ---
 
@@ -247,7 +261,7 @@ from suika.bc import BCTrainer, DemoDataset
 ds = DemoDataset.from_recordings("demos/")
 trainer = BCTrainer(obs_dim=584, num_actions=32)
 trainer.train(ds, epochs=20)
-trainer.save_onnx("policy.onnx")     # load with OnnxPolicyRunner.java
+trainer.save_onnx("policy.onnx")     # copy to ~/.suikai/saves/.../model.onnx for OnnxAgent
 ```
 
 **Diffusion Policy**
@@ -323,7 +337,11 @@ python/suika/   — Gymnasium env + PyTorch training toolkit
 ```
 
 **Deploy path (no Python)**:
-Train in Python → export ONNX → load with `OnnxPolicyRunner` → shipped in game JAR.
+Train in Python → export ONNX → place as `~/.suikai/saves/<id>/slotN/model.onnx` →
+`OnnxAgent` / `AiSlotPlayer` / ensemble donor via `OrtOnnxPolicyRunner`.
+Standalone Python sim remains the default fast training path; Java backend is opt-in.
+
+Compatibility freezes: [`docs/contracts.md`](docs/contracts.md).
 
 ---
 
@@ -331,7 +349,7 @@ Train in Python → export ONNX → load with `OnnxPolicyRunner` → shipped in 
 
 1. Fork and create a feature branch
 2. `./gradlew build` must pass
-3. `ruff check python/` must pass
+3. `ruff check python/` and `cd python && pytest -q` must pass
 4. Open a PR against `main`
 
 ---

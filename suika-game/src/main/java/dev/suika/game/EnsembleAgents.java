@@ -7,6 +7,7 @@ import dev.suika.ai.HeuristicAgent;
 import dev.suika.ai.MctsAgent;
 import dev.suika.ai.MlpPolicy;
 import dev.suika.ai.ReturnConditionedAgent;
+import dev.suika.bridge.OnnxPolicyRunner;
 import dev.suika.core.GameCore;
 import dev.suika.core.GameState;
 import dev.suika.core.PhysicsConfig;
@@ -101,18 +102,34 @@ final class EnsembleAgents {
         return p;
     }
 
+    /**
+     * Prefer a slot {@code model.onnx} via ORT (PPO / exported MLP); otherwise classic
+     * {@link MlpPolicy} weights. Returns {@code null} runner when falling back to MLP.
+     */
+    private static OnnxPolicyRunner tryLoadDonorOnnx(AiTechnique sourceTechnique, int slot, int actionBins) {
+        if (slot >= 1 && slot <= ModelSlots.SLOT_COUNT) {
+            return ModelSlots.tryLoadOnnxRunner(sourceTechnique.id, slot, actionBins);
+        }
+        int found = ModelSlots.firstOnnxSlot(sourceTechnique.id);
+        if (found >= 1) {
+            return ModelSlots.tryLoadOnnxRunner(sourceTechnique.id, found, actionBins);
+        }
+        return null;
+    }
+
     private static MlpPolicy loadOrFreshPolicy(AiTechnique sourceTechnique, long fallbackSeed) {
         return loadOrFreshPolicy(sourceTechnique, 0, fallbackSeed);
     }
 
-    /** True when a donor technique has loadable trained WEIGHTS in the given slot (or ANY
-     *  slot when {@code slot <= 0}). Weight-aware (not just "a save exists"): a config-only
-     *  save — e.g. an untrained PPO/MuZero slot — correctly reads as untrained, so the UI
-     *  never claims a random net is a trained donor. */
+    /** True when a donor technique has loadable trained WEIGHTS or {@code model.onnx} in the
+     *  given slot (or ANY slot when {@code slot <= 0}). Weight-aware (not just "a save
+     *  exists"): a config-only save correctly reads as untrained. */
     static boolean donorTrained(AiTechnique donor, int slot) {
-        if (slot >= 1 && slot <= ModelSlots.SLOT_COUNT) return ModelSlots.hasWeights(donor.id, slot);
+        if (slot >= 1 && slot <= ModelSlots.SLOT_COUNT) {
+            return ModelSlots.hasPlayablePolicy(donor.id, slot);
+        }
         for (int s = 1; s <= ModelSlots.SLOT_COUNT; s++) {
-            if (ModelSlots.hasWeights(donor.id, s)) return true;
+            if (ModelSlots.hasPlayablePolicy(donor.id, s)) return true;
         }
         return false;
     }
@@ -148,6 +165,7 @@ final class EnsembleAgents {
     static final class NetGuidedMcts implements AgentPlugin, HasMctsCore, AutoCloseable {
         private final MctsAgent mcts;
         private final MlpPolicy net;
+        private final OnnxPolicyRunner onnx; // nullable — preferred when donor exported ONNX
         private final double netWeight;
         final AiTechnique donor;
         final int donorSlot;
@@ -160,7 +178,8 @@ final class EnsembleAgents {
         // eval loop this is a safe, worthwhile cadence for the GPU bridge's ~1ms IPC —
         // see GpuInferenceBridge's class doc for why the hotter loops deliberately don't
         // do this. Never affects the decision, only where the arithmetic runs (same
-        // guarantee GpuNeuralAgent gives the playback path).
+        // guarantee GpuNeuralAgent gives the playback path). GPU bridge only applies to
+        // classic MlpPolicy donors — ONNX donors run through OrtOnnxPolicyRunner.
         private final GpuInferenceBridge gpuBridge;
         private volatile boolean gpuUsable;
 
@@ -169,10 +188,13 @@ final class EnsembleAgents {
             this.donor = donor;
             this.donorSlot = donorSlot;
             this.donorTrained = donorTrained(donor, donorSlot);
-            this.net = loadOrFreshPolicy(donor, donorSlot, 101L);
+            this.onnx = tryLoadDonorOnnx(donor, donorSlot, actionBins);
+            this.net = this.onnx != null
+                    ? ModelSlots.newCompatiblePolicy() // unused when onnx is live
+                    : loadOrFreshPolicy(donor, donorSlot, 101L);
             this.netWeight = netWeight;
             GpuInferenceBridge b = null;
-            if (GpuProbe.gpuInferenceActive()) {
+            if (this.onnx == null && GpuProbe.gpuInferenceActive()) {
                 b = GpuInferenceBridge.start(StateObservationEncoder.TOTAL, ModelSlots.HIDDEN_SIZE,
                         ModelSlots.OUTPUT_BINS, net.getWeights(), "cuda");
                 if (!b.healthy()) { b.close(); b = null; }
@@ -216,6 +238,12 @@ final class EnsembleAgents {
         }
         private double[] netForward(GameState state) {
             float[] obs = encoder.encode(state);
+            if (onnx != null && onnx.isLoaded()) {
+                float[] logits = onnx.run(obs).policyLogits();
+                double[] out = new double[logits.length];
+                for (int i = 0; i < logits.length; i++) out[i] = logits[i];
+                return out;
+            }
             if (netOnGpu()) {
                 double[] out = gpuBridge.forward(obs);
                 if (out != null) return out;
@@ -228,6 +256,9 @@ final class EnsembleAgents {
         public void close() {
             gpuUsable = false;
             if (gpuBridge != null) gpuBridge.close();
+            if (onnx != null) {
+                try { onnx.close(); } catch (Exception ignored) {}
+            }
         }
     }
 

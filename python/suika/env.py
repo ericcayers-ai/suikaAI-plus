@@ -318,6 +318,8 @@ class SuikaEnv(gym.Env if HAS_GYMNASIUM else object):
         seed: int = 0,
         backend: str = "standalone",
         render_mode: str | None = None,
+        host: str = "localhost",
+        port: int = 50052,
     ):
         self.observation_type  = observation
         self.action_space_type = action_space_type
@@ -325,9 +327,14 @@ class SuikaEnv(gym.Env if HAS_GYMNASIUM else object):
         self._seed             = seed
         self.backend           = backend
         self.render_mode       = render_mode
+        self._bridge_host      = host
+        self._bridge_port      = port
 
         self._sim: StandaloneSimulator | None = None
         self._bridge = None
+
+        if backend not in ("standalone", "java"):
+            raise ValueError(f"Unknown backend: {backend!r} (expected 'standalone' or 'java')")
 
         if HAS_GYMNASIUM:
             if action_space_type == "discrete":
@@ -356,11 +363,18 @@ class SuikaEnv(gym.Env if HAS_GYMNASIUM else object):
     def reset(self, seed: int | None = None, options: dict | None = None):
         if seed is not None:
             self._seed = seed
+
+        if self.backend == "java":
+            return self._reset_java()
+
         self._sim = StandaloneSimulator(seed=self._seed)
         obs = self._get_obs()
         return obs, {}
 
     def step(self, action: Any):
+        if self.backend == "java":
+            return self._step_java(action)
+
         if self._sim is None or self._sim.game_over:
             raise RuntimeError("Call reset() before stepping a terminated environment.")
 
@@ -384,6 +398,52 @@ class SuikaEnv(gym.Env if HAS_GYMNASIUM else object):
         if self._bridge is not None:
             self._bridge.close()
             self._bridge = None
+        self._sim = None
+
+    # ------------------------------------------------------------------
+    # Java backend (BridgeServer / GymBridge)
+    # ------------------------------------------------------------------
+
+    def _ensure_bridge(self):
+        if self._bridge is not None:
+            return
+        from suika.bridge import JavaBackedSuikaEnv
+        self._bridge = JavaBackedSuikaEnv(
+            host=self._bridge_host,
+            port=self._bridge_port,
+            action_bins=self.action_bins,
+            action_space_type=self.action_space_type,
+        )
+
+    def _reset_java(self):
+        self._ensure_bridge()
+        obs, info = self._bridge.reset(seed=self._seed)
+        if HAS_GYMNASIUM:
+            arr = np.array(obs, dtype=np.float32)
+            if self.observation_type == "pixels":
+                # Pixel mode against the Java sidecar is not yet rasterized server-side;
+                # fall back to a zero stack so callers do not crash.
+                return np.zeros(
+                    (self.PIXEL_FRAMES, self.PIXEL_H, self.PIXEL_W), dtype=np.float32), info
+            return arr, info
+        return obs, info
+
+    def _step_java(self, action: Any):
+        if self._bridge is None:
+            raise RuntimeError("Call reset() before stepping a Java-backed environment.")
+        # Discrete bins are sent as integer indices; continuous as [-1, 1].
+        if self.action_space_type == "discrete":
+            a = float(int(action))
+        else:
+            a = float(action) if not hasattr(action, "__len__") else float(action[0])
+        obs, reward, terminated, truncated, info = self._bridge.step(a)
+        if HAS_GYMNASIUM:
+            arr = np.array(obs, dtype=np.float32)
+            if self.observation_type == "pixels":
+                arr = np.zeros(
+                    (self.PIXEL_FRAMES, self.PIXEL_H, self.PIXEL_W), dtype=np.float32)
+            return arr, float(reward), terminated, truncated, info
+        return obs, float(reward), terminated, truncated, info
 
     # ------------------------------------------------------------------
 

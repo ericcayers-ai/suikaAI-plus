@@ -69,8 +69,9 @@ public final class ControlCenterScreen extends ScreenAdapter {
     // survives a crash/close. Uses wall-clock delta (not the sped-up sim time) so "5 min"
     // means 5 real minutes regardless of the playback speed.
     private float autosaveTimer = 0f;
-    private String autosaveNote = "";
-    private float autosaveNoteTimer = 0f;
+    private final UiToast toast = new UiToast();
+    private final UiModal modal = new UiModal();
+    private final UiScroll statsScroller = new UiScroll();
 
     // Stuck-run watchdog (Settings -> INPUT -> "Stuck-run watchdog"): if a single think
     // hangs past STUCK_THINK_MS, or the machine can't keep up (many-second frames piling
@@ -87,7 +88,6 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private final Rectangle   slotsCloseBtn = new Rectangle();
     private static final float SLOTS_MW = 640f, SLOTS_MH = 380f;
     private volatile String slotsMessage = "";
-
     // Hotswap (quick-settings) modal — mirrors the AI Playground drawer so every
     // per-technique launch knob (including evolution's sims/gen + ghost lineage) is
     // reachable mid-run, not just before LAUNCH.
@@ -112,20 +112,11 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private final Rectangle swapCloseBtn      = new Rectangle();
     private static final float SWAP_MW = 480f, SWAP_MH = 668f;
 
-    // Hotswap param tables (mirror AiPlaygroundScreen)
-    private static final int[]    ROLLOUTS = {40, 80, 150, 300, 600, 1200, 2400};
-    private static final int[]    POP      = {16, 24, 40, 64, 128, 256, 512, 1000};
-    private static final int[]    RETURNS  = {1000, 2000, 4000};
-    private static final double[] LRS      = {1e-3, 3e-3, 1e-2};
+    // Board tiling constants live on ControlCenterBoardGrid (workflow-redesign split).
+    private static final float GRID_CELL_PAD = ControlCenterBoardGrid.GRID_CELL_PAD;
+    private static final float GRID_TAG_H = ControlCenterBoardGrid.GRID_TAG_H;
 
-    // Board game-unit footprint (well + walls), used for tiling.
-    private static final float BOARD_GW = (float) (PhysicsConfig.CONTAINER_WIDTH  + 2 * PhysicsConfig.WALL_THICKNESS);
-    private static final float BOARD_GH = (float) (PhysicsConfig.CONTAINER_HEIGHT + PhysicsConfig.WALL_THICKNESS + 1.0);
-
-    // Shared with placements(): how much screen space is reserved above each mini-board
-    // for its caption. renderGridShapes() clips fruit rendering to this same budget so a
-    // tall/dense stack can never visually bleed into the label above it.
-    private static final float GRID_CELL_PAD = 10f, GRID_TAG_H = 46f;
+    private final ExperimentStatusRail statusRail = new ExperimentStatusRail();
 
     public ControlCenterScreen(SuikaGame game, PlaygroundConfig cfg) {
         this.game   = game;
@@ -151,23 +142,13 @@ public final class ControlCenterScreen extends ScreenAdapter {
     }
 
     private void layoutButtonsPortrait() {
-        backBtn.set(20, 16, 100, 46);
-        pauseBtn.set(128, 16, 100, 46);
-        slowBtn.set(240, 16, 44, 46);
-        fastBtn.set(344, 16, 44, 46);
-        swapBtn.set(400, 16, 86, 46);
-        slotsBtn.set(492, 16, 74, 46);
-        restartBtn.set(574, 16, 122, 46);
+        ControlCenterRunControls.layoutPortrait(
+                backBtn, pauseBtn, slowBtn, fastBtn, swapBtn, slotsBtn, restartBtn);
     }
 
     private void layoutButtonsLandscape() {
-        backBtn.set(24, 16, 100, 44);
-        pauseBtn.set(132, 16, 100, 44);
-        slowBtn.set(244, 16, 44, 44);
-        fastBtn.set(348, 16, 44, 44);
-        swapBtn.set(404, 16, 86, 44);
-        slotsBtn.set(496, 16, 92, 44);
-        restartBtn.set(1138, 16, 118, 44);
+        ControlCenterRunControls.layoutLandscape(
+                backBtn, pauseBtn, slowBtn, fastBtn, swapBtn, slotsBtn, restartBtn);
     }
 
     @Override
@@ -185,34 +166,49 @@ public final class ControlCenterScreen extends ScreenAdapter {
                 if (hotswapOpen || slotsOpen) return false;
                 float[] p = panelBounds();
                 if (mx < p[0] || mx > p[0] + p[2] || my < p[1] || my > p[1] + p[3]) return false;
-                // Wheel-down reveals lower stat lines — see AiPlaygroundScreen's fix.
-                statsScroll = MathUtils.clamp(statsScroll + amountY * 40f, 0f, maxStatsScroll());
+                statsScroller.offset = statsScroll;
+                statsScroller.contentHeight = maxStatsScroll() + (p[3] - 80f);
+                statsScroller.viewHeight = p[3] - 80f;
+                statsScroller.wheel(amountY);
+                statsScroll = MathUtils.clamp(statsScroller.offset, 0f, maxStatsScroll());
                 return true;
             }
             @Override public boolean keyDown(int k) {
-                switch (k) {
-                    case Input.Keys.ESCAPE -> {
-                        if (hotswapOpen) { hotswapOpen = false; return true; }
-                        if (slotsOpen) { slotsOpen = false; return true; }
-                        game.setScreen(new AiPlaygroundScreen(game, cfg));
-                    }
-                    case Input.Keys.SPACE  -> runner.setPaused(!runner.paused());
-                    case Input.Keys.R      -> runner.restart();
-                    case Input.Keys.EQUALS, Input.Keys.PLUS -> changeSpeed(+1);
-                    case Input.Keys.MINUS                   -> changeSpeed(-1);
-                    // Down-arrow drop, pairing with the Left/Right arrow-key aim glide in
-                    // render() below — Space is already the pause toggle here, so arrows-only
-                    // (aim + drop) is the keyboard scheme for techniques that accept human
-                    // input (currently Imitation's "YOU" board recording). Same guards as the
-                    // mouse-click drop paths in handleClick.
-                    case Input.Keys.DOWN -> {
-                        if (!runner.paused() && runner.acceptsHumanInput()
-                                && !hotswapOpen && !slotsOpen && chuteClear())
-                            runner.humanDrop(hoverGameX);
-                    }
-                    default -> { return false; }
+                if (UiKeys.isBackOrDismiss(k)) {
+                    if (hotswapOpen) { hotswapOpen = false; modal.close(); return true; }
+                    if (slotsOpen) { slotsOpen = false; modal.close(); return true; }
+                    UiViewport.OrientationSession.restorePortraitAfterRun(game.settings);
+                    game.setScreen(new AiPlaygroundScreen(game, cfg));
+                    return true;
                 }
-                return true;
+                if (UiKeys.isPause(k) || k == Input.Keys.SPACE) {
+                    runner.setPaused(!runner.paused());
+                    return true;
+                }
+                if (UiKeys.isRestart(k)) { runner.restart(); return true; }
+                if (k == Input.Keys.E && runner.board().gameOver()) {
+                    exportRunSummary();
+                    return true;
+                }
+                if (UiKeys.isSpeedUp(k)) { changeSpeed(+1); return true; }
+                if (UiKeys.isSpeedDown(k)) { changeSpeed(-1); return true; }
+                if (UiKeys.dropKeyForHumanBoard(k, true)) {
+                    if (!runner.paused() && runner.acceptsHumanInput()
+                            && !hotswapOpen && !slotsOpen && chuteClear())
+                        runner.humanDrop(hoverGameX);
+                    return true;
+                }
+                if (!hotswapOpen && !slotsOpen) {
+                    float[] p = panelBounds();
+                    statsScroller.offset = statsScroll;
+                    statsScroller.contentHeight = maxStatsScroll() + (p[3] - 80f);
+                    statsScroller.viewHeight = p[3] - 80f;
+                    if (statsScroller.key(k)) {
+                        statsScroll = MathUtils.clamp(statsScroller.offset, 0f, maxStatsScroll());
+                        return true;
+                    }
+                }
+                return false;
             }
         });
     }
@@ -326,6 +322,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
             if (swapTbOpenBtn.contains(x, y) && tbView) {
                 tbMessage = TensorboardLauncher.launch(cfg.technique.id);
                 tbMessageTimer = 4f;
+                toast.show(tbMessage, UiToast.Tone.INFO, 4f);
                 return;
             }
             if (swapAutoDropToggle.contains(x, y)) { cfg.autoDrop = !cfg.autoDrop; return; }
@@ -334,7 +331,11 @@ public final class ControlCenterScreen extends ScreenAdapter {
             if (x < m0x || x > m0x + SWAP_MW || y < m0y || y > m0y + SWAP_MH) hotswapOpen = false;
             return;
         }
-        if (backBtn.contains(x, y))    { game.setScreen(new AiPlaygroundScreen(game, cfg)); return; }
+        if (backBtn.contains(x, y)) {
+            UiViewport.OrientationSession.restorePortraitAfterRun(game.settings);
+            game.setScreen(new AiPlaygroundScreen(game, cfg));
+            return;
+        }
         if (pauseBtn.contains(x, y))   { runner.setPaused(!runner.paused()); return; }
         if (slowBtn.contains(x, y))    { changeSpeed(-1); return; }
         if (fastBtn.contains(x, y))    { changeSpeed(+1); return; }
@@ -373,6 +374,24 @@ public final class ControlCenterScreen extends ScreenAdapter {
         runner.setSpeed(cfg.speed());
     }
 
+    private void exportRunSummary() {
+        String body = RunSummaryExport.format(
+                "control-center",
+                cfg.technique.display,
+                runner.board().score(),
+                game.settings.fixedSeed,
+                null,
+                runner.board().fruits().size(),
+                "speed=" + cfg.speedLabel());
+        String path = RunSummaryExport.writeFile(body, cfg.technique.id);
+        if (path.startsWith("Export failed")) toast.show(path, UiToast.Tone.WARNING, 4f);
+        else {
+            Gdx.app.getClipboard().setContents(body);
+            toast.show("Run summary exported · " + RunSummaryExport.oneLiner(
+                    runner.board().score(), game.settings.fixedSeed), UiToast.Tone.SUCCESS, 4f);
+        }
+    }
+
     /**
      * Returns true (and switches back to the technique/ensemble menu) when the run is
      * hung — a single think stuck past {@link #STUCK_THINK_MS}, or the machine buried
@@ -395,6 +414,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
             AiPlaygroundScreen.pendingBackoutNote = stuckThink
                     ? "Run stalled 10s+ — backed out safely (lower the load or turn off Auto-drop)"
                     : "System overloaded — backed out safely to keep things responsive";
+            UiViewport.OrientationSession.restorePortraitAfterRun(game.settings);
             game.setScreen(new AiPlaygroundScreen(game, cfg));
             return true;
         }
@@ -402,15 +422,15 @@ public final class ControlCenterScreen extends ScreenAdapter {
     }
 
     private void tickAutosave(float delta) {
-        if (autosaveNoteTimer > 0f) autosaveNoteTimer -= delta;
+        toast.tick(delta);
+        if (tbMessageTimer > 0f) tbMessageTimer -= delta;
         int minutes = game.settings.autosaveMinutes();
         if (minutes <= 0 || !slotsSupported()) { autosaveTimer = 0f; return; }
         autosaveTimer += delta;
         if (autosaveTimer >= minutes * 60f) {
             autosaveTimer = 0f;
             doSaveSlot(1);                        // reuses the SAVES path — writes slot 1's folder
-            autosaveNote = "Autosaved to slot 1";
-            autosaveNoteTimer = 3f;
+            toast.show("Autosaved to slot 1", UiToast.Tone.SUCCESS);
         }
     }
 
@@ -443,6 +463,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
     private void openSlots() {
         slotsOpen = true;
         slotsMessage = "";
+        modal.open(UiModal.Kind.SLOTS);
         layoutSlotsModal();
     }
 
@@ -538,6 +559,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
 
     private void openHotswap() {
         hotswapOpen = true;
+        modal.open(UiModal.Kind.HOTSWAP);
         float m0x = swapModalX(), m0y = swapModalY();
         swapPresetCtrl.set(   m0x + 230, m0y + SWAP_MH - 96,  220, 38);
         swapSpeedCtrl.set(    m0x + 230, m0y + SWAP_MH - 150, 220, 38);
@@ -553,57 +575,13 @@ public final class ControlCenterScreen extends ScreenAdapter {
     }
 
     private boolean ghostApplicable() {
-        return cfg.technique.family == AiTechnique.Family.EVOLUTION;
+        return TechniqueHyperparams.evolutionApplicable(cfg.technique);
     }
 
-    // Ensembles built on MCTS search share its Rollouts knob; ENS_RTG_VERIFIED shares
-    // Decision Transformer's Return knob.
-    private static final java.util.Set<AiTechnique> ROLLOUT_PARAM_TECHS = java.util.Set.of(
-            AiTechnique.MCTS, AiTechnique.ALPHAZERO, AiTechnique.ENS_MCTS_NET,
-            AiTechnique.ENS_MCTS_TIEBREAK, AiTechnique.ENS_ADAPTIVE_VOTE, AiTechnique.ENS_BANDIT);
-
-    private boolean paramApplicable() {
-        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return true;
-        return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES, PBT, DECISION_TRANSFORMER, DAGGER, BC, DQN, ENS_RTG_VERIFIED -> true;
-            default -> false;
-        };
-    }
-    private String paramLabel() {
-        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return "Rollouts";
-        return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES, PBT                   -> "Population";
-            case DECISION_TRANSFORMER, ENS_RTG_VERIFIED  -> "Return";
-            case DAGGER, BC, DQN                         -> "LR";
-            default                                      -> "—";
-        };
-    }
-    private String paramValue() {
-        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return Integer.toString(cfg.rollouts);
-        return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES, PBT                   -> Integer.toString(cfg.populationSize);
-            case DECISION_TRANSFORMER, ENS_RTG_VERIFIED  -> Integer.toString((int) cfg.targetReturn);
-            case DAGGER, BC, DQN                         -> String.format("%.0e", cfg.learningRate);
-            default                                      -> "—";
-        };
-    }
-    private void cycleParam(int d) {
-        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) { cfg.rollouts = cycleInt(ROLLOUTS, cfg.rollouts, d); return; }
-        switch (cfg.technique) {
-            case NEUROEVO, CMA_ES, PBT                   -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
-            case DECISION_TRANSFORMER, ENS_RTG_VERIFIED  -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
-            case DAGGER, BC, DQN                         -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
-            default -> { }
-        }
-    }
-    private int cycleInt(int[] opts, int cur, int d) {
-        int idx = 0; for (int i = 0; i < opts.length; i++) if (opts[i] == cur) idx = i;
-        return opts[Math.floorMod(idx + d, opts.length)];
-    }
-    private double cycleDouble(double[] opts, double cur, int d) {
-        int idx = 0; for (int i = 0; i < opts.length; i++) if (Math.abs(opts[i] - cur) < 1e-9) idx = i;
-        return opts[Math.floorMod(idx + d, opts.length)];
-    }
+    private boolean paramApplicable() { return TechniqueHyperparams.paramApplicable(cfg.technique); }
+    private String paramLabel() { return TechniqueHyperparams.paramLabelShort(cfg.technique); }
+    private String paramValue() { return TechniqueHyperparams.paramValue(cfg); }
+    private void cycleParam(int d) { TechniqueHyperparams.cycleParam(cfg, d); }
 
     // -------------------------------------------------------------------------
     // Board tiling
@@ -611,54 +589,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
 
     /** Free screen area (x, y, w, h) not covered by the side panel or control bar. */
     private float[] boardRegion() {
-        if (landscape) {
-            float[] p = panelBounds();
-            float left = p[0] + p[2] + 24f;
-            return new float[]{ left, 78f, Theme.VW_L - left - 16f, Theme.VH_L - 78f - 12f };
-        }
-        return new float[]{ 10f, 78f, Theme.VW - 20f, 980f - 78f - 8f };
+        return ControlCenterBoardGrid.boardRegion(landscape, panelBounds());
     }
 
-    /**
-     * Per-board transform {ox, oy, scale} tiling {@code n} boards into the free region.
-     *
-     * <p>Rows are packed from the TOP of the region using each board's actual rendered
-     * height, not centred inside an evenly-divided slice. For 2 side-by-side boards in
-     * portrait, width (not height) bounds the scale — the region is much taller than two
-     * narrow boards need — so centering left a large, header-hugging dead gap above the
-     * boards that read as a layout bug (and an equal one below). Anchoring to the top
-     * with a small fixed margin pushes any leftover space to the bottom instead, where
-     * it reads as ordinary breathing room above the control bar.
-     */
+    /** Per-board transform {ox, oy, scale} — see {@link ControlCenterBoardGrid#placements}. */
     private float[][] placements(int n) {
-        float[] r = boardRegion();
-        // Auto-grid: cols = ceil(sqrt(n)) — reproduces the previous hand-picked shapes
-        // exactly (1→1×1, 2→2×1, 4→2×2) and extends cleanly to any configured elite
-        // view count up to 16 (4×4).
-        int cols = Math.max(1, (int) Math.ceil(Math.sqrt(n)));
-        int rows = (n + cols - 1) / cols;
-        // `tag` reserves room for the caption ABOVE each board. It must clear not just
-        // the label text but a freshly-dropped fruit still above the well (spawns at
-        // CONTAINER_HEIGHT + 1 game-unit) — the vertical centering in BOARD_GH only
-        // puts about half that unit's worth of pixels above the container itself, so a
-        // small tag gap let a falling fruit visually graze the label text.
-        float pad = GRID_CELL_PAD, tag = GRID_TAG_H, topMargin = 16f;
-        float cw = r[2] / cols, chFull = r[3] / rows;
-        float availW = cw - 2 * pad, availHFull = chFull - 2 * pad - tag;
-        float sc = Math.min(availW / BOARD_GW, availHFull / BOARD_GH);
-        float boardPxH = (float) PhysicsConfig.CONTAINER_HEIGHT * sc;
-        float rowPxH = tag + 2 * pad + boardPxH;   // this row's actual rendered height, not chFull
-        float regionTop = r[1] + r[3] - topMargin;
-        float[][] out = new float[n][3];
-        for (int i = 0; i < n; i++) {
-            int cxIdx = i % cols, cyIdx = i / cols;
-            float cellX = r[0] + cxIdx * cw;
-            float rowTop = regionTop - cyIdx * rowPxH;   // row 0 sits at the TOP of the region
-            float ox = cellX + cw / 2f - 5f * sc;        // centre the 10-wide well
-            float oy = rowTop - tag - pad - boardPxH;    // floor y, right below this row's tag+pad
-            out[i] = new float[]{ ox, oy, sc };
-        }
-        return out;
+        return ControlCenterBoardGrid.placements(boardRegion(), n);
     }
 
     // -------------------------------------------------------------------------
@@ -673,7 +609,6 @@ public final class ControlCenterScreen extends ScreenAdapter {
         delta = Math.min(delta, 0.05f);
         BoardRenderer.tickFlash(delta);
         tickAutosave(delta);
-        if (tbMessageTimer > 0f) tbMessageTimer -= delta;
         int views = viewCount();
         updateHoverFromArrowKeys(delta);
         if (views == 1 && runner.acceptsHumanInput()) runner.setHover(hoverGameX);
@@ -720,6 +655,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
         }
 
         drawControlBar(s);
+        float vwToast = landscape ? Theme.VW_L : Theme.VW;
+        float vhToast = landscape ? Theme.VH_L : Theme.VH;
+        statusRail.layout(12f, vhToast - 70f, vwToast - 24f, 56f);
+        ExperimentStatus live = ExperimentStatus.forLiveRun(cfg, runner, runner.paused(), null);
+        statusRail.drawShapes(s, live);
+        toast.drawShapes(s, vwToast, vhToast - 48f);
         s.end();
 
         // board labels (own batch pass)
@@ -820,13 +761,7 @@ public final class ControlCenterScreen extends ScreenAdapter {
     // ---- diagnostics panel ----
 
     private float[] panelBounds() {
-        // Landscape width was 470 — with the fuller per-technique stat lines added since
-        // (throughput/elapsed/parallel-search detail etc.), several ran long enough to
-        // visually run into the floating chart column at whatever Y they landed on.
-        // Widened so the text column has real clearance before the chart's left edge
-        // (still leaves a comfortable gap to the fixed single-board landscape position).
-        if (landscape) return new float[]{12f, 72f, 560f, Theme.VH_L - 90f};
-        return new float[]{26f, 980f, Theme.VW - 52f, 286f};
+        return ControlCenterDiagnostics.panelBounds(landscape);
     }
 
     private void drawPanel(ShapeRenderer s) {
@@ -1211,12 +1146,12 @@ public final class ControlCenterScreen extends ScreenAdapter {
         else if (!landscape && viewCount() == 1)
             Ui.textCenter(game.batch, game.fontSmall, "live · " + cfg.technique.liveHint(),
                     Theme.VW / 2f, 84, Theme.ACCENT_BLUE);
-        // Transient autosave confirmation, top-centre so it's visible in any layout.
-        if (autosaveNoteTimer > 0f) {
-            float vw = landscape ? Theme.VW_L : Theme.VW;
-            float vh = landscape ? Theme.VH_L : Theme.VH;
-            Ui.textCenter(game.batch, game.fontSmall, autosaveNote, vw / 2f, vh - 14, Theme.GOLD);
-        }
+        // Transient confirmations (autosave / errors) via shared toast.
+        float vw = landscape ? Theme.VW_L : Theme.VW;
+        float vh = landscape ? Theme.VH_L : Theme.VH;
+        ExperimentStatus live = ExperimentStatus.forLiveRun(cfg, runner, runner.paused(), null);
+        statusRail.drawText(game.batch, game.fontSmall, game.fontSmall, live);
+        toast.drawText(game.batch, game.fontSmall, vw, vh - 48f);
     }
 
     // ---- hotswap (quick settings) modal ----
@@ -1398,17 +1333,16 @@ public final class ControlCenterScreen extends ScreenAdapter {
                 m0x + SLOTS_MW / 2f, m0y + SLOTS_MH - 32, Theme.TEXT);
         for (int i = 0; i < ModelSlots.SLOT_COUNT; i++) {
             ModelSlots.SlotInfo info = slotInfo(i + 1);
+            ControlCenterModelSlots.Status st =
+                    ControlCenterModelSlots.status(cfg.technique.id, i + 1, info);
             float labelY = slotSaveBtn[i].y + slotSaveBtn[i].height / 2f + 7f;
             Ui.text(game.batch, game.font, "Slot " + (i + 1), m0x + 24, labelY, Theme.TEXT);
-            String detail = info.present()
-                    ? String.format("saved %tR  ·  score %.0f", new java.util.Date(info.savedAtMillis()), info.score())
-                    : "empty";
-            Ui.text(game.batch, game.fontSmall, detail, m0x + 24, labelY - 22f, Theme.TEXT_DIM);
+            Ui.text(game.batch, game.fontSmall, st.detailLine(), m0x + 24, labelY - 22f, Theme.TEXT_DIM);
             Ui.textCenter(game.batch, game.fontSmall, "SAVE",
                     slotSaveBtn[i].x + slotSaveBtn[i].width / 2f, slotSaveBtn[i].y + slotSaveBtn[i].height / 2f - 5f, Theme.TEXT);
             Ui.textCenter(game.batch, game.fontSmall, "LOAD",
                     slotLoadBtn[i].x + slotLoadBtn[i].width / 2f, slotLoadBtn[i].y + slotLoadBtn[i].height / 2f - 5f,
-                    info.present() ? Theme.TEXT : Theme.TEXT_FAINT);
+                    ControlCenterModelSlots.canLoad(st) ? Theme.TEXT : Theme.TEXT_FAINT);
             Ui.textCenter(game.batch, game.fontSmall, "FOLDER",
                     slotRevealBtn[i].x + slotRevealBtn[i].width / 2f, slotRevealBtn[i].y + slotRevealBtn[i].height / 2f - 5f, Theme.TEXT);
         }
@@ -1419,6 +1353,18 @@ public final class ControlCenterScreen extends ScreenAdapter {
                 : slotsMessage;
         Ui.textCenter(game.batch, game.fontSmall, footer, m0x + SLOTS_MW / 2f, m0y + 74,
                 slotsMessage.isEmpty() ? Theme.TEXT_FAINT : Theme.GOLD);
+        // Empty-state nudge when every slot is vacant (incl. ONNX-only playable policies).
+        boolean any = false;
+        for (int i = 0; i < ModelSlots.SLOT_COUNT; i++) {
+            ControlCenterModelSlots.Status st = ControlCenterModelSlots.status(
+                    cfg.technique.id, i + 1, slotInfo(i + 1));
+            if (st.present()) { any = true; break; }
+        }
+        if (!any && slotsMessage.isEmpty()) {
+            Ui.statusCopy(game.batch, game.fontSmall, game.fontSmall,
+                    m0x + SLOTS_MW / 2f, m0y + SLOTS_MH / 2f - 10f,
+                    "No saves yet", "SAVE writes weights / ONNX / hyperparams into a slot");
+        }
         Ui.textCenter(game.batch, game.fontSmall, "CLOSE",
                 slotsCloseBtn.x + slotsCloseBtn.width / 2f, slotsCloseBtn.y + 25, Theme.TEXT);
         game.batch.end();

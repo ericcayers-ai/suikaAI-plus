@@ -27,18 +27,27 @@ public final class MainMenuScreen extends ScreenAdapter {
     private static final com.badlogic.gdx.graphics.Color RT_LAB_VIOLET =
             new com.badlogic.gdx.graphics.Color(0.55f, 0.35f, 0.85f, 1f);
 
-    private final Rectangle playBtn     = new Rectangle(CX - 170, 660, 340, 78);
-    private final Rectangle watchBtn    = new Rectangle(CX - 170, 566, 340, 78);
-    private final Rectangle settingsBtn = new Rectangle(CX - 170, 472, 340, 78);
-    private final Rectangle quitBtn     = new Rectangle(CX - 170, 378, 340, 78);
-    private final Rectangle rtLabBtn    = new Rectangle(CX - 130, 296, 260, 56);
-    private final Rectangle rtAiBtn     = new Rectangle(CX + 140, 296, 150, 56);
+    private final Rectangle playBtn     = new Rectangle(CX - 170, 680, 340, 78);
+    private final Rectangle watchBtn    = new Rectangle(CX - 170, 586, 340, 78);
+    private final Rectangle settingsBtn = new Rectangle(CX - 170, 492, 340, 78);
+    private final Rectangle labBtn      = new Rectangle(CX - 170, 398, 340, 78);
+    private final Rectangle quitBtn     = new Rectangle(CX - 170, 304, 340, 70);
+    private final Rectangle rtLabBtn    = new Rectangle(CX - 130, 220, 260, 48);
+    private final Rectangle rtAiBtn     = new Rectangle(CX + 140, 220, 150, 48);
+
+    private final UiFocus focus = new UiFocus();
+    private boolean helpOpen = false;
+    private final Rectangle helpCloseBtn = new Rectangle(CX - 100, 360, 200, 56);
+    private final Rectangle helpDismissBtn = new Rectangle(CX - 140, 430, 280, 56);
+    private final Rectangle rtRetryBtn = new Rectangle(CX - 100, 160, 200, 40);
+    private final Rectangle rtSettingsBtn = new Rectangle(CX + 110, 160, 120, 40);
 
     private float time = 0f;
     private float mx, my;
     private float rtHintTimer = 0f;
     private String rtHintText = "";
     private boolean awaitingRtLaunch = false;
+    private boolean rtFailureActionable = false;
 
     // ---- AI-save picker modal (RT Lab autoplay) ----
     private record SaveEntry(AiTechnique technique, int slot, ModelSlots.SlotInfo info) {}
@@ -77,16 +86,44 @@ public final class MainMenuScreen extends ScreenAdapter {
 
     @Override
     public void show() {
+        helpOpen = !game.settings.firstRunHelpSeen;
+        focus.clear();
+        focus.add(playBtn); focus.add(watchBtn); focus.add(settingsBtn);
+        focus.add(labBtn); focus.add(quitBtn); focus.add(rtLabBtn); focus.add(rtAiBtn);
+        focus.ensureStarted();
         Gdx.input.setInputProcessor(new InputAdapter() {
             @Override public boolean touchDown(int sx, int sy, int pointer, int button) {
                 camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
+                if (helpOpen) {
+                    if (helpDismissBtn.contains(touch.x, touch.y) || helpCloseBtn.contains(touch.x, touch.y)) {
+                        helpOpen = false;
+                        game.settings.firstRunHelpSeen = true;
+                        SettingsPersistence.save(game.settings);
+                    }
+                    return true;
+                }
                 if (aiPickerOpen) { handleAiPickerClick(touch.x, touch.y); return true; }
+                if (rtFailureActionable && rtHintTimer > 0f) {
+                    if (rtRetryBtn.contains(touch.x, touch.y)) {
+                        dev.suika.game.rtlab.RtLabLauncher.launch(game.settings.rt3dPhysics);
+                        awaitingRtLaunch = true;
+                        rtFailureActionable = false;
+                        rtHintTimer = 0f;
+                        return true;
+                    }
+                    if (rtSettingsBtn.contains(touch.x, touch.y)) {
+                        game.setScreen(new SettingsScreen(game, MainMenuScreen::new));
+                        return true;
+                    }
+                }
                 if (playBtn.contains(touch.x, touch.y))
                     game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN));
                 else if (watchBtn.contains(touch.x, touch.y))
                     game.setScreen(new AiPlaygroundScreen(game));
                 else if (settingsBtn.contains(touch.x, touch.y))
                     game.setScreen(new SettingsScreen(game, MainMenuScreen::new));
+                else if (labBtn.contains(touch.x, touch.y))
+                    game.setScreen(new LabHubScreen(game));
                 else if (quitBtn.contains(touch.x, touch.y))
                     Gdx.app.exit();
                 else if (rtLabBtn.contains(touch.x, touch.y)) {
@@ -102,6 +139,38 @@ public final class MainMenuScreen extends ScreenAdapter {
                 mx = touch.x; my = touch.y;
                 return false;
             }
+            @Override public boolean keyDown(int k) {
+                if (helpOpen) {
+                    if (UiKeys.isBackOrDismiss(k) || k == Input.Keys.ENTER || k == Input.Keys.SPACE) {
+                        helpOpen = false;
+                        game.settings.firstRunHelpSeen = true;
+                        SettingsPersistence.save(game.settings);
+                        return true;
+                    }
+                    return true;
+                }
+                if (aiPickerOpen) {
+                    if (UiKeys.isBackOrDismiss(k)) { aiPickerOpen = false; return true; }
+                    return false;
+                }
+                if (focus.key(k, Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT)
+                        || Gdx.input.isKeyPressed(Input.Keys.SHIFT_RIGHT))) return true;
+                if (k == Input.Keys.ENTER || k == Input.Keys.SPACE) {
+                    Rectangle cur = focus.current();
+                    if (cur == playBtn) game.setScreen(new SuikaScreen(game, SuikaScreen.Mode.HUMAN));
+                    else if (cur == watchBtn) game.setScreen(new AiPlaygroundScreen(game));
+                    else if (cur == settingsBtn) game.setScreen(new SettingsScreen(game, MainMenuScreen::new));
+                    else if (cur == labBtn) game.setScreen(new LabHubScreen(game));
+                    else if (cur == quitBtn) Gdx.app.exit();
+                    else if (cur == rtLabBtn) {
+                        dev.suika.game.rtlab.RtLabLauncher.launch(game.settings.rt3dPhysics);
+                        awaitingRtLaunch = true;
+                    } else if (cur == rtAiBtn) openAiPicker();
+                    return true;
+                }
+                if (UiKeys.isBackOrDismiss(k)) { Gdx.app.exit(); return true; }
+                return false;
+            }
         });
     }
 
@@ -114,8 +183,9 @@ public final class MainMenuScreen extends ScreenAdapter {
             } else {
                 String fail = dev.suika.game.rtlab.RtLabLauncher.lastFailure();
                 if (fail != null) {
-                    rtHintText = fail;
-                    rtHintTimer = 4.5f;
+                    rtHintText = fail + "  ·  Retry or open Settings → RT Lab";
+                    rtHintTimer = 8f;
+                    rtFailureActionable = true;
                     awaitingRtLaunch = false;
                 }
             }
@@ -143,12 +213,24 @@ public final class MainMenuScreen extends ScreenAdapter {
             s.circle(m[0], y, rr, 24);
         }
 
-        Ui.button(s, playBtn,     Theme.ACCENT_2,    playBtn.contains(mx, my),     true);
-        Ui.button(s, watchBtn,    Theme.ACCENT_BLUE, watchBtn.contains(mx, my),    true);
-        Ui.button(s, settingsBtn, Theme.PANEL_EDGE,  settingsBtn.contains(mx, my), true);
-        Ui.button(s, quitBtn,     Theme.ACCENT,      quitBtn.contains(mx, my),     true);
-        Ui.button(s, rtLabBtn, RT_LAB_VIOLET, rtLabBtn.contains(mx, my), true);
-        Ui.button(s, rtAiBtn, Theme.ACCENT_2, rtAiBtn.contains(mx, my), true);
+        Ui.button(s, playBtn,     Theme.ACCENT_2,    playBtn.contains(mx, my) || focus.isFocused(playBtn),     true);
+        Ui.button(s, watchBtn,    Theme.ACCENT_BLUE, watchBtn.contains(mx, my) || focus.isFocused(watchBtn),    true);
+        Ui.button(s, settingsBtn, Theme.PANEL_EDGE,  settingsBtn.contains(mx, my) || focus.isFocused(settingsBtn), true);
+        Ui.button(s, labBtn,      Theme.GOLD,        labBtn.contains(mx, my) || focus.isFocused(labBtn), true);
+        Ui.button(s, quitBtn,     Theme.ACCENT,      quitBtn.contains(mx, my) || focus.isFocused(quitBtn),     true);
+        Ui.button(s, rtLabBtn, RT_LAB_VIOLET, rtLabBtn.contains(mx, my) || focus.isFocused(rtLabBtn), true);
+        Ui.button(s, rtAiBtn, Theme.ACCENT_2, rtAiBtn.contains(mx, my) || focus.isFocused(rtAiBtn), true);
+        focus.drawRing(s);
+
+        if (helpOpen) {
+            Ui.modalScrim(s, Theme.VW, Theme.VH);
+            Ui.modalCard(s, CX - 280, 340, 560, 420);
+            Ui.button(s, helpDismissBtn, Theme.ACCENT_2, helpDismissBtn.contains(mx, my), true);
+        }
+        if (rtFailureActionable && rtHintTimer > 0f) {
+            Ui.button(s, rtRetryBtn, Theme.ACCENT_2, rtRetryBtn.contains(mx, my), true);
+            Ui.button(s, rtSettingsBtn, Theme.PANEL_EDGE, rtSettingsBtn.contains(mx, my), true);
+        }
 
         s.end();
 
@@ -162,7 +244,8 @@ public final class MainMenuScreen extends ScreenAdapter {
         Ui.textCenter(game.batch, game.fontMed, "PLAY",     CX, playBtn.y + 39,     Theme.TEXT);
         Ui.textCenter(game.batch, game.fontMed, "WATCH AI", CX, watchBtn.y + 39,    Theme.TEXT);
         Ui.textCenter(game.batch, game.fontMed, "SETTINGS", CX, settingsBtn.y + 39, Theme.TEXT);
-        Ui.textCenter(game.batch, game.fontMed, "QUIT",     CX, quitBtn.y + 39,     Theme.TEXT);
+        Ui.textCenter(game.batch, game.fontMed, "LAB",      CX, labBtn.y + 39,      Theme.BG_BOTTOM);
+        Ui.textCenter(game.batch, game.fontMed, "QUIT",     CX, quitBtn.y + 35,     Theme.TEXT);
         String mode = game.settings.rt3dPhysics ? "3D" : "2D";
         Ui.textCenter(game.batch, game.fontSmall, "RT LAB · " + mode,
                 CX, rtLabBtn.y + 30, Theme.TEXT);
@@ -172,11 +255,28 @@ public final class MainMenuScreen extends ScreenAdapter {
             rtHintTimer -= delta;
             Ui.textCenter(game.batch, game.fontSmall, rtHintText,
                     CX, rtLabBtn.y - 12, Theme.GOLD);
+            if (rtFailureActionable) {
+                Ui.textCenter(game.batch, game.fontSmall, "RETRY",
+                        rtRetryBtn.x + rtRetryBtn.width / 2f, rtRetryBtn.y + 22, Theme.TEXT);
+                Ui.textCenter(game.batch, game.fontSmall, "SETTINGS",
+                        rtSettingsBtn.x + rtSettingsBtn.width / 2f, rtSettingsBtn.y + 22, Theme.TEXT);
+            }
         }
 
         Ui.textCenter(game.batch, game.fontSmall,
-                "Mouse or ←/→ · click / Space to drop · ESC pauses · R restarts",
+                "Tab focus · Enter select · Mouse or ←/→ · Space drops · ESC pauses · R restarts",
                 CX, 250, Theme.TEXT_FAINT);
+        if (helpOpen) {
+            Ui.textCenter(game.batch, game.fontMed, "Welcome to Suika AI+", CX, 720, Theme.GOLD);
+            Ui.textCenter(game.batch, game.fontSmall, "PLAY — human watermelon merge puzzle", CX, 660, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "WATCH AI — pick a technique, tune, LAUNCH", CX, 620, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "SETTINGS — display, sim, AI, RT Lab, data", CX, 580, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "LAB — reward, dashboard, bench, replay, physics", CX, 540, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "RT LAB — ray-traced board (needs Vulkan RT)", CX, 500, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "Tab / Enter for keyboard-first navigation", CX, 500, Theme.TEXT_DIM);
+            Ui.textCenter(game.batch, game.fontMed, "GOT IT",
+                    helpDismissBtn.x + helpDismissBtn.width / 2f, helpDismissBtn.y + 28, Theme.TEXT);
+        }
         Ui.text(game.batch, game.fontSmall, "v" + Theme.VERSION, 14, 30, Theme.TEXT_FAINT);
         Ui.textRight(game.batch, game.fontSmall,
                 AiTechnique.values().length + " AI techniques · " + game.settings.fpsLabel(),

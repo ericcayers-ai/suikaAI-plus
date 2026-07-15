@@ -23,10 +23,15 @@ downward — lower modules never import higher ones:
 | `suika-core` | Pure game rules + dyn4j physics (`GameCore`, `PhysicsConfig`). No UI, no AI. |
 | `suika-env` | RL environment contract: observation encoding, action spec, reward. |
 | `suika-ai` | Agents & trainers (MCTS, Greedy, Heuristic, GA, CMA-ES, DQN, BC, DAgger, `BoardEval`). |
-| `suika-assets` | Procedural assets (fonts, colours) — no external art files. |
-| `suika-game` | LibGDX game + control center + RT Lab (Vulkan) + Python bridge. |
+| `suika-assets` | Procedural assets (fonts, colours) + data-driven `fruits.json`. |
+| `suika-bridge` | Java↔Python boundary (`BridgeServer`, `GymBridge`, `BridgeTransport`, ONNX Runtime deploy). |
+| `suika-dash` | Headless telemetry (`DashboardRegistry`, exporters, heatmaps). |
+| `suika-game` | LibGDX game + Playground / Control Center / **Lab Hub** + RT Lab (Vulkan). |
 | `suika-app` | Entry point / distribution packaging. |
-| `python/suika` | Optional Python training (PPO via SB3, Decision Transformer). |
+| `python/suika` | Optional Python training (PPO via SB3, Decision Transformer, BC). |
+
+Frozen compatibility: [`docs/contracts.md`](docs/contracts.md). Performance budgets:
+[`docs/budgets.md`](docs/budgets.md). Overhaul wrap: [`ROADMAP-NEXT.md`](ROADMAP-NEXT.md) §Overhaul.
 
 See [`docs/architecture.md`](docs/architecture.md) for the full picture and
 [`docs/adr/`](docs/adr) for the reasoning behind key decisions.
@@ -64,15 +69,21 @@ Every change should keep the suite green:
 ```
 
 - **Unit tests** live in each module's `src/test/java`.
+- **Python contract tests** — `cd python && pytest` (also run in CI).
 - **Headless AI benchmarks** — the fastest way to check an agent change hasn't regressed
-  strength is the score bench described in [`docs/benchmarking.md`](docs/benchmarking.md).
-- **Visual QA** — the `CaptureHarness` (`-Dsuika.capture.dir=...`) renders screens headlessly
-  for regression review; the opt-in `capture-matrix` CI job exercises it under `xvfb`.
+  strength is the score bench described in [`docs/benchmarking.md`](docs/benchmarking.md);
+  CI gates a bounded `BenchmarkFloorTest`.
+- **Visual QA** — the `CaptureHarness` (`-Dsuika.capture.dir=...`) renders screens headlessly;
+  PR CI runs a bounded smoke capture; a wider `capture-matrix` job is opt-in via workflow_dispatch.
+- **Compatibility** — see [`docs/contracts.md`](docs/contracts.md) for frozen ModelSlots /
+  encoder / benchmark / prefs surfaces.
 
-Python changes must pass `ruff`:
+Python changes must pass `ruff` + `pytest`:
 
 ```bash
-pip install ruff && ruff check python/
+pip install -e "./python[dev]"
+ruff check python/
+cd python && pytest -q
 ```
 
 ## Pull-request workflow
@@ -84,7 +95,8 @@ pip install ruff && ruff check python/
    numbers in the PR description.
 4. **Run `./gradlew build` and the tests locally** before pushing.
 5. **Open a PR** using the template. Link the issue it closes, describe the change, and note
-   how you verified it. CI (build + tests + Python lint) runs automatically on the PR.
+   how you verified it. CI (Java tests, Python lint+pytest, bounded benchmark, capture smoke)
+   runs automatically on the PR.
 6. A maintainer reviews; address feedback by pushing follow-up commits (no force-push during
    review, please — it makes re-review harder).
 

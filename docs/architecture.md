@@ -7,45 +7,58 @@ suika-core        headless dyn4j physics engine, GameCore, FruitTier, modding ty
     ↑
 suika-assets      data-driven FruitDefinition / AssetRegistry (fruits.json)
 suika-env         Gymnasium-shaped environment (SuikaEnv, VectorEnv, encoders, reward)
-suika-bridge      Java↔Python boundary (BridgeTransport, GymBridge, PettingZooBridge, ONNX deploy)
-suika-ai          plugin SPI, neuroevolution, MCTS, imitation, IRL, offline RL, benchmark
-suika-game        fixed-timestep game loop, renderer/input interfaces (LibGDX boundary)
-suika-dash        RunMetrics, DashboardRegistry, ConsoleExporter, ActionHeatmap
+suika-bridge      Java↔Python boundary (BridgeServer, GymBridge, ONNX Runtime deploy)
+suika-ai          plugin SPI, neuroevolution, MCTS, imitation, benchmark suite
+suika-game        LibGDX UI + Playground / Control Center + RT Lab + OnnxAgent
+suika-dash        RunMetrics, DashboardRegistry, ConsoleExporter, ActionHeatmap (headless)
     ↑
 suika-app         application entry point, AgentPreset, HyperparamSchema, OnnxExportConfig
 ```
 
 Dependencies flow downward only — `suika-core` has no runtime dependencies beyond dyn4j.
 
+Frozen compatibility surfaces (ModelSlots, encoders, BenchmarkSuite seeds, prefs keys)
+are documented in [`contracts.md`](contracts.md).
+
 ## The Java ↔ Python Boundary (`suika-bridge`)
 
-The roadmap's hybrid boundary (§II.4) is expressed as a JVM-side contract:
+The roadmap's hybrid boundary (§II.4 / ADR-0003) is expressed as a JVM-side **contract**:
 
-- `BridgeTransport` — the channel carrying observations out / actions back. Real
-  implementations wrap JEP, GraalPy, a gRPC sidecar, or an Arrow shared-memory ring;
-  `InProcessTransport` is the dependency-free path for tests and JVM-native inference.
+- `BridgeTransport` — the channel carrying observations out / actions back.
+  **Shipping today:** `InProcessTransport` (dependency-free tests / JVM-native paths).
+  JEP, GraalPy, gRPC sidecar, and Arrow shared-memory remain enum / javadoc placeholders
+  for later phases; training/play bridging uses the TCP `BridgeServer` below.
+- `BridgeServer` — TCP Gym sidecar wrapping `GymBridge`. Start with
+  `./gradlew :suika-app:run --args="--bridge-port 50052"`. Python connects via
+  `suika.make(backend="java", port=50052)` (standalone remains the default/fast path).
 - `BridgeConfig` — selects the mechanism (`JEP`, `GRAALPY`, `GRPC_SIDECAR`,
   `SHARED_MEMORY`, `DJL_ONNX`).
-- `ObservationCodec` — length-prefixed little-endian tensor wire format (the
-  dependency-free stand-in for Arrow zero-copy).
-- `GymBridge` / `PettingZooBridge` — Gymnasium and PettingZoo adapters over `SuikaEnv`,
-  the JVM half that Python `gym.make` / `parallel_env` drive.
-- `OnnxPolicyRunner` — the no-Python deployment seam: load an exported ONNX policy and
-  run inference on the JVM (pairs with `OnnxExportConfig` in suika-app).
+- `ObservationCodec` — length-prefixed little-endian tensor wire format (stand-in for
+  Arrow zero-copy). Bridge frames use opcodes: reset=`[0,seed]`, step=`[1,action]`, close=`[2]`.
+- `GymBridge` / `PettingZooBridge` — Gymnasium-shaped adapters over `SuikaEnv`.
+- `OnnxPolicyRunner` — no-Python deployment seam. **Shipping:** `OrtOnnxPolicyRunner`
+  (Microsoft ONNX Runtime: lazy natives, action-head shape checks, CUDA→CPU fallback).
+  `StubOnnxPolicyRunner` remains for dependency-free tests when natives are absent.
+  Play path: drop `model.onnx` in a ModelSlots folder → `OnnxAgent` / `AiSlotPlayer` /
+  ensembler donor blend without Python.
 
-## Two Front Doors
+## Two Front Doors (planned UX)
 
-| Mode       | Audience        | Entry point                              |
-|------------|-----------------|------------------------------------------|
-| Explorer   | casual / player | `AgentPreset` enum → one-click presets   |
-| Researcher | ML practitioner | `HyperparamSchema` → full config panel   |
+| Mode       | Audience        | Entry point                              | Status |
+|------------|-----------------|------------------------------------------|--------|
+| Explorer   | casual / player | `AgentPreset` → one-click presets        | Headless/CLI helpers exist; LibGDX UX redesign pending |
+| Researcher | ML practitioner | `HyperparamSchema` → full config panel   | Schema used in CLI/headless; full Settings redesign pending |
+
+Shipping UX today is the AI Playground + Control Center matrix (13 techniques + 5 ensembles).
 
 ## Key Invariants
 
-- **Determinism**: `new GameCore(seed)` + same action sequence → identical trajectory.
+- **Determinism**: `new GameCore(seed)` + same action sequence → identical trajectory
+  (guarded by golden physics tests).
 - **Headless ≥ Headful**: every feature works without a display (`ObservationMode.STATE`).
-- **Plugin SPI**: new algorithm = new `AgentPlugin` class + `META-INF/services` registration, zero engine edits.
+- **Plugin SPI**: new algorithm = new `AgentPlugin` class + `META-INF/services` registration.
 - **Environment Contract**: `SuikaEnv.reset()` / `SuikaEnv.step(action)` mirrors Gymnasium's API.
+- **Fruit sync**: `FruitTier` ≡ `FruitLadder.standard` ≡ `fruits.json` ≡ Python `FRUIT_TIERS`.
 
 ## Core Loop (headless)
 
@@ -63,8 +76,15 @@ GameCore.dropAndSettle(x)
 `PluginRegistry` uses `java.util.ServiceLoader` to discover all `AgentPlugin` and
 `TrainerPlugin` implementations on the classpath. Third-party plugins are registered by
 adding a `META-INF/services/dev.suika.ai.AgentPlugin` file to their JAR.
+Researcher UI discovery of plugins is planned; Explorer uses the curated `AiTechnique` set.
 
 ## Snapshot / Planning
 
 `GameCore.snapshot()` deep-clones the entire physics world. MCTS and one-ply lookahead
 agents use snapshots as a perfect world model — branch, simulate N steps, discard.
+
+## Dashboard / Reward Studio
+
+`suika-dash` ships **headless** metric publishers and exporters. An in-app dashboard and
+Reward Studio UI are future research-surface work; do not read the registry as a finished
+product UI.

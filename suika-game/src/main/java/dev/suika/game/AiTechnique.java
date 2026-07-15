@@ -49,9 +49,9 @@ public enum AiTechnique {
             "Value-based deep RL: Q-learning with experience replay + a target network, training live on the JVM."),
 
     // ---- Model-based ----
-    MUZERO("muzero", "MuZero", "Model-Based", "pixels", "both", Family.PYTHON,
+    MUZERO("muzero", "MuZero (demo)", "Model-Based · demonstration", "pixels", "both", Family.PYTHON,
             false, true, true, true, 88,
-            "Learn a latent dynamics model and plan inside it. Compare vs the true sim."),
+            "DEMONSTRATION: live Control Center runs an MCTS surrogate — there is no tested train→ONNX deploy path yet. Treat scores as educational, not competitive."),
 
     // ---- Evolution: gradient-free optimisation ----
     NEUROEVO("neuroevo", "Neuroevolution (GA)", "Evolution", "state", "learning", Family.EVOLUTION,
@@ -134,6 +134,13 @@ public enum AiTechnique {
     public boolean imitationBased() { return family == Family.IMITATION; }
 
     public boolean isEnsemble() { return kind.equals("ensemble"); }
+
+    /**
+     * True when the Playground entry is an honest educational surrogate without a
+     * tested train→deploy path (MuZero today). Explorer still lists it; Researcher /
+     * docs label it clearly so scores are not treated as full-algorithm results.
+     */
+    public boolean isDemonstrationSurrogate() { return this == MUZERO; }
 
     /**
      * Exactly which building-block agents an ensemble is composed of, in the role

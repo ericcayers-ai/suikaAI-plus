@@ -433,10 +433,9 @@ public final class CaptureHarness implements ApplicationListener {
             // Separate stage so the scrolled state (EXPERIMENTAL + AI ENVIRONMENT incl.
             // the GPU-utilization slider) actually renders a frame before the shot —
             // shooting in the same stage as the scroll call captured the pre-scroll frame.
-            case 2 -> { if (stageT > 0.3f) { shoot("01c-settings-scrolled.png"); nextStage(); } }
-            // RT LAB / AI PLAYS are always live now (no experimental-mode gate) — one
-            // shot of the main menu is enough to confirm both buttons render active.
-            case 3 -> { if (stageT > 0.4f) { game.setScreen(new MainMenuScreen(game)); nextStage(); } }
+            case 2 -> { if (stageT > 0.3f) { shoot("01c-settings-scrolled.png"); game.setScreen(new LabHubScreen(game)); nextStage(); } }
+            // Research Lab Hub (Reward / Dash / Bench / Replay / Physics / Plugins).
+            case 3 -> { if (stageT > 0.5f) { shoot("01d-lab-hub.png"); game.setScreen(new MainMenuScreen(game)); nextStage(); } }
             case 4 -> { if (stageT > 0.5f) { shoot("00b-menu-rtlab.png"); openPlayground(); nextStage(); } }
             case 5 -> { if (stageT > 0.6f) { shoot("02-playground.png"); playground.setEnsemblesExpandedForCapture(true); nextStage(); } }
             // Separate stage so the expanded ensemble dropdown (§8: sorted best->worst)

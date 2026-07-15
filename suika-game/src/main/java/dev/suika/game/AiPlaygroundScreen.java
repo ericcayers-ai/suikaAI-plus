@@ -14,33 +14,31 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 
 /**
- * AI Playground — scrollable technique matrix with per-technique info cards,
- * a config drawer for the selected technique, and a LAUNCH button.
- *
- * <p>The drawer's top row is the hardware-aware quality preset (Slow = best quality /
- * Normal / High = fastest — see {@link HardwarePresets}); below it, only the knobs
- * the selected technique actually reads are enabled, including the per-ensemble
- * customization (donor net, blend weight, tie threshold, UCB c, adapt rate) and the
- * evolution selection-math controls.
+ * AI Playground — searchable technique matrix with Explorer/Researcher modes,
+ * hardware-aware presets, experiment import/export, shared {@link TechniqueConfigPanel},
+ * and the persistent {@link ExperimentStatusRail}.
  */
 public final class AiPlaygroundScreen extends ScreenAdapter {
 
     private final SuikaGame game;
     private final PlaygroundConfig cfg;
+    private final TechniqueCatalog catalog = new TechniqueCatalog();
 
     private final OrthographicCamera camera = new OrthographicCamera();
     private final FitViewport viewport;
     private final Vector3 touch = new Vector3();
     private float mx, my;
 
-    private final AiTechnique[] ensembleTechs;
-    private final AiTechnique[] otherTechs;
-    private boolean ensemblesExpanded = false;
     private float scroll = 0f;
+    private final UiScroll listScroll = new UiScroll();
+    private final UiToast toast = new UiToast();
+    private final UiModal modal = new UiModal();
+    private final UiFocus focus = new UiFocus();
+    private final ExperimentStatusRail statusRail = new ExperimentStatusRail();
 
     // Layout constants
     private static final float CARD_H   = 60f;
-    private static final float LIST_TOP = Theme.VH - 158f;
+    private static final float LIST_TOP = Theme.VH - 220f;
     private static final float LIST_BOT = 470f;
     private static final float CARD_X   = 36f;
     private static final float CARD_W   = Theme.VW - 72f;
@@ -49,8 +47,14 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private static final float INFO_R  = 11f;
     private static final float INFO_CX = CARD_X + CARD_W - INFO_R - 12f;
 
-    // Drawer controls
+    // Drawer / toolbar
     private static final float CTRL_X = 420, CTRL_W = 260, CTRL_H = 24, CTRL_STEP = 30;
+    private final Rectangle modeCtrl      = new Rectangle(36, Theme.VH - 168, 150, 32);
+    private final Rectangle filterCtrl    = new Rectangle(196, Theme.VH - 168, 200, 32);
+    private final Rectangle searchCtrl    = new Rectangle(406, Theme.VH - 168, 100, 32);
+    private final Rectangle clearSearchBtn = new Rectangle(510, Theme.VH - 168, 50, 32);
+    private final Rectangle exportBtn     = new Rectangle(570, Theme.VH - 168, 70, 32);
+    private final Rectangle importBtn     = new Rectangle(648, Theme.VH - 168, 70, 32);
     private final Rectangle presetCtrl    = row(0);
     private final Rectangle speedCtrl     = row(1);
     private final Rectangle paraCtrl      = row(2);
@@ -64,6 +68,8 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private final Rectangle ghostCtrl     = row(10);
     private final Rectangle backBtn       = new Rectangle(36, 16, 300, 64);
     private final Rectangle launchBtn     = new Rectangle(Theme.VW - 336, 16, 300, 64);
+    private final TechniqueConfigPanel schemaPanel = new TechniqueConfigPanel();
+    private TechniqueConfigPanel.Binding schemaBinding;
 
     private static Rectangle row(int i) {
         return new Rectangle(CTRL_X, 386 - i * CTRL_STEP, CTRL_W, CTRL_H);
@@ -71,23 +77,21 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
     private static final float INFO_MW = 600f, INFO_MH = 640f;
     private AiTechnique infocardTech = null;
-
-    private float presetHintTimer = 0f;
+    private java.util.List<TechniqueCatalog.Row> visibleRows = java.util.List.of();
 
     /** One-shot note surfaced when the control center's stuck-run watchdog backs a hung
      *  run out to this menu (Settings → INPUT → "Stuck-run watchdog"). Set statically just
      *  before the screen switch, consumed once on construction. */
     static String pendingBackoutNote = null;
-    private String backoutNote = "";
-    private float  backoutNoteTimer = 0f;
 
-    void openInfocardForCapture(AiTechnique t) { this.infocardTech = t; }
-    void setEnsemblesExpandedForCapture(boolean expanded) { this.ensemblesExpanded = expanded; }
+    private float presetHintTimer = 0f;
+    private boolean searchFocused = false;
 
-    private static final int[]    ROLLOUTS = {40, 80, 150, 300, 600, 1200, 2400};
-    private static final int[]    POP      = {16, 24, 40, 64, 128, 256, 512, 1000};
-    private static final int[]    RETURNS  = {1000, 2000, 4000};
-    private static final double[] LRS      = {1e-3, 3e-3, 1e-2};
+    void openInfocardForCapture(AiTechnique t) {
+        this.infocardTech = t;
+        this.modal.open(UiModal.Kind.INFO, t);
+    }
+    void setEnsemblesExpandedForCapture(boolean expanded) { catalog.ensemblesExpanded = expanded; rebuildRows(); }
 
     public AiPlaygroundScreen(SuikaGame game) { this(game, null); }
 
@@ -97,65 +101,105 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         if (existing == null) cfg.selectDefaultsFor(AiTechnique.MCTS);
         cfg.actionBins = game.settings.actionBins();
         if (pendingBackoutNote != null) {
-            backoutNote = pendingBackoutNote; backoutNoteTimer = 6f; pendingBackoutNote = null;
+            toast.show(pendingBackoutNote, UiToast.Tone.WARNING, 6f);
+            pendingBackoutNote = null;
         }
-        viewport = new FitViewport(Theme.VW, Theme.VH, camera);
-        camera.position.set(Theme.VW / 2f, Theme.VH / 2f, 0f);
-        camera.update();
-
-        java.util.List<AiTechnique> ens = new java.util.ArrayList<>();
-        java.util.List<AiTechnique> other = new java.util.ArrayList<>();
-        for (AiTechnique t : AiTechnique.values()) (t.isEnsemble() ? ens : other).add(t);
-        ens.sort((a, b) -> b.strength - a.strength);
-        ensembleTechs = ens.toArray(new AiTechnique[0]);
-        otherTechs = other.toArray(new AiTechnique[0]);
+        UiViewport.OrientationSession.restorePortraitAfterRun(game.settings);
+        viewport = UiViewport.portrait(camera);
+        rebuildRows();
+        relayoutSchemas();
     }
 
-    private int rowCount() {
-        return 1 + (ensemblesExpanded ? ensembleTechs.length : 0) + otherTechs.length;
+    private void rebuildRows() {
+        visibleRows = catalog.buildRows();
+    }
+
+    private void relayoutSchemas() {
+        schemaBinding = TechniqueConfigPanel.playgroundBinding(cfg);
+        // Schema panel is shared for researcher depth hooks; explorer still uses drawer cyclers.
+        var schemas = TechniqueConfigPanel.schemasFor(cfg.technique);
+        schemaPanel.layout(36f, 120f, 180f, 200f, catalog.mode == TechniqueCatalog.Mode.RESEARCHER
+                ? schemas : java.util.List.of());
+    }
+
+    private int rowCount() { return visibleRows.size(); }
+
+    private TechniqueCatalog.Row rowAt(int row) {
+        return row >= 0 && row < visibleRows.size() ? visibleRows.get(row) : null;
     }
 
     private AiTechnique rowTech(int row) {
-        if (row == 0) return null;
-        row--;
-        if (ensemblesExpanded) {
-            if (row < ensembleTechs.length) return ensembleTechs[row];
-            row -= ensembleTechs.length;
-        }
-        return row < otherTechs.length ? otherTechs[row] : null;
+        TechniqueCatalog.Row r = rowAt(row);
+        return r instanceof TechniqueCatalog.TechRow t ? t.technique() : null;
     }
 
     @Override
     public void show() {
+        rebuildFocus();
         Gdx.input.setInputProcessor(new InputAdapter() {
             @Override public boolean touchDown(int sx, int sy, int p, int b) {
-                camera.unproject(touch.set(sx, sy, 0),
-                        viewport.getScreenX(), viewport.getScreenY(),
-                        viewport.getScreenWidth(), viewport.getScreenHeight());
+                UiViewport.unproject(camera, viewport, touch, sx, sy);
                 handleClick(touch.x, touch.y);
                 return true;
             }
             @Override public boolean mouseMoved(int sx, int sy) {
-                camera.unproject(touch.set(sx, sy, 0),
-                        viewport.getScreenX(), viewport.getScreenY(),
-                        viewport.getScreenWidth(), viewport.getScreenHeight());
+                UiViewport.unproject(camera, viewport, touch, sx, sy);
                 mx = touch.x; my = touch.y;
                 return false;
             }
             @Override public boolean scrolled(float ax, float ay) {
-                if (infocardTech == null)
-                    scroll = MathUtils.clamp(scroll + ay * 46f, 0f, maxScroll());
+                if (infocardTech == null) {
+                    listScroll.contentHeight = rowCount() * CARD_H;
+                    listScroll.viewHeight = LIST_TOP - LIST_BOT;
+                    listScroll.offset = scroll;
+                    listScroll.wheel(ay);
+                    scroll = listScroll.offset;
+                }
                 return true;
             }
             @Override public boolean keyDown(int k) {
-                if (k == Input.Keys.ESCAPE) {
-                    if (infocardTech != null) { infocardTech = null; return true; }
+                if (UiKeys.isBackOrDismiss(k)) {
+                    if (infocardTech != null) { infocardTech = null; modal.close(); return true; }
+                    if (modal.dismiss()) return true;
+                    if (searchFocused) { searchFocused = false; return true; }
                     game.setScreen(new MainMenuScreen(game));
+                    return true;
+                }
+                if (searchFocused) {
+                    if (k == Input.Keys.BACKSPACE) { catalog.backspaceQuery(); rebuildRows(); return true; }
+                    if (k == Input.Keys.ENTER) { searchFocused = false; return true; }
+                }
+                if (infocardTech == null) {
+                    listScroll.contentHeight = rowCount() * CARD_H;
+                    listScroll.viewHeight = LIST_TOP - LIST_BOT;
+                    listScroll.offset = scroll;
+                    if (listScroll.key(k)) { scroll = listScroll.offset; return true; }
+                }
+                if (focus.key(k, Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT)
+                        || Gdx.input.isKeyPressed(Input.Keys.SHIFT_RIGHT))) return true;
+                return false;
+            }
+            @Override public boolean keyTyped(char c) {
+                if (!searchFocused) return false;
+                if (c >= 32 && c < 127) {
+                    catalog.appendQueryChar(c);
+                    rebuildRows();
                     return true;
                 }
                 return false;
             }
         });
+    }
+
+    private void rebuildFocus() {
+        focus.clear();
+        focus.add(modeCtrl);
+        focus.add(filterCtrl);
+        focus.add(exportBtn);
+        focus.add(importBtn);
+        focus.add(launchBtn);
+        focus.add(backBtn);
+        schemaPanel.registerFocus(focus);
     }
 
     private float maxScroll() {
@@ -176,14 +220,51 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     }
 
     private void handleClick(float x, float y) {
-        if (infocardTech != null) { infocardTech = null; return; }
+        if (infocardTech != null) { infocardTech = null; modal.close(); return; }
 
         if (backBtn.contains(x, y))   { game.setScreen(new MainMenuScreen(game)); return; }
         if (launchBtn.contains(x, y)) {
-            if (Gdx.graphics.getWidth() <= Gdx.graphics.getHeight() * 1.3f) goLandscape();
+            UiViewport.OrientationSession.goLandscapeForRun();
             game.setScreen(new ControlCenterScreen(game, cfg));
             return;
         }
+        if (modeCtrl.contains(x, y)) {
+            catalog.cycleMode(dir(x, modeCtrl));
+            rebuildRows();
+            relayoutSchemas();
+            return;
+        }
+        if (filterCtrl.contains(x, y)) {
+            catalog.cycleFilter(dir(x, filterCtrl));
+            rebuildRows();
+            return;
+        }
+        if (searchCtrl.contains(x, y)) { searchFocused = true; return; }
+        if (clearSearchBtn.contains(x, y)) {
+            catalog.clearQuery();
+            searchFocused = false;
+            rebuildRows();
+            return;
+        }
+        if (exportBtn.contains(x, y)) {
+            String path = ExperimentIO.exportToFile(cfg);
+            Gdx.app.getClipboard().setContents(ExperimentIO.exportText(cfg));
+            toast.show(path.startsWith("Export failed") ? path : "Experiment copied + saved",
+                    path.startsWith("Export failed") ? UiToast.Tone.WARNING : UiToast.Tone.SUCCESS, 4f);
+            return;
+        }
+        if (importBtn.contains(x, y)) {
+            String err = ExperimentIO.importText(cfg, Gdx.app.getClipboard().getContents());
+            if (err != null) toast.show(err, UiToast.Tone.WARNING, 4f);
+            else {
+                toast.show("Imported " + cfg.technique.display, UiToast.Tone.SUCCESS, 3f);
+                relayoutSchemas();
+                rebuildRows();
+            }
+            return;
+        }
+        if (catalog.mode == TechniqueCatalog.Mode.RESEARCHER
+                && schemaBinding != null && schemaPanel.click(x, y, schemaBinding)) return;
         if (presetCtrl.contains(x, y)) {
             if (!PresetCalibration.calibrated()) { presetHintTimer = 3f; return; }
             var presets = HardwarePresets.values();
@@ -221,80 +302,42 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             if (!rowClickable(i)) continue;
             float top = cardTop(i);
             boolean inCard = x >= CARD_X && x <= CARD_X + CARD_W && y <= top && y >= top - CARD_H + 6;
-            AiTechnique t = rowTech(i);
-            if (t == null) {
+            TechniqueCatalog.Row row = rowAt(i);
+            if (row instanceof TechniqueCatalog.EnsembleHeader) {
                 if (inCard) {
-                    ensemblesExpanded = !ensemblesExpanded;
+                    catalog.ensemblesExpanded = !catalog.ensemblesExpanded;
+                    rebuildRows();
                     scroll = MathUtils.clamp(scroll, 0f, maxScroll());
                     return;
                 }
                 continue;
             }
-            if (hitInfoIcon(i, x, y)) { infocardTech = t; return; }
-            if (inCard) { cfg.selectDefaultsFor(t); return; }
+            if (row instanceof TechniqueCatalog.PluginRow) {
+                if (inCard) toast.show("Plugin hook — research-surfaces deepens this", UiToast.Tone.INFO, 3f);
+                continue;
+            }
+            AiTechnique t = rowTech(i);
+            if (t == null) continue;
+            if (hitInfoIcon(i, x, y)) { infocardTech = t; modal.open(UiModal.Kind.INFO, t); return; }
+            if (inCard) {
+                cfg.selectDefaultsFor(t);
+                relayoutSchemas();
+                return;
+            }
         }
     }
 
     private int dir(float x, Rectangle r) { return x < r.x + r.width / 2f ? -1 : +1; }
     private static int wrap(int i, int n)  { return Math.floorMod(i, n); }
 
-    private static void goLandscape() {
-        var dm = com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration.getDisplayMode();
-        int winW = Math.min(1600, (int) (dm.width * 0.88f));
-        int winH = (int) (winW * 720.0 / 1280.0);
-        Gdx.graphics.setWindowedMode(winW, winH);
-    }
-
     private boolean evolutionApplicable() {
-        return cfg.technique.family == AiTechnique.Family.EVOLUTION;
+        return TechniqueHyperparams.evolutionApplicable(cfg.technique);
     }
 
-    private static final java.util.Set<AiTechnique> ROLLOUT_PARAM_TECHS = java.util.Set.of(
-            AiTechnique.MCTS, AiTechnique.ALPHAZERO, AiTechnique.ENS_MCTS_NET,
-            AiTechnique.ENS_MCTS_TIEBREAK, AiTechnique.ENS_ADAPTIVE_VOTE, AiTechnique.ENS_BANDIT);
-
-    private boolean paramApplicable() {
-        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return true;
-        return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES, PBT, DECISION_TRANSFORMER, DAGGER, BC, DQN, ENS_RTG_VERIFIED -> true;
-            default -> false;
-        };
-    }
-    private String paramLabel() {
-        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return "Rollouts";
-        return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES, PBT                    -> "Population";
-            case DECISION_TRANSFORMER, ENS_RTG_VERIFIED   -> "Target return";
-            case DAGGER, BC, DQN                          -> "Learning rate";
-            default                                       -> "—";
-        };
-    }
-    private String paramValue() {
-        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) return Integer.toString(cfg.rollouts);
-        return switch (cfg.technique) {
-            case NEUROEVO, CMA_ES, PBT                    -> Integer.toString(cfg.populationSize);
-            case DECISION_TRANSFORMER, ENS_RTG_VERIFIED   -> Integer.toString((int) cfg.targetReturn);
-            case DAGGER, BC, DQN                          -> String.format("%.0e", cfg.learningRate);
-            default                                       -> "—";
-        };
-    }
-    private void cycleParam(int d) {
-        if (ROLLOUT_PARAM_TECHS.contains(cfg.technique)) { cfg.rollouts = cycleInt(ROLLOUTS, cfg.rollouts, d); return; }
-        switch (cfg.technique) {
-            case NEUROEVO, CMA_ES, PBT                    -> cfg.populationSize = cycleInt(POP, cfg.populationSize, d);
-            case DECISION_TRANSFORMER, ENS_RTG_VERIFIED   -> cfg.targetReturn = cycleInt(RETURNS, (int) cfg.targetReturn, d);
-            case DAGGER, BC, DQN                          -> cfg.learningRate = cycleDouble(LRS, cfg.learningRate, d);
-            default -> { }
-        }
-    }
-    private int cycleInt(int[] opts, int cur, int d) {
-        int idx = 0; for (int i = 0; i < opts.length; i++) if (opts[i] == cur) idx = i;
-        return opts[wrap(idx + d, opts.length)];
-    }
-    private double cycleDouble(double[] opts, double cur, int d) {
-        int idx = 0; for (int i = 0; i < opts.length; i++) if (Math.abs(opts[i] - cur) < 1e-9) idx = i;
-        return opts[wrap(idx + d, opts.length)];
-    }
+    private boolean paramApplicable() { return TechniqueHyperparams.paramApplicable(cfg.technique); }
+    private String paramLabel() { return TechniqueHyperparams.paramLabel(cfg.technique); }
+    private String paramValue() { return TechniqueHyperparams.paramValue(cfg); }
+    private void cycleParam(int d) { TechniqueHyperparams.cycleParam(cfg, d); }
 
     private boolean gaEvolution() {
         return cfg.technique == AiTechnique.NEUROEVO || cfg.technique == AiTechnique.PBT;
@@ -412,7 +455,8 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
         ShapeRenderer s = game.shapes;
         s.begin(ShapeRenderer.ShapeType.Filled);
-        s.rect(0, 0, Theme.VW, Theme.VH, Theme.BG_BOTTOM, Theme.BG_BOTTOM, Theme.BG_TOP, Theme.BG_TOP);
+        Ui.background(s, Theme.VW, Theme.VH);
+        if (toast.visible()) toast.drawShapes(s, Theme.VW, Theme.VH - 210f);
         s.end();
 
         // FIX: Enabled precise hardware-clipping glScissor window over the scroll list
@@ -431,12 +475,15 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
 
         for (int i = 0; i < rowCount(); i++) {
             float top = cardTop(i);
+            TechniqueCatalog.Row row = rowAt(i);
             AiTechnique t = rowTech(i);
             boolean hov = rowClickable(i)
                     && mx >= CARD_X && mx <= CARD_X + CARD_W
                     && my <= top    && my >= top - CARD_H + 6;
             if (t == null) {
-                s.setColor(hov ? Theme.GOLD : Theme.PANEL_EDGE);
+                Color edge = row instanceof TechniqueCatalog.PluginRow ? Theme.ACCENT_BLUE
+                        : (hov ? Theme.GOLD : Theme.PANEL_EDGE);
+                s.setColor(edge);
                 Ui.fillRoundRect(s, CARD_X, top - CARD_H + 6, CARD_W, CARD_H - 8, 10);
                 continue;
             }
@@ -457,9 +504,15 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         s.end();
         Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
 
-        // Fixed drawer controls
+        // Toolbar + drawer + status rail
         s.begin(ShapeRenderer.ShapeType.Filled);
         boolean evo = evolutionApplicable();
+        Ui.cycler(s, modeCtrl, modeCtrl.contains(mx, my), true);
+        Ui.cycler(s, filterCtrl, filterCtrl.contains(mx, my), true);
+        Ui.button(s, searchCtrl, searchFocused ? Theme.ACCENT_BLUE : Theme.PANEL_EDGE, searchCtrl.contains(mx, my), true);
+        Ui.button(s, clearSearchBtn, Theme.PANEL_EDGE, clearSearchBtn.contains(mx, my), true);
+        Ui.button(s, exportBtn, Theme.GOLD, exportBtn.contains(mx, my), true);
+        Ui.button(s, importBtn, Theme.ACCENT_BLUE, importBtn.contains(mx, my), true);
         drawCycler(s, presetCtrl, true);
         drawCycler(s, speedCtrl, true);
         drawCycler(s, paraCtrl,  cfg.technique.parallel);
@@ -475,8 +528,13 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         if (evo) Ui.toggle(s,
                 ghostCtrl.x + ghostCtrl.width - 64f, ghostCtrl.y + 3f,
                 58f, ghostCtrl.height - 6f, cfg.ghostView);
+        if (catalog.mode == TechniqueCatalog.Mode.RESEARCHER && schemaBinding != null)
+            schemaPanel.drawShapes(s, schemaBinding, mx, my, focus);
+        statusRail.layout(36f, Theme.VH - 78f, Theme.VW - 72f, 52f);
+        statusRail.drawShapes(s, ExperimentStatus.forPlayground(cfg, game.settings));
         Ui.button(s, backBtn,   Theme.PANEL_EDGE, backBtn.contains(mx, my),   true);
         Ui.button(s, launchBtn, Theme.ACCENT_2,   launchBtn.contains(mx, my), true);
+        focus.drawRing(s);
 
         if (infocardTech != null) {
             s.setColor(0.03f, 0.04f, 0.07f, 0.94f);
@@ -496,11 +554,19 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         game.batch.begin();
         if (infocardTech == null) {
             Ui.textCenter(game.batch, game.fontBig, "AI PLAYGROUND",
-                    Theme.VW / 2f, Theme.VH - 86, Theme.TEXT);
+                    Theme.VW / 2f, Theme.VH - 100, Theme.TEXT);
+            Ui.cyclerLabel(game.batch, game.fontSmall, modeCtrl, catalog.modeLabel(), true);
+            Ui.cyclerLabel(game.batch, game.fontSmall, filterCtrl, catalog.filterLabel(), true);
             Ui.textCenter(game.batch, game.fontSmall,
-                    "Top " + otherTechs.length + " techniques + " + ensembleTechs.length
-                            + " ensembles · " + HardwarePresets.hardwareLabel(),
-                    Theme.VW / 2f, Theme.VH - 126, Theme.TEXT_DIM);
+                    catalog.query.isEmpty() ? "search" : catalog.query,
+                    searchCtrl.x + searchCtrl.width / 2f, searchCtrl.y + 16f,
+                    searchFocused ? Theme.TEXT : Theme.TEXT_DIM);
+            Ui.textCenter(game.batch, game.fontSmall, "✕",
+                    clearSearchBtn.x + clearSearchBtn.width / 2f, clearSearchBtn.y + 16f, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "EXP",
+                    exportBtn.x + exportBtn.width / 2f, exportBtn.y + 16f, Theme.BG_BOTTOM);
+            Ui.textCenter(game.batch, game.fontSmall, "IMP",
+                    importBtn.x + importBtn.width / 2f, importBtn.y + 16f, Theme.TEXT);
 
             // FIX: Flush batch buffer and enable scissor for text metrics
             game.batch.flush();
@@ -515,16 +581,24 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             for (int i = 0; i < rowCount(); i++) {
                 float top = cardTop(i);
                 float cy  = top - CARD_H / 2f;
-                AiTechnique t = rowTech(i);
-                if (t == null) {
+                TechniqueCatalog.Row row = rowAt(i);
+                if (row instanceof TechniqueCatalog.EnsembleHeader eh) {
                     Ui.text(game.batch, game.font,
-                            (ensemblesExpanded ? "[-]" : "[+]") + "  ENSEMBLES",
+                            (catalog.ensemblesExpanded || catalog.filter == TechniqueCatalog.Filter.ENSEMBLES
+                                    ? "[-]" : "[+]") + "  ENSEMBLES",
                             CARD_X + 20, cy + 6, Theme.GOLD);
                     Ui.textRight(game.batch, game.fontSmall,
-                            ensembleTechs.length + " · best to worst",
+                            eh.count() + " · best to worst",
                             CARD_X + CARD_W - 20, cy + 6, Theme.TEXT_DIM);
                     continue;
                 }
+                if (row instanceof TechniqueCatalog.PluginRow pr) {
+                    Ui.text(game.batch, game.font, pr.displayName(), CARD_X + 20, cy + 12, Theme.TEXT);
+                    Ui.text(game.batch, game.fontSmall, pr.blurb(), CARD_X + 20, cy - 12, Theme.TEXT_DIM);
+                    continue;
+                }
+                AiTechnique t = rowTech(i);
+                if (t == null) continue;
                 Ui.text(game.batch, game.font,      t.display,
                         CARD_X + 46, cy + 12, Theme.TEXT);
                 Ui.text(game.batch, game.fontSmall,
@@ -541,6 +615,10 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
 
             drawDrawerText();
+            statusRail.drawText(game.batch, game.fontSmall, game.fontSmall,
+                    ExperimentStatus.forPlayground(cfg, game.settings));
+            if (catalog.mode == TechniqueCatalog.Mode.RESEARCHER && schemaBinding != null)
+                schemaPanel.drawText(game.batch, game.fontSmall, game.fontSmall, schemaBinding);
         }
 
         if (infocardTech != null) {
@@ -657,10 +735,8 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
             Ui.textCenter(game.batch, game.fontSmall, "Calibrate presets in Settings -> PRESETS first",
                     Theme.VW / 2f, 92, Theme.GOLD);
         }
-        if (backoutNoteTimer > 0f) {
-            backoutNoteTimer -= Gdx.graphics.getDeltaTime();
-            Ui.textCenter(game.batch, game.fontSmall, backoutNote, Theme.VW / 2f, Theme.VH - 190f, Theme.GOLD);
-        }
+        toast.tick(Gdx.graphics.getDeltaTime());
+        toast.drawText(game.batch, game.fontSmall, Theme.VW, Theme.VH - 210f);
         cyclerText("Speed",       cfg.speedLabel(),          speedCtrl, true);
         cyclerText("Parallelism", cfg.parallelismLabel(),    paraCtrl,  t.parallel);
         cyclerText(paramLabel(),  paramValue(),              paramCtrl, paramApplicable());

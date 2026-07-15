@@ -7,6 +7,25 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-15
+
+### Added
+- Complete systems overhaul: compatibility contracts + regression gates; shared UI primitives
+  (`UiFocus`/`UiToast`/`UiScroll`/…); Playground search + Explorer/Researcher + experiment IO
+  + status rail; Control Center layout helpers; Settings Display/Graphics/Simulation/AI/Input/
+  RT Lab/Data with drag sliders + reset; durable prefs expansion; Research **Lab Hub**
+  (Reward Studio, DashboardRegistry panel, in-app bench, replay scrub, physics golden tooling,
+  PluginRegistry view); bridge server + ONNX Runtime playback path; `docs/budgets.md`.
+- First-run help, run-summary export, actionable RT launch CTAs, CaptureHarness Lab shot.
+
+### Changed
+- Version **0.18.0**. MuZero labelled demonstration/surrogate (no fake train→ONNX claim).
+- ROADMAP / ROADMAP-NEXT wrap the overhaul phases; README screen table updated.
+
+### Fixed
+- Gap audit: prefs contracts, TechniqueConfigPanel as shared hyperparam source, ONNX slot
+  status via `hasOnnx`/`hasPlayablePolicy`, honest RT failure copy.
+
 ## [0.17.2] - 2026-07-14
 
 ### Fixed

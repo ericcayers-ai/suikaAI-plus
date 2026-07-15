@@ -15,12 +15,11 @@ import java.util.Map;
  *
  * <p>Every technique has SOME state worth saving into its 3 slots: Evolution/Imitation
  * (NEUROEVO, CMA-ES, PBT, BC, DAgger) have real trained {@link MlpPolicy} weights;
- * everything else (planning, baselines, and the JVM surrogates that stand in for
- * Python-family techniques) is fully determined by technique + hyperparameters, so a
- * "save" there is that pair via {@link ModelSlots#saveConfig}. Either way, loading a
- * slot reconstructs a working agent — this class is the one place that knows which
- * path a given technique takes, so {@link ControlCenterScreen} and the RT Lab launch
- * flow don't have to duplicate that branch.
+ * PPO (and other Python-exported policies) play from {@code model.onnx} via
+ * {@link OnnxAgent} with no Python at play time; everything else (planning, baselines,
+ * JVM surrogates) is fully determined by technique + hyperparameters via
+ * {@link ModelSlots#saveConfig}. Loading a slot reconstructs a working agent — this
+ * class is the one place that knows which path a given technique takes.
  */
 final class AiSlotPlayer {
 
@@ -34,8 +33,17 @@ final class AiSlotPlayer {
                 || t.family == AiTechnique.Family.DEEP_RL;
     }
 
+    /** Techniques that can play from a slot {@code model.onnx} without Python. */
+    static boolean isOnnxPlayable(AiTechnique t) {
+        return t == AiTechnique.PPO
+                || t == AiTechnique.BC
+                || t == AiTechnique.DAGGER
+                || t.family == AiTechnique.Family.EVOLUTION
+                || t.family == AiTechnique.Family.DEEP_RL;
+    }
+
     static boolean hasSave(AiTechnique t, int slot) {
-        return ModelSlots.info(t.id, slot).present();
+        return ModelSlots.info(t.id, slot).present() || ModelSlots.hasOnnx(t.id, slot);
     }
 
     /** Builds a ready-to-play agent from a saved slot, or {@code null} if the slot is
@@ -43,6 +51,14 @@ final class AiSlotPlayer {
     static AgentPlugin load(AiTechnique t, int slot) {
         PlaygroundConfig cfg = new PlaygroundConfig();
         cfg.selectDefaultsFor(t);
+
+        // Prefer ONNX Runtime when model.onnx is present — no Python at play time.
+        if (isOnnxPlayable(t) && ModelSlots.hasOnnx(t.id, slot)) {
+            OnnxAgent onnx = ModelSlots.tryLoadOnnxAgent(t.id, slot, cfg.actionBins);
+            if (onnx != null) return onnx;
+            // Honest fallthrough: ONNX present but unloadable → try classic weights / config.
+        }
+
         if (isWeightBearing(t)) {
             MlpPolicy policy = ModelSlots.newCompatiblePolicy();
             if (!ModelSlots.load(t.id, slot, policy)) return null;
@@ -52,7 +68,11 @@ final class AiSlotPlayer {
             return GpuProbe.gpuInferenceActive() ? new GpuNeuralAgent(policy) : new NeuralAgent(policy);
         }
         ModelSlots.ConfigSlot saved = ModelSlots.loadConfig(t.id, slot);
-        if (saved == null) return null;
+        if (saved == null) {
+            // ONNX-only PPO slot may lack a config/weights manifest — still playable above;
+            // if ORT failed, surface null rather than a silent heuristic.
+            return null;
+        }
         applyHyperparams(cfg, saved.params());
         AgentPlugin agent = Agents.build(cfg);
         // Learning ensembles saved their live trust statistics into the same param

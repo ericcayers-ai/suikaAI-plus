@@ -63,6 +63,9 @@ jobs:
       - name: Run suika-app unit tests
         run: ./gradlew :suika-app:test --parallel
 
+      - name: Bounded benchmark floor gate
+        run: ./gradlew :suika-ai:test --tests "dev.suika.ai.BenchmarkFloorTest" --rerun-tasks
+
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -70,29 +73,81 @@ jobs:
           name: test-reports-java-${{ matrix.java }}
           path: "**/build/reports/tests/"
 
-  python-lint:
-    name: Python lint
+  python-lint-and-test:
+    name: Python lint + pytest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install dependencies
-        run: pip install ruff
+      - name: Install package + test deps
+        run: |
+          pip install ruff pytest
+          pip install -e "./python"
       - name: Lint
         run: ruff check python/
+      - name: Contract pytest
+        working-directory: python
+        run: pytest -q
 
-  # §12: opt-in only (manual "Run workflow" dispatch, never on a plain push) — a
-  # real LWJGL3/OpenGL window under xvfb takes real wall-clock time per cell, so
-  # this deliberately doesn't run on every commit. Axes are bounded (one technique
-  # per family, one alternate resolution) to keep it well under CI's patience;
-  # widen -Dsuika.capture.* below if a specific regression needs a bigger sweep.
-  # RT-mode capture (-Dsuika.rt.capture.dir, see RtLabLauncher) is NOT run here —
-  # GitHub-hosted runners have no ray-tracing-capable GPU, and RtLabLauncher's own
-  # capability probe would just report that failure on every run, which isn't a
-  # real regression signal. RT changes still need a local run on RT-capable
-  # hardware; see ROADMAP-NEXT.md §12's technical notes.
+  # Bounded capture matrix on every PR/push — tiny axis count so GitHub-hosted
+  # runners finish in a few minutes. Wider sweeps stay on workflow_dispatch below.
+  # RT capture is not run here (no ray-tracing GPU on GH runners).
+  capture-smoke:
+    name: Capture harness (bounded smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: Install a virtual display (xvfb)
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Build the app distribution
+        run: ./gradlew :suika-app:installDist --parallel
+
+      - name: Run bounded capture (portrait smoke)
+        env:
+          JAVA_OPTS: >-
+            -Dsuika.capture.dir=${{ github.workspace }}/capture-out/smoke
+            -Dsuika.capture.mode=matrix
+            -Dsuika.capture.techniques=mcts,heuristic
+            -Dsuika.capture.columns=32
+            -Dsuika.capture.speeds=1
+            -Dsuika.capture.durations=2
+            -Dsuika.capture.max=8
+        run: |
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" \
+            suika-app/build/install/suika-app/bin/suika-app
+
+      - name: Fail on any reported anomaly
+        run: |
+          if grep -rl '\[!!\]' capture-out/*/report.txt 2>/dev/null; then
+            echo "::error::Capture smoke reported an anomaly — see report.txt above."
+            grep -r '\[!!\]' capture-out/*/report.txt
+            exit 1
+          fi
+          echo "No anomalies reported."
+
+      - name: Upload smoke screenshots + reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture-smoke-results
+          path: capture-out/
+
+  # Wider opt-in matrix (manual "Run workflow" only).
   capture-matrix:
     name: Capture-harness debug matrix (opt-in)
     if: github.event_name == 'workflow_dispatch'

@@ -11,6 +11,7 @@ dependencies {
     implementation(project(":suika-game"))
     implementation(project(":suika-env"))
     implementation(project(":suika-ai"))
+    implementation(project(":suika-bridge"))
     implementation(project(":suika-dash"))
     implementation("com.badlogicgames.gdx:gdx-backend-lwjgl3:${libgdxVersion}")
     implementation("com.badlogicgames.gdx:gdx-platform:${libgdxVersion}:natives-desktop")

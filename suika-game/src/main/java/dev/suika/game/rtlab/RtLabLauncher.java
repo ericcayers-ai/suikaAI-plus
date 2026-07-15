@@ -121,12 +121,15 @@ public final class RtLabLauncher {
      *  stack-trace-flavoured string. Falls back to the exception's own message. */
     private static String friendlyFailureReason(Throwable t) {
         String msg = String.valueOf(t.getMessage());
-        if (msg.contains("Vulkan not supported")) return "This GPU/driver has no Vulkan support.";
+        if (msg.contains("Vulkan not supported"))
+            return "No Vulkan support — update GPU drivers or use classic Play.";
         if (msg.toLowerCase(java.util.Locale.ROOT).contains("ray tracing")
                 || msg.toLowerCase(java.util.Locale.ROOT).contains("raytracing"))
-            return "This GPU doesn't support hardware ray tracing.";
-        if (msg.contains("glfwInit failed")) return "Couldn't initialise the window system.";
-        return "RT Lab isn't available on this system (" + t.getClass().getSimpleName() + ").";
+            return "No hardware ray tracing — try Settings → RT Lab → 2D, or classic Play.";
+        if (msg.contains("glfwInit failed"))
+            return "Window system failed — close other fullscreen apps, then Retry.";
+        return "RT Lab unavailable (" + t.getClass().getSimpleName()
+                + ") — Retry or Settings → RT Lab.";
     }
 
     private static void runUnsafe(boolean use3dPhysics, AgentPlugin aiDriver) throws Exception {

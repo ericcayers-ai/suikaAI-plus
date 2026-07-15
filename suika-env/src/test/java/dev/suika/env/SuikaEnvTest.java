@@ -98,4 +98,53 @@ class SuikaEnvTest {
             assertEquals(rb.total(), sumTerms, 1e-9, "Terms must sum to total");
         }
     }
+
+    @Test
+    void pixelsEncoderProducesContractShapeAndFiniteValues() {
+        SuikaEnv env = new SuikaEnv(ObservationMode.PIXELS,
+                new ActionSpace.Discrete(32), RewardConfig.defaultConfig());
+        env.reset(11L);
+        env.step(16);
+        float[] obs = env.encode(env.observation());
+        int expected = 4 * 84 * 84;
+        assertEquals(expected, obs.length);
+        assertArrayEquals(new int[]{4, 84, 84}, env.observationShape());
+        for (float v : obs) {
+            assertTrue(Float.isFinite(v), "pixel obs must be finite");
+            assertTrue(v >= 0f && v <= 1f, "pixel intensity must be in [0,1], got " + v);
+        }
+        // Walls / deadline paint non-zero structure even on an empty-ish board
+        float sum = 0f;
+        for (float v : obs) sum += v;
+        assertTrue(sum > 0f, "pixels observation must not be all zeros after a drop");
+    }
+
+    @Test
+    void continuousActionSpaceMapsEndpointsAndSteps() {
+        SuikaEnv env = new SuikaEnv(ObservationMode.STATE,
+                new ActionSpace.Continuous(), RewardConfig.defaultConfig());
+        env.reset(5L);
+        ActionSpace.Continuous c = new ActionSpace.Continuous();
+        double left = c.toDropX(-1.0,
+                dev.suika.core.PhysicsConfig.DROP_X_MIN,
+                dev.suika.core.PhysicsConfig.DROP_X_MAX);
+        double right = c.toDropX(1.0,
+                dev.suika.core.PhysicsConfig.DROP_X_MIN,
+                dev.suika.core.PhysicsConfig.DROP_X_MAX);
+        assertEquals(dev.suika.core.PhysicsConfig.DROP_X_MIN, left, 1e-9);
+        assertEquals(dev.suika.core.PhysicsConfig.DROP_X_MAX, right, 1e-9);
+
+        StepResult r = env.step(0.0); // centre
+        assertTrue(Double.isFinite(r.reward()));
+        assertNotNull(r.observation());
+    }
+
+    @Test
+    void stateEncoderTotalIsFrozenContract() {
+        // docs/contracts.md — 584-input default; ModelSlots / BenchmarkSuite depend on this.
+        assertEquals(584, StateObservationEncoder.TOTAL);
+        assertEquals(8, StateObservationEncoder.GLOBAL_DIMS);
+        assertEquals(64, StateObservationEncoder.MAX_FRUITS);
+        assertEquals(9, StateObservationEncoder.PER_FRUIT);
+    }
 }
