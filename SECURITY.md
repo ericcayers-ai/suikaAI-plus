@@ -7,7 +7,7 @@ tagged release. Only the latest release line is supported.
 
 | Version | Supported |
 |---|---|
-| Latest release (`0.17.x`) | :white_check_mark: |
+| Latest release (`0.18.x`) | :white_check_mark: |
 | Older releases | :x: |
 
 ## Reporting a vulnerability

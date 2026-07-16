@@ -19,6 +19,18 @@ def test_version_matches_gradle() -> None:
     assert pm, "Python __version__ not found"
     assert pm.group(1) == gradle_ver
 
+    setup = (ROOT / "python" / "setup.py").read_text(encoding="utf-8")
+    sm = re.search(r'version\s*=\s*"([^"]+)"', setup)
+    assert sm, "setup.py version not found"
+    assert sm.group(1) == gradle_ver
+
+    fallback_src = (
+        ROOT / "suika-game" / "src" / "main" / "java" / "dev" / "suika" / "game" / "SuikaVersion.java"
+    ).read_text(encoding="utf-8")
+    fm = re.search(r'FALLBACK\s*=\s*"([^"]+)"', fallback_src)
+    assert fm, "SuikaVersion.FALLBACK not found"
+    assert fm.group(1) == gradle_ver
+
 
 def test_fruit_tiers_match_java_and_json() -> None:
     from suika.env import FRUIT_TIERS, DROPPABLE_TIERS, DOUBLE_WATERMELON_BONUS

@@ -15,6 +15,12 @@ include breaking changes).
 - Remove unused `pytest` import that failed `ruff check` in CI.
 - Align `python/setup.py` version with Gradle / `__version__` / `SuikaVersion.FALLBACK`
   (was stuck at 0.17.2 and would fail the release workflow gate).
+- Docs honesty: `SECURITY.md` supported line → `0.18.x`; ROADMAP / ROADMAP-NEXT status →
+  v0.18.1; `docs/architecture.md` reflects shipped Explorer/Researcher, Lab Hub, and plugin
+  discovery (no longer “pending”); `docs/contracts.md` lists all release-gated version
+  surfaces (`setup.py`, `SuikaVersion.FALLBACK`).
+- `CompatibilityContractTest` now asserts `setup.py` and `FALLBACK` match Gradle (same gates
+  as the release workflow).
 
 ## [0.18.0] - 2026-07-15
 

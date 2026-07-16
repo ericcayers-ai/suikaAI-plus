@@ -42,14 +42,15 @@ The roadmap's hybrid boundary (§II.4 / ADR-0003) is expressed as a JVM-side **c
   Play path: drop `model.onnx` in a ModelSlots folder → `OnnxAgent` / `AiSlotPlayer` /
   ensembler donor blend without Python.
 
-## Two Front Doors (planned UX)
+## Two Front Doors (shipping UX)
 
 | Mode       | Audience        | Entry point                              | Status |
 |------------|-----------------|------------------------------------------|--------|
-| Explorer   | casual / player | `AgentPreset` → one-click presets        | Headless/CLI helpers exist; LibGDX UX redesign pending |
-| Researcher | ML practitioner | `HyperparamSchema` → full config panel   | Schema used in CLI/headless; full Settings redesign pending |
+| Explorer   | casual / player | Curated Playground matrix + hardware presets | **Shipping** in LibGDX Playground / Control Center |
+| Researcher | ML practitioner | Full hyperparam panels + PluginRegistry rows | **Shipping**; plugins listed as informational rows / Lab Hub |
 
-Shipping UX today is the AI Playground + Control Center matrix (13 techniques + 5 ensembles).
+Headless/CLI helpers (`AgentPreset`, `HyperparamSchema`) remain available. Shipping Playground
+matrix: **13 techniques + 5 ensembles**.
 
 ## Key Invariants
 
@@ -76,7 +77,8 @@ GameCore.dropAndSettle(x)
 `PluginRegistry` uses `java.util.ServiceLoader` to discover all `AgentPlugin` and
 `TrainerPlugin` implementations on the classpath. Third-party plugins are registered by
 adding a `META-INF/services/dev.suika.ai.AgentPlugin` file to their JAR.
-Researcher UI discovery of plugins is planned; Explorer uses the curated `AiTechnique` set.
+Explorer uses the curated `AiTechnique` set; Researcher mode and the Lab Hub **Plugins**
+tab surface discovered plugins (informational — they do not expand the curated matrix).
 
 ## Snapshot / Planning
 
@@ -85,6 +87,7 @@ agents use snapshots as a perfect world model — branch, simulate N steps, disc
 
 ## Dashboard / Reward Studio
 
-`suika-dash` ships **headless** metric publishers and exporters. An in-app dashboard and
-Reward Studio UI are future research-surface work; do not read the registry as a finished
-product UI.
+`suika-dash` ships headless metric publishers and exporters. The Research **Lab Hub** also
+ships in-app panels for Reward Studio, DashboardRegistry runs, bounded bench, replay scrub,
+physics golden tooling, and plugin discovery. These are research surfaces — lean, not a full
+ImGui chart chrome replacement (`ConsoleExporter` remains for rich export).

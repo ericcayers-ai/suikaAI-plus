@@ -10,9 +10,12 @@ overhaul gates them with unit tests and CI checks.
 |---|---|---|
 | Gradle `version` | root `build.gradle.kts` | **Canonical** — release tags must be `v$version` |
 | Displayed UI / window / headless banner | `Theme.VERSION` ← generated `suika-version.properties` | Derived from Gradle at build time |
+| IDE / pre-build fallback | `SuikaVersion.FALLBACK` | Must equal Gradle version (used when the properties resource is missing) |
 | Python package | `python/suika/__init__.py` `__version__` | Must equal Gradle version |
+| Python setuptools | `python/setup.py` `version=` | Must equal Gradle version |
 
-Release CI verifies all three surfaces match the tag.
+Release CI verifies Gradle, `__version__`, `setup.py`, and `SuikaVersion.FALLBACK` match the tag,
+then confirms the stamped `suika-version.properties` after `:suika-game:processResources`.
 
 ## Model slots (`ModelSlots`)
 

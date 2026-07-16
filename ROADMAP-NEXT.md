@@ -1,11 +1,11 @@
 # 🍉 Suika AI Sandbox — Next Roadmap (post-0.10.0)
 
-> **Status (v0.18.0):** The **Complete Systems Overhaul** plan is implemented end-to-end:
-> truth-gates → UI foundation → workflow redesign → bridge/ONNX deploy → research surfaces
-> → hardening. This file remains a **historical work plan** for §1–§12 (v0.11→v0.17) plus
-> the overhaul wrap below. Prefer [`docs/contracts.md`](docs/contracts.md) for frozen
-> surfaces, [`docs/budgets.md`](docs/budgets.md) for performance budgets, and
-> [`CHANGELOG.md`](CHANGELOG.md) for what actually shipped.
+> **Status (v0.18.1):** The **Complete Systems Overhaul** plan is implemented end-to-end
+> (landed in v0.18.0; v0.18.1 is the CI/release patch): truth-gates → UI foundation →
+> workflow redesign → bridge/ONNX deploy → research surfaces → hardening. This file remains
+> a **historical work plan** for §1–§12 (v0.11→v0.17) plus the overhaul wrap below. Prefer
+> [`docs/contracts.md`](docs/contracts.md) for frozen surfaces, [`docs/budgets.md`](docs/budgets.md)
+> for performance budgets, and [`CHANGELOG.md`](CHANGELOG.md) for what actually shipped.
 >
 > Unchecked boxes in older sections are **not** claims of remaining work unless confirmed
 > in live code — many were delivered under different headings.
@@ -21,7 +21,7 @@
 | **bridge-deploy** | Done | BridgeServer `--bridge-port`, OrtOnnxPolicyRunner, OnnxAgent, ModelSlots ONNX playback |
 | **workflow-redesign** | Done | Playground search/Explorer·Researcher/presets/IO/rail; Control Center splits; Settings sections + drag sliders + durable prefs; menu/GO/RT polish |
 | **research-surfaces** | Done | Lab Hub: Reward Studio, Dashboard registry panel, in-app bench + durable leaderboard, replay scrub, physics golden tooling, PluginRegistry view; MuZero marked demonstration |
-| **hardening-release** | Done | Focused tests, CaptureHarness Lab shot, budgets doc, version 0.18.0, docs honesty |
+| **hardening-release** | Done | Focused tests, CaptureHarness Lab shot, budgets doc, version 0.18.x, docs honesty |
 
 ### Intentional leftovers (honest debt)
 

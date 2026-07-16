@@ -5,7 +5,7 @@
 > with neuroevolution, planning, imitation, diffusion policies, and a live training
 > dashboard, all inside one application.
 
-**Status:** Living north-star vision (shipping as **v0.18.0** after the complete systems
+**Status:** Living north-star vision (shipping as **v0.18.1** after the complete systems
 overhaul). Unchecked items below are aspirational unless also checked in [`CHANGELOG.md`](CHANGELOG.md)
 or [`ROADMAP-NEXT.md`](ROADMAP-NEXT.md) §Overhaul. For frozen contracts see
 [`docs/contracts.md`](docs/contracts.md); for phase wrap-up see [`ROADMAP-NEXT.md`](ROADMAP-NEXT.md).
