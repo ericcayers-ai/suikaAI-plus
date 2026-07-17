@@ -7,6 +7,15 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-07-17
+
+### Changed
+- **UI QOL revamp** (bencium + impeccable product register): clearer navigation hierarchy,
+  shared `UiChrome` (bottom action bar, section chips, ghost/secondary buttons), distilled
+  main menu (PLAY / AI PLAYGROUND primary; Settings+Lab pair; quiet Quit), Settings section
+  jump chips (keys 1–7), Playground Export/Import labels + wider search, Lab/Game Over
+  action hierarchy cleaned up. Version **0.19.0**.
+
 ## [0.18.1] - 2026-07-15
 
 ### Fixed
@@ -156,7 +165,8 @@ Frontend rebuild: crisp fonts, live physics, settings, AI selection.
 ## [0.2.0] — 2026
 Initial public foundation.
 
-[Unreleased]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.17.2...v0.18.0
 [0.17.2]: https://github.com/ericcayers-ai/suikaAI-plus/compare/v0.17.1...v0.17.2

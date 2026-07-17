@@ -84,7 +84,7 @@ public final class SettingsScreen extends ScreenAdapter {
     private float mx, my;
 
     private final List<Row> rows = new ArrayList<>();
-    private final Rectangle backBtn = new Rectangle(Theme.VW / 2f - 130, 70, 260, 70);
+    private final Rectangle backBtn = new Rectangle();
     private volatile String installStatus = PythonSetup.isReady()
             ? "Ready  ·  venv" : "Not installed";
     private volatile boolean installing = false;
@@ -93,18 +93,31 @@ public final class SettingsScreen extends ScreenAdapter {
     private static final float ROW_GAP      = 6f;
     private static final float SECTION_GAP  = 50f;
     private static final float CTRL_W       = 250f;
-    private static final float MARGIN_X     = 60f;
-    private static final float TOP          = Theme.VH - 200f;
+    private static final float MARGIN_X     = 48f;
+    /** Content top sits below title + section jump chips. */
+    private static final float TOP          = Theme.VH - 220f;
 
-    // Scrollable list — the settings list has grown past a single screenful (adding
-    // "Bouncy fruit" + "Max GPU utilization" once pushed later rows behind the fixed
-    // BACK button with no way to reach them). LIST_BOT sits just above BACK with a
-    // small margin; anything scrolled above LIST_TOP or below LIST_BOT is masked out,
-    // mirroring AiPlaygroundScreen's technique-list scrolling.
+    // Scrollable list — LIST_BOT sits just above BACK; section chips jump-scroll.
     private static final float LIST_TOP = TOP;
-    private static final float LIST_BOT = 170f;
+    private static final float LIST_BOT = 110f;
     private float scroll = 0f;
     private Row draggingSlider = null;
+
+    /** Jump-nav chips for each settings section (Display → Data). */
+    private static final String[] SECTION_IDS = {
+            "DISPLAY", "GRAPHICS", "SIMULATION", "AI", "INPUT", "RT LAB", "DATA"
+    };
+    private static final String[] SECTION_CHIP_LABELS = {
+            "Display", "Graphics", "Sim", "AI", "Input", "RT", "Data"
+    };
+    private final Rectangle[] sectionChips = new Rectangle[SECTION_IDS.length];
+    private int activeSection = 0;
+    {
+        for (int i = 0; i < sectionChips.length; i++) sectionChips[i] = new Rectangle();
+        UiChrome.layoutChips(sectionChips, SECTION_CHIP_LABELS,
+                MARGIN_X, Theme.VH - 168f, Theme.VW - 2f * MARGIN_X, 36f);
+        UiChrome.layoutBottomBar(backBtn, null, Theme.VW);
+    }
 
     public SettingsScreen(SuikaGame game, Function<SuikaGame, Screen> back) {
         this.game = game;
@@ -370,6 +383,7 @@ public final class SettingsScreen extends ScreenAdapter {
             @Override public boolean scrolled(float ax, float ay) {
                 if (numEntryOpen) return true;
                 scroll = Math.max(0f, Math.min(scroll + ay * Theme.SCROLL_STEP, maxScroll()));
+                syncActiveSectionFromScroll();
                 return true;
             }
             @Override public boolean keyDown(int k) {
@@ -382,10 +396,15 @@ public final class SettingsScreen extends ScreenAdapter {
                     return true; // swallow everything else while typing
                 }
                 if (k == Input.Keys.ESCAPE) { game.setScreen(back.apply(game)); return true; }
+                // Number keys 1-7 jump to section chips.
+                if (k >= Input.Keys.NUM_1 && k <= Input.Keys.NUM_7) {
+                    jumpToSection(k - Input.Keys.NUM_1);
+                    return true;
+                }
                 // Keyboard scroll for the settings list (mirrors wheel).
                 UiScroll s = new UiScroll(contentHeight(), LIST_TOP - LIST_BOT);
                 s.offset = scroll;
-                if (s.key(k)) { scroll = s.offset; return true; }
+                if (s.key(k)) { scroll = s.offset; syncActiveSectionFromScroll(); return true; }
                 return false;
             }
             @Override public boolean keyTyped(char c) {
@@ -429,8 +448,48 @@ public final class SettingsScreen extends ScreenAdapter {
 
     public void scrollToBottomForCapture() { scroll = maxScroll(); }
 
+    /** Scroll offset that puts section {@code id} flush under LIST_TOP. */
+    private float scrollForSection(String id) {
+        float offset = 0f;
+        for (Row r : rows) {
+            if (r.section != null) {
+                if (id.equals(r.section)) return Math.min(maxScroll(), offset);
+                offset += SECTION_GAP;
+            }
+            offset += rowHeight(r) + ROW_GAP;
+        }
+        return 0f;
+    }
+
+    private void jumpToSection(int index) {
+        if (index < 0 || index >= SECTION_IDS.length) return;
+        activeSection = index;
+        scroll = scrollForSection(SECTION_IDS[index]);
+    }
+
+    private void syncActiveSectionFromScroll() {
+        float y = LIST_TOP + scroll;
+        int found = 0;
+        for (Row r : rows) {
+            if (r.section != null) {
+                float sectionTop = y;
+                y -= SECTION_GAP;
+                if (sectionTop <= LIST_TOP + 12f) {
+                    for (int i = 0; i < SECTION_IDS.length; i++) {
+                        if (SECTION_IDS[i].equals(r.section)) found = i;
+                    }
+                }
+            }
+            y -= rowHeight(r) + ROW_GAP;
+        }
+        activeSection = found;
+    }
+
     private void handleClick(float x, float y) {
         if (backBtn.contains(x, y)) { game.setScreen(back.apply(game)); return; }
+        for (int i = 0; i < sectionChips.length; i++) {
+            if (sectionChips[i].contains(x, y)) { jumpToSection(i); return; }
+        }
         for (Row r : rows) {
             if (!r.area.contains(x, y)) continue;
             if (r.area.y + r.area.height > LIST_TOP || r.area.y < LIST_BOT) continue;
@@ -546,11 +605,20 @@ public final class SettingsScreen extends ScreenAdapter {
 
         s.begin(ShapeRenderer.ShapeType.Filled);
         Ui.button(s, backBtn, Theme.ACCENT, backBtn.contains(mx, my), true);
+        for (int i = 0; i < sectionChips.length; i++) {
+            UiChrome.chip(s, sectionChips[i], i == activeSection, sectionChips[i].contains(mx, my));
+        }
+        UiChrome.titleRule(s, Theme.VW, Theme.VH - 188f);
         s.end();
 
         // ---- text pass ----
         game.batch.begin();
-        Ui.textCenter(game.batch, game.fontBig, "SETTINGS", Theme.VW / 2f, Theme.VH - 120f, Theme.TEXT);
+        UiChrome.drawTitle(game.batch, game.fontBig, game.fontSmall,
+                Theme.VW, Theme.VH, "SETTINGS", "Jump with chips or keys 1-7");
+        for (int i = 0; i < sectionChips.length; i++) {
+            UiChrome.chipLabel(game.batch, game.fontSmall, sectionChips[i],
+                    SECTION_CHIP_LABELS[i], i == activeSection);
+        }
 
         game.batch.flush();
         Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
@@ -603,7 +671,7 @@ public final class SettingsScreen extends ScreenAdapter {
         game.batch.flush();
         Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
 
-        Ui.textCenter(game.batch, game.fontMed, "BACK", Theme.VW / 2f, backBtn.y + 35f, Theme.TEXT);
+        Ui.textCenter(game.batch, game.fontMed, "BACK", Theme.VW / 2f, backBtn.y + 32f, Theme.TEXT);
         game.batch.end();
 
         if (numEntryOpen) drawNumEntry();

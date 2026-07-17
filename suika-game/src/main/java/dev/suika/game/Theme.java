@@ -58,6 +58,10 @@ public final class Theme {
     public static final Color ACCENT_SOFT = new Color(0.98f, 0.26f, 0.42f, 0.16f);
     /** Drop-shadow wash for lifting panels/cards off the backdrop. */
     public static final Color SHADOW      = new Color(0f, 0f, 0f, 0.34f);
+    /** Quiet hairline for chrome separators (title rules, list dividers). */
+    public static final Color RULE        = new Color(0.42f, 0.35f, 0.54f, 0.35f);
+    /** Soft gold wash for selected chips / active section markers. */
+    public static final Color GOLD_SOFT   = new Color(0.99f, 0.80f, 0.30f, 0.14f);
 
     // --- Text (crisp near-white; dim shifts cool-lavender for calm hierarchy) ---
     public static final Color TEXT        = new Color(0.95f, 0.96f, 0.99f, 1f);

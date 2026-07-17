@@ -428,29 +428,37 @@ public final class CaptureHarness implements ApplicationListener {
 
     private void renderShowcase(float dt) {
         switch (stage) {
-            case 0 -> { if (stageT > 0.6f) { shoot("00-menu.png"); settings = new SettingsScreen(game, MainMenuScreen::new); game.setScreen(settings); nextStage(); } }
-            case 1 -> { if (stageT > 0.7f) { shoot("01-settings.png"); settings.scrollToBottomForCapture(); nextStage(); } }
+            case 0 -> {
+                if (stageT > 0.6f) {
+                    // Capture the distilled menu without the first-run help modal.
+                    game.settings.firstRunHelpSeen = true;
+                    game.setScreen(new MainMenuScreen(game));
+                    nextStage();
+                }
+            }
+            case 1 -> { if (stageT > 0.5f) { shoot("00-menu.png"); settings = new SettingsScreen(game, MainMenuScreen::new); game.setScreen(settings); nextStage(); } }
+            case 2 -> { if (stageT > 0.7f) { shoot("01-settings.png"); settings.scrollToBottomForCapture(); nextStage(); } }
             // Separate stage so the scrolled state (EXPERIMENTAL + AI ENVIRONMENT incl.
             // the GPU-utilization slider) actually renders a frame before the shot —
             // shooting in the same stage as the scroll call captured the pre-scroll frame.
-            case 2 -> { if (stageT > 0.3f) { shoot("01c-settings-scrolled.png"); game.setScreen(new LabHubScreen(game)); nextStage(); } }
+            case 3 -> { if (stageT > 0.3f) { shoot("01c-settings-scrolled.png"); game.setScreen(new LabHubScreen(game)); nextStage(); } }
             // Research Lab Hub (Reward / Dash / Bench / Replay / Physics / Plugins).
-            case 3 -> { if (stageT > 0.5f) { shoot("01d-lab-hub.png"); game.setScreen(new MainMenuScreen(game)); nextStage(); } }
-            case 4 -> { if (stageT > 0.5f) { shoot("00b-menu-rtlab.png"); openPlayground(); nextStage(); } }
-            case 5 -> { if (stageT > 0.6f) { shoot("02-playground.png"); playground.setEnsemblesExpandedForCapture(true); nextStage(); } }
+            case 4 -> { if (stageT > 0.5f) { shoot("01d-lab-hub.png"); game.setScreen(new MainMenuScreen(game)); nextStage(); } }
+            case 5 -> { if (stageT > 0.5f) { shoot("00b-menu-rtlab.png"); openPlayground(); nextStage(); } }
+            case 6 -> { if (stageT > 0.6f) { shoot("02-playground.png"); playground.setEnsemblesExpandedForCapture(true); nextStage(); } }
             // Separate stage so the expanded ensemble dropdown (§8: sorted best->worst)
             // actually renders before the shot — same shoot-before-state-change pitfall
             // as the settings scroll above.
-            case 6 -> { if (stageT > 0.3f) { shoot("02b-playground-ensembles.png"); playground.setEnsemblesExpandedForCapture(false); playground.openInfocardForCapture(AiTechnique.PPO); nextStage(); } }
-            case 7 -> { if (stageT > 0.4f) { shoot("03-infocard-modal.png"); playground.openInfocardForCapture(null); launchControlCenter(AiTechnique.MCTS, false); nextStage(); } }
-            case 8 -> { if (stageT > 3.5f) { shoot("04-mcts-cc.png"); cc.openHotswapForCapture(); nextStage(); } }
-            case 9 -> { if (stageT > 0.5f) { shoot("05-hotswap-modal.png"); launchControlCenter(AiTechnique.NEUROEVO, false); nextStage(); } }
-            case 10 -> { if (stageT > 3.0f) { cc.openSlotsForCapture(); nextStage(); } }
-            case 11 -> { if (stageT > 0.5f) { shoot("06-slots-modal.png"); startSixteenXGrid(); nextStage(); } }
-            case 12 -> { if (stageT > 9.0f) { shoot("07-neuroevo-16x-grid.png"); techIndex = 0; startTechnique(TECHS[techIndex]); nextStage(); } }
+            case 7 -> { if (stageT > 0.3f) { shoot("02b-playground-ensembles.png"); playground.setEnsemblesExpandedForCapture(false); playground.openInfocardForCapture(AiTechnique.PPO); nextStage(); } }
+            case 8 -> { if (stageT > 0.4f) { shoot("03-infocard-modal.png"); playground.openInfocardForCapture(null); launchControlCenter(AiTechnique.MCTS, false); nextStage(); } }
+            case 9 -> { if (stageT > 3.5f) { shoot("04-mcts-cc.png"); cc.openHotswapForCapture(); nextStage(); } }
+            case 10 -> { if (stageT > 0.5f) { shoot("05-hotswap-modal.png"); launchControlCenter(AiTechnique.NEUROEVO, false); nextStage(); } }
+            case 11 -> { if (stageT > 3.0f) { cc.openSlotsForCapture(); nextStage(); } }
+            case 12 -> { if (stageT > 0.5f) { shoot("06-slots-modal.png"); startSixteenXGrid(); nextStage(); } }
+            case 13 -> { if (stageT > 9.0f) { shoot("07-neuroevo-16x-grid.png"); techIndex = 0; startTechnique(TECHS[techIndex]); nextStage(); } }
 
             // ---- full technique sweep: one screenshot per AiTechnique ----
-            case 13 -> {
+            case 14 -> {
                 AiTechnique tech = TECHS[techIndex];
                 if (tech.family == AiTechnique.Family.IMITATION) {
                     driveImitationAutoPlay(dt);
@@ -465,20 +473,20 @@ public final class CaptureHarness implements ApplicationListener {
             }
 
             // ---- extra curated views the default sweep doesn't cover ----
-            case 14-> { if (stageT > 0.2f) { launchControlCenter(AiTechnique.ENS_ADAPTIVE_VOTE, false); nextStage(); } }
-            case 15-> { if (stageT > 5.0f) { shoot("90-adaptive-vote.png"); launchControlCenter(AiTechnique.NEUROEVO, true); nextStage(); } }
-            case 16-> { if (stageT > 9.0f) { shoot("91-neuroevo-ghost.png"); nextStage(); } }
+            case 15 -> { if (stageT > 0.2f) { launchControlCenter(AiTechnique.ENS_ADAPTIVE_VOTE, false); nextStage(); } }
+            case 16 -> { if (stageT > 5.0f) { shoot("90-adaptive-vote.png"); launchControlCenter(AiTechnique.NEUROEVO, true); nextStage(); } }
+            case 17 -> { if (stageT > 9.0f) { shoot("91-neuroevo-ghost.png"); nextStage(); } }
 
             // TensorBoard SETUP row — only meaningful for PPO/Decision Transformer (see
             // AiTechnique#supportsTensorboard()); confirms the toggle + OPEN button render.
-            case 17-> { if (stageT > 0.2f) { launchControlCenter(AiTechnique.PPO, false); nextStage(); } }
-            case 18-> { if (stageT > 1.0f) { cc.openHotswapForCapture(); nextStage(); } }
-            case 19-> { if (stageT > 0.5f) { shoot("94-tensorboard-hotswap.png"); nextStage(); } }
+            case 18 -> { if (stageT > 0.2f) { launchControlCenter(AiTechnique.PPO, false); nextStage(); } }
+            case 19 -> { if (stageT > 1.0f) { cc.openHotswapForCapture(); nextStage(); } }
+            case 20 -> { if (stageT > 0.5f) { shoot("94-tensorboard-hotswap.png"); nextStage(); } }
 
-            case 20-> { if (stageT > 0.2f) { humanPlay = new SuikaScreen(game, SuikaScreen.Mode.HUMAN); game.setScreen(humanPlay); nextStage(); } }
-            case 21-> { if (stageT > 1.5f) { shoot("92-human-play.png"); humanPlay.pauseForCapture(); nextStage(); } }
-            case 22-> { if (stageT > 0.5f) { shoot("92b-human-pause.png"); openGameOver(); nextStage(); } }
-            case 23-> { if (stageT > 1.0f) { shoot("93-game-over.png"); nextStage(); Gdx.app.exit(); } }
+            case 21 -> { if (stageT > 0.2f) { humanPlay = new SuikaScreen(game, SuikaScreen.Mode.HUMAN); game.setScreen(humanPlay); nextStage(); } }
+            case 22 -> { if (stageT > 1.5f) { shoot("92-human-play.png"); humanPlay.pauseForCapture(); nextStage(); } }
+            case 23 -> { if (stageT > 0.5f) { shoot("92b-human-pause.png"); openGameOver(); nextStage(); } }
+            case 24 -> { if (stageT > 1.0f) { shoot("93-game-over.png"); nextStage(); Gdx.app.exit(); } }
             default -> { }
         }
     }

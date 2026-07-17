@@ -44,9 +44,15 @@ public final class LabHubScreen extends ScreenAdapter {
 
     private Tab tab = Tab.REWARD;
     private final Rectangle[] tabBtns = new Rectangle[Tab.values().length];
-    private final Rectangle backBtn = new Rectangle(Theme.VW / 2f - 130, 40, 260, 56);
+    private final Rectangle backBtn = new Rectangle();
     private final Rectangle actionBtn = new Rectangle(Theme.VW - 220, 40, 180, 56);
     private final Rectangle action2Btn = new Rectangle(Theme.VW - 420, 40, 180, 56);
+    {
+        UiChrome.layoutBottomBar(backBtn, null, Theme.VW);
+        // Keep secondary actions above the back bar, not competing with it.
+        actionBtn.set(Theme.VW - 220, 110, 180, 48);
+        action2Btn.set(Theme.VW - 420, 110, 180, 48);
+    }
 
     private final RewardStudioModel reward = new RewardStudioModel();
     private int rewardTermIndex = 0;
@@ -64,7 +70,7 @@ public final class LabHubScreen extends ScreenAdapter {
         camera.update();
         float x = 24f;
         for (int i = 0; i < tabBtns.length; i++) {
-            tabBtns[i] = new Rectangle(x, Theme.VH - 100, 110, 40);
+            tabBtns[i] = new Rectangle(x, Theme.VH - 130, 110, 40);
             x += 118f;
         }
         // Seed a demo replay for scrub UI.
@@ -252,7 +258,7 @@ public final class LabHubScreen extends ScreenAdapter {
             Ui.button(s, tabBtns[i], on ? Theme.ACCENT_2 : Theme.PANEL_EDGE,
                     tabBtns[i].contains(mx, my) || focus.isFocused(tabBtns[i]), true);
         }
-        Ui.button(s, backBtn, Theme.ACCENT, backBtn.contains(mx, my), true);
+        Ui.button(s, backBtn, Theme.ACCENT, backBtn.contains(mx, my) || focus.isFocused(backBtn), true);
         if (tab != Tab.PLUGINS)
             Ui.button(s, actionBtn, Theme.ACCENT_2, actionBtn.contains(mx, my), true);
         if (tab == Tab.REWARD || tab == Tab.REPLAY || tab == Tab.PHYSICS)
@@ -269,17 +275,17 @@ public final class LabHubScreen extends ScreenAdapter {
                     tabBtns[i].x + tabBtns[i].width / 2f, tabBtns[i].y + 22, Theme.TEXT);
         }
         Ui.textCenter(game.batch, game.fontMed, "BACK",
-                backBtn.x + backBtn.width / 2f, backBtn.y + 30, Theme.TEXT);
+                backBtn.x + backBtn.width / 2f, backBtn.y + 32, Theme.TEXT);
         drawTabBody();
         toast.drawText(game.batch, game.fontSmall, Theme.VW, 110f);
         game.batch.end();
     }
 
     private void drawTabBody() {
-        float y = Theme.VH - 160f;
+        float y = Theme.VH - 200f;
         switch (tab) {
             case REWARD -> {
-                Ui.text(game.batch, game.fontSmall, "ComposableReward weights · ←/→ nudge · EXP/IMP",
+                Ui.text(game.batch, game.fontSmall, "ComposableReward weights · Left/Right nudge",
                         40, y, Theme.TEXT_DIM);
                 y -= 40;
                 String[] terms = RewardStudioModel.terms();

@@ -24,7 +24,12 @@ public final class UiLayout {
 
     /** Bottom safe band reserved for the primary action bar. */
     public static float bottomBarHeight(Profile p) {
-        return p == Profile.LANDSCAPE ? 68f : 80f;
+        return p == Profile.LANDSCAPE ? 68f : 96f;
+    }
+
+    /** Content floor just above the bottom action bar. */
+    public static float contentBottom(Profile p) {
+        return bottomBarHeight(p) + Theme.SPACE_MD;
     }
 
     /** Horizontal content margin. */

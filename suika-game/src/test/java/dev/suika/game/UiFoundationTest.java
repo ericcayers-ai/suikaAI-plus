@@ -109,6 +109,34 @@ class UiFoundationTest {
     }
 
     @Test
+    void chromeBottomBarSplitsBackAndPrimary() {
+        Rectangle back = new Rectangle();
+        Rectangle primary = new Rectangle();
+        UiChrome.layoutBottomBar(back, primary, Theme.VW);
+        assertTrue(back.x < primary.x);
+        assertEquals(back.width, primary.width, 0.01f);
+        assertTrue(back.height >= Theme.MIN_TARGET);
+        assertEquals(UiChrome.BAR_Y, back.y, 0.01f);
+    }
+
+    @Test
+    void chromeChipsFillAvailableWidth() {
+        Rectangle[] chips = new Rectangle[4];
+        String[] labels = {"A", "B", "C", "D"};
+        int n = UiChrome.layoutChips(chips, labels, 40f, 100f, 640f, 32f);
+        assertEquals(4, n);
+        assertEquals(40f, chips[0].x, 0.01f);
+        assertTrue(chips[3].x + chips[3].width <= 40f + 640f + 0.01f);
+        for (int i = 1; i < n; i++) assertTrue(chips[i].x > chips[i - 1].x);
+    }
+
+    @Test
+    void themeRuleAndGoldSoftTokensExist() {
+        assertTrue(Theme.RULE.a > 0f);
+        assertTrue(Theme.GOLD_SOFT.a > 0f && Theme.GOLD_SOFT.a < 1f);
+    }
+
+    @Test
     void uiKeysPauseAndDrop() {
         assertTrue(UiKeys.isPause(com.badlogic.gdx.Input.Keys.P));
         assertTrue(UiKeys.dropKeyForHumanBoard(com.badlogic.gdx.Input.Keys.DOWN, true));
