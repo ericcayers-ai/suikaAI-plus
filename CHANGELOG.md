@@ -7,6 +7,10 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Changed
+- README visual revamp — curated CaptureHarness screenshots in `docs/screenshots/`,
+  hero strip, screen tour, tighter train examples (impeccable / bencium / frontend-design).
+
 ## [0.19.0] - 2026-07-17
 
 ### Changed
