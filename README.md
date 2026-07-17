@@ -31,16 +31,13 @@ cd suika-app-<version>\bin && suika-app.bat
 
 ---
 
-## What's new in v0.18.1
+## What's new in v0.19.0
 
-**v0.18.1** ships CI/release gates for the **v0.18.0** complete systems / UI overhaul
-(truth gates, UI foundation, workflow redesign, bridge+ONNX deploy, research Lab Hub):
+**v0.19.0** is a navigation / QOL UI pass on top of the v0.18 systems overhaul:
 
-- **Contracts & gates** — `docs/contracts.md`, PrefsKeys, stamped `Theme.VERSION`, golden physics, CI/Python/bench floors.
-- **Workflow UI** — searchable Playground (Explorer/Researcher), experiment import/export, status rail, Control Center layout splits, Settings sections with drag sliders + reset, durable prefs, keyboard-first menu/game-over, actionable RT failures.
-- **Bridge / ONNX** — JVM `BridgeServer`, ONNX Runtime playback without Python at play time; tiny ORT fixtures committed for CI.
-- **Research Lab** — Reward Studio, DashboardRegistry panel, in-app bounded bench + durable leaderboard, replay scrub, physics golden rebless tooling, PluginRegistry browser; **MuZero** marked demonstration/surrogate.
-- **Docs** — budgets (`docs/budgets.md`), roadmap wrap, community templates retained (Apache-2.0 LICENSE, CoC, CONTRIBUTING, issue/PR templates).
+- **Clearer menu** — PLAY and AI PLAYGROUND lead; Settings + Lab sit as a utility pair; Quit is a quiet link.
+- **Shared chrome** — `UiChrome` bottom bars, secondary/ghost buttons, Settings section jump chips (keys 1–7).
+- **Readable tools** — Playground Export/Import + wider search; Lab and Game Over action hierarchy cleaned up.
 
 See the full [CHANGELOG](CHANGELOG.md) for every release.
 
@@ -51,10 +48,10 @@ See the full [CHANGELOG](CHANGELOG.md) for every release.
 
 | Screen | What you see |
 |---|---|
-| **Main Menu** | Title + **PLAY** / **WATCH AI** / **SETTINGS** / **LAB** / **QUIT**, first-run help, RT CTAs |
-| **Settings** | Display / Graphics / Simulation / AI / Input / RT Lab / Data — drag sliders, reduced motion, reset defaults |
+| **Main Menu** | Title + **PLAY** / **AI PLAYGROUND** / Settings+Lab / RT row / quiet Quit; first-run help |
+| **Settings** | Section jump chips + Display / Graphics / Sim / AI / Input / RT Lab / Data — drag sliders, reset |
 | **Game (Human)** | Real-time physics — aim with the mouse or ←/→, click or Space to drop. HUD with score, best, next-fruit preview |
-| **AI Playground** | Searchable capability matrix (13+5); Explorer/Researcher; hardware presets; experiment IO; status rail; **LAUNCH** |
+| **AI Playground** | Searchable capability matrix (13+5); Explorer/Researcher; Export/Import; status rail; **LAUNCH** |
 | **Control Center** | Live boards, diagnostics, run controls, ONNX-aware slots, hotswap; experiment status rail |
 | **Research Lab** | Reward Studio, dashboard runs, bounded bench, replay scrub, physics golden tools, plugins |
 | **RT Lab** | Experimental Vulkan ray-traced game (own window); failures offer Retry / Settings |

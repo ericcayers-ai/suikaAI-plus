@@ -1,7 +1,8 @@
 # 🍉 Suika AI Sandbox — Next Roadmap (post-0.10.0)
 
-> **Status (v0.18.1):** The **Complete Systems Overhaul** plan is implemented end-to-end
-> (landed in v0.18.0; v0.18.1 is the CI/release patch): truth-gates → UI foundation →
+> **Status (v0.19.0):** UI QOL revamp on top of the **Complete Systems Overhaul**
+> (landed in v0.18.0; v0.18.1 CI/release patch; v0.19.0 navigation/chrome polish).
+> truth-gates → UI foundation →
 > workflow redesign → bridge/ONNX deploy → research surfaces → hardening. This file remains
 > a **historical work plan** for §1–§12 (v0.11→v0.17) plus the overhaul wrap below. Prefer
 > [`docs/contracts.md`](docs/contracts.md) for frozen surfaces, [`docs/budgets.md`](docs/budgets.md)

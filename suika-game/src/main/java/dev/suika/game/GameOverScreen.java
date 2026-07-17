@@ -36,7 +36,7 @@ public final class GameOverScreen extends ScreenAdapter {
 
     private final Rectangle againBtn = new Rectangle(Theme.VW/2f - 320, 380, 300, 78);
     private final Rectangle menuBtn  = new Rectangle(Theme.VW/2f +  20, 380, 300, 78);
-    private final Rectangle exportBtn = new Rectangle(Theme.VW/2f - 150, 280, 300, 56);
+    private final Rectangle exportBtn = new Rectangle(Theme.VW/2f - 150, 280, 300, 52);
 
     public GameOverScreen(SuikaGame game, long score, GameState finalState,
                           SuikaScreen.Mode mode, long seed) {
@@ -126,8 +126,8 @@ public final class GameOverScreen extends ScreenAdapter {
         s.circle(cx, 640, 46, 40);
 
         Ui.button(s, againBtn, Theme.ACCENT_2, againBtn.contains(mx,my) || focus.isFocused(againBtn), true);
-        Ui.button(s, menuBtn,  Theme.ACCENT,   menuBtn.contains(mx,my) || focus.isFocused(menuBtn),  true);
-        Ui.button(s, exportBtn, Theme.GOLD, exportBtn.contains(mx, my) || focus.isFocused(exportBtn), true);
+        UiChrome.secondaryButton(s, menuBtn, menuBtn.contains(mx,my) || focus.isFocused(menuBtn), true);
+        UiChrome.ghostButton(s, exportBtn, exportBtn.contains(mx, my) || focus.isFocused(exportBtn), true);
         focus.drawRing(s);
         if (toast.visible()) toast.drawShapes(s, Theme.VW, 200f);
         s.end();
@@ -151,8 +151,8 @@ public final class GameOverScreen extends ScreenAdapter {
 
         Ui.textCenter(game.batch, game.fontMed, "PLAY AGAIN", againBtn.x + againBtn.width/2f, againBtn.y + 39, Theme.TEXT);
         Ui.textCenter(game.batch, game.fontMed, "MAIN MENU",  menuBtn.x + menuBtn.width/2f,   menuBtn.y + 39, Theme.TEXT);
-        Ui.textCenter(game.batch, game.fontSmall, "EXPORT SUMMARY",
-                exportBtn.x + exportBtn.width / 2f, exportBtn.y + 30, Theme.BG_BOTTOM);
+        Ui.textCenter(game.batch, game.fontSmall, "Export summary",
+                exportBtn.x + exportBtn.width / 2f, exportBtn.y + 26, Theme.TEXT_DIM);
         toast.drawText(game.batch, game.fontSmall, Theme.VW, 200f);
         game.batch.end();
     }

@@ -36,9 +36,9 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private final UiFocus focus = new UiFocus();
     private final ExperimentStatusRail statusRail = new ExperimentStatusRail();
 
-    // Layout constants
+    // Layout constants — list sits between status rail and config drawer
     private static final float CARD_H   = 60f;
-    private static final float LIST_TOP = Theme.VH - 220f;
+    private static final float LIST_TOP = Theme.VH - 250f;
     private static final float LIST_BOT = 470f;
     private static final float CARD_X   = 36f;
     private static final float CARD_W   = Theme.VW - 72f;
@@ -47,14 +47,14 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private static final float INFO_R  = 11f;
     private static final float INFO_CX = CARD_X + CARD_W - INFO_R - 12f;
 
-    // Drawer / toolbar
+    // Drawer / toolbar — search widened; export/import use readable labels
     private static final float CTRL_X = 420, CTRL_W = 260, CTRL_H = 24, CTRL_STEP = 30;
-    private final Rectangle modeCtrl      = new Rectangle(36, Theme.VH - 168, 150, 32);
-    private final Rectangle filterCtrl    = new Rectangle(196, Theme.VH - 168, 200, 32);
-    private final Rectangle searchCtrl    = new Rectangle(406, Theme.VH - 168, 100, 32);
-    private final Rectangle clearSearchBtn = new Rectangle(510, Theme.VH - 168, 50, 32);
-    private final Rectangle exportBtn     = new Rectangle(570, Theme.VH - 168, 70, 32);
-    private final Rectangle importBtn     = new Rectangle(648, Theme.VH - 168, 70, 32);
+    private final Rectangle modeCtrl      = new Rectangle(36, Theme.VH - 200, 140, 34);
+    private final Rectangle filterCtrl    = new Rectangle(184, Theme.VH - 200, 170, 34);
+    private final Rectangle searchCtrl    = new Rectangle(362, Theme.VH - 200, 150, 34);
+    private final Rectangle clearSearchBtn = new Rectangle(518, Theme.VH - 200, 40, 34);
+    private final Rectangle exportBtn     = new Rectangle(566, Theme.VH - 200, 70, 34);
+    private final Rectangle importBtn     = new Rectangle(644, Theme.VH - 200, 70, 34);
     private final Rectangle presetCtrl    = row(0);
     private final Rectangle speedCtrl     = row(1);
     private final Rectangle paraCtrl      = row(2);
@@ -66,10 +66,13 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     private final Rectangle eliteViewCtrl = row(8);
     private final Rectangle ghostCullCtrl = row(9);
     private final Rectangle ghostCtrl     = row(10);
-    private final Rectangle backBtn       = new Rectangle(36, 16, 300, 64);
-    private final Rectangle launchBtn     = new Rectangle(Theme.VW - 336, 16, 300, 64);
+    private final Rectangle backBtn       = new Rectangle();
+    private final Rectangle launchBtn     = new Rectangle();
     private final TechniqueConfigPanel schemaPanel = new TechniqueConfigPanel();
     private TechniqueConfigPanel.Binding schemaBinding;
+    {
+        UiChrome.layoutBottomBar(backBtn, launchBtn, Theme.VW);
+    }
 
     private static Rectangle row(int i) {
         return new Rectangle(CTRL_X, 386 - i * CTRL_STEP, CTRL_W, CTRL_H);
@@ -515,25 +518,27 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         Ui.button(s, importBtn, Theme.ACCENT_BLUE, importBtn.contains(mx, my), true);
         drawCycler(s, presetCtrl, true);
         drawCycler(s, speedCtrl, true);
-        drawCycler(s, paraCtrl,  cfg.technique.parallel);
-        drawCycler(s, paramCtrl, paramApplicable());
-        drawCycler(s, ctx1Ctrl, ctx1Applicable());
-        drawCycler(s, ctx2Ctrl, ctx2Applicable());
-        drawCycler(s, ctx3Ctrl, ctx3Applicable());
-        drawCycler(s, simsCtrl,      evo);
-        drawCycler(s, eliteViewCtrl, evo);
-        drawCycler(s, ghostCullCtrl, evo);
-        s.setColor(evo ? Theme.PANEL_DEEP : new Color(0.10f, 0.11f, 0.16f, 0.6f));
-        Ui.fillRoundRect(s, ghostCtrl.x, ghostCtrl.y, ghostCtrl.width, ghostCtrl.height, 8);
-        if (evo) Ui.toggle(s,
-                ghostCtrl.x + ghostCtrl.width - 64f, ghostCtrl.y + 3f,
-                58f, ghostCtrl.height - 6f, cfg.ghostView);
+        if (cfg.technique.parallel) drawCycler(s, paraCtrl, true);
+        if (paramApplicable()) drawCycler(s, paramCtrl, true);
+        if (ctx1Applicable()) drawCycler(s, ctx1Ctrl, true);
+        if (ctx2Applicable()) drawCycler(s, ctx2Ctrl, true);
+        if (ctx3Applicable()) drawCycler(s, ctx3Ctrl, true);
+        if (evo) {
+            drawCycler(s, simsCtrl, true);
+            drawCycler(s, eliteViewCtrl, true);
+            drawCycler(s, ghostCullCtrl, true);
+            s.setColor(Theme.PANEL_DEEP);
+            Ui.fillRoundRect(s, ghostCtrl.x, ghostCtrl.y, ghostCtrl.width, ghostCtrl.height, 8);
+            Ui.toggle(s,
+                    ghostCtrl.x + ghostCtrl.width - 64f, ghostCtrl.y + 3f,
+                    58f, ghostCtrl.height - 6f, cfg.ghostView);
+        }
         if (catalog.mode == TechniqueCatalog.Mode.RESEARCHER && schemaBinding != null)
             schemaPanel.drawShapes(s, schemaBinding, mx, my, focus);
-        statusRail.layout(36f, Theme.VH - 78f, Theme.VW - 72f, 52f);
+        statusRail.layout(36f, Theme.VH - 100f, Theme.VW - 72f, 44f);
         statusRail.drawShapes(s, ExperimentStatus.forPlayground(cfg, game.settings));
-        Ui.button(s, backBtn,   Theme.PANEL_EDGE, backBtn.contains(mx, my),   true);
-        Ui.button(s, launchBtn, Theme.ACCENT_2,   launchBtn.contains(mx, my), true);
+        UiChrome.secondaryButton(s, backBtn, backBtn.contains(mx, my), true);
+        Ui.button(s, launchBtn, Theme.ACCENT_2, launchBtn.contains(mx, my), true);
         focus.drawRing(s);
 
         if (infocardTech != null) {
@@ -554,19 +559,19 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         game.batch.begin();
         if (infocardTech == null) {
             Ui.textCenter(game.batch, game.fontBig, "AI PLAYGROUND",
-                    Theme.VW / 2f, Theme.VH - 100, Theme.TEXT);
+                    Theme.VW / 2f, Theme.VH - 40f, Theme.TEXT);
             Ui.cyclerLabel(game.batch, game.fontSmall, modeCtrl, catalog.modeLabel(), true);
             Ui.cyclerLabel(game.batch, game.fontSmall, filterCtrl, catalog.filterLabel(), true);
             Ui.textCenter(game.batch, game.fontSmall,
-                    catalog.query.isEmpty() ? "search" : catalog.query,
-                    searchCtrl.x + searchCtrl.width / 2f, searchCtrl.y + 16f,
+                    catalog.query.isEmpty() ? "Search…" : catalog.query,
+                    searchCtrl.x + searchCtrl.width / 2f, searchCtrl.y + 17f,
                     searchFocused ? Theme.TEXT : Theme.TEXT_DIM);
             Ui.textCenter(game.batch, game.fontSmall, "✕",
-                    clearSearchBtn.x + clearSearchBtn.width / 2f, clearSearchBtn.y + 16f, Theme.TEXT);
-            Ui.textCenter(game.batch, game.fontSmall, "EXP",
-                    exportBtn.x + exportBtn.width / 2f, exportBtn.y + 16f, Theme.BG_BOTTOM);
-            Ui.textCenter(game.batch, game.fontSmall, "IMP",
-                    importBtn.x + importBtn.width / 2f, importBtn.y + 16f, Theme.TEXT);
+                    clearSearchBtn.x + clearSearchBtn.width / 2f, clearSearchBtn.y + 17f, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "Export",
+                    exportBtn.x + exportBtn.width / 2f, exportBtn.y + 17f, Theme.BG_BOTTOM);
+            Ui.textCenter(game.batch, game.fontSmall, "Import",
+                    importBtn.x + importBtn.width / 2f, importBtn.y + 17f, Theme.TEXT);
 
             // FIX: Flush batch buffer and enable scissor for text metrics
             game.batch.flush();
@@ -732,29 +737,26 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
         cyclerText("Preset",      cfg.preset.cyclerLabel(),  presetCtrl, true);
         if (presetHintTimer > 0f) {
             presetHintTimer -= Gdx.graphics.getDeltaTime();
-            Ui.textCenter(game.batch, game.fontSmall, "Calibrate presets in Settings -> PRESETS first",
+            Ui.textCenter(game.batch, game.fontSmall, "Calibrate presets in Settings -> RT LAB first",
                     Theme.VW / 2f, 92, Theme.GOLD);
         }
         toast.tick(Gdx.graphics.getDeltaTime());
-        toast.drawText(game.batch, game.fontSmall, Theme.VW, Theme.VH - 210f);
+        toast.drawText(game.batch, game.fontSmall, Theme.VW, Theme.VH - 240f);
         cyclerText("Speed",       cfg.speedLabel(),          speedCtrl, true);
-        cyclerText("Parallelism", cfg.parallelismLabel(),    paraCtrl,  t.parallel);
-        cyclerText(paramLabel(),  paramValue(),              paramCtrl, paramApplicable());
-        cyclerText(ctx1Applicable() ? ctx1Label() : "Strategy", ctx1Value(), ctx1Ctrl, ctx1Applicable());
-        cyclerText(ctx2Applicable() ? ctx2Label() : "Blend",    ctx2Value(), ctx2Ctrl, ctx2Applicable());
-        cyclerText(ctx3Applicable() ? ctx3Label() : "Breeding", ctx3Value(), ctx3Ctrl, ctx3Applicable());
+        if (t.parallel) cyclerText("Parallelism", cfg.parallelismLabel(), paraCtrl, true);
+        if (paramApplicable()) cyclerText(paramLabel(), paramValue(), paramCtrl, true);
+        if (ctx1Applicable()) cyclerText(ctx1Label(), ctx1Value(), ctx1Ctrl, true);
+        if (ctx2Applicable()) cyclerText(ctx2Label(), ctx2Value(), ctx2Ctrl, true);
+        if (ctx3Applicable()) cyclerText(ctx3Label(), ctx3Value(), ctx3Ctrl, true);
 
         boolean evo = evolutionApplicable();
-        cyclerText("Sims/generation", Integer.toString(cfg.simsPerGen()),   simsCtrl,      evo);
-        cyclerText("Elite views",     cfg.eliteViewCount() + "x",           eliteViewCtrl, evo);
-        cyclerText("Ghost lineage",   cfg.ghostCullGens() + " gens",        ghostCullCtrl, evo);
-
-        Color glc = evo ? Theme.TEXT : Theme.TEXT_FAINT;
-        Ui.text(game.batch, game.font, "Ghost overlay",
-                CARD_X + 4, ghostCtrl.y + ghostCtrl.height / 2f + 8, glc);
-        if (!evo) Ui.textCenter(game.batch, game.fontSmall, "n/a (evolution only)",
-                ghostCtrl.x + ghostCtrl.width / 2f - 28f,
-                ghostCtrl.y + ghostCtrl.height / 2f, Theme.TEXT_FAINT);
+        if (evo) {
+            cyclerText("Sims/generation", Integer.toString(cfg.simsPerGen()), simsCtrl, true);
+            cyclerText("Elite views", cfg.eliteViewCount() + "x", eliteViewCtrl, true);
+            cyclerText("Ghost lineage", cfg.ghostCullGens() + " gens", ghostCullCtrl, true);
+            Ui.text(game.batch, game.font, "Ghost overlay",
+                    CARD_X + 4, ghostCtrl.y + ghostCtrl.height / 2f + 8, Theme.TEXT);
+        }
 
         Ui.textCenter(game.batch, game.fontMed, "BACK",
                 backBtn.x   + backBtn.width   / 2f, backBtn.y   + 32, Theme.TEXT);
@@ -763,13 +765,8 @@ public final class AiPlaygroundScreen extends ScreenAdapter {
     }
 
     private void cyclerText(String label, String value, Rectangle r, boolean enabled) {
-        Color lc = enabled ? Theme.TEXT : Theme.TEXT_FAINT;
-        Ui.text(game.batch, game.fontSmall, label, CARD_X + 4, r.y + r.height / 2f + 7, lc);
-        if (!enabled) {
-            Ui.textCenter(game.batch, game.fontSmall, "n/a",
-                    r.x + r.width / 2f, r.y + r.height / 2f, Theme.TEXT_FAINT);
-            return;
-        }
+        if (!enabled) return;
+        Ui.text(game.batch, game.fontSmall, label, CARD_X + 4, r.y + r.height / 2f + 7, Theme.TEXT);
         Ui.textCenter(game.batch, game.fontSmall, value,
                 r.x + r.width / 2f, r.y + r.height / 2f, Theme.TEXT);
         Ui.textCenter(game.batch, game.fontMed, "<",

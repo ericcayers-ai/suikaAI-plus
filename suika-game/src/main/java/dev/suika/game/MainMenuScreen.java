@@ -13,8 +13,9 @@ import com.badlogic.gdx.utils.viewport.FitViewport;
 import dev.suika.core.FruitTier;
 
 /**
- * Title screen: Play, Watch AI, Settings, Quit — with a gentle ambient backdrop of
- * rising translucent fruit so the menu feels alive.
+ * Title screen distilled for product navigation: one primary path (Play), one secondary
+ * (AI Playground), then quiet utilities (Settings / Lab) and experimental RT entries.
+ * Quit is a text link so it never competes with the primary CTA.
  */
 public final class MainMenuScreen extends ScreenAdapter {
 
@@ -27,20 +28,23 @@ public final class MainMenuScreen extends ScreenAdapter {
     private static final com.badlogic.gdx.graphics.Color RT_LAB_VIOLET =
             new com.badlogic.gdx.graphics.Color(0.55f, 0.35f, 0.85f, 1f);
 
-    private final Rectangle playBtn     = new Rectangle(CX - 170, 680, 340, 78);
-    private final Rectangle watchBtn    = new Rectangle(CX - 170, 586, 340, 78);
-    private final Rectangle settingsBtn = new Rectangle(CX - 170, 492, 340, 78);
-    private final Rectangle labBtn      = new Rectangle(CX - 170, 398, 340, 78);
-    private final Rectangle quitBtn     = new Rectangle(CX - 170, 304, 340, 70);
-    private final Rectangle rtLabBtn    = new Rectangle(CX - 130, 220, 260, 48);
-    private final Rectangle rtAiBtn     = new Rectangle(CX + 140, 220, 150, 48);
+    // Primary stack — generous targets, clear hierarchy
+    private final Rectangle playBtn     = new Rectangle(CX - 170, 700, 340, 80);
+    private final Rectangle watchBtn    = new Rectangle(CX - 170, 600, 340, 74);
+    // Utility pair
+    private final Rectangle settingsBtn = new Rectangle(CX - 170, 490, 160, 56);
+    private final Rectangle labBtn      = new Rectangle(CX + 10,  490, 160, 56);
+    // Experimental row (grouped, quieter)
+    private final Rectangle rtLabBtn    = new Rectangle(CX - 170, 400, 160, 48);
+    private final Rectangle rtAiBtn     = new Rectangle(CX + 10,  400, 160, 48);
+    // Quit as ghost text-link — never a loud competing CTA
+    private final Rectangle quitBtn     = new Rectangle(CX - 70,  280, 140, 44);
 
     private final UiFocus focus = new UiFocus();
     private boolean helpOpen = false;
-    private final Rectangle helpCloseBtn = new Rectangle(CX - 100, 360, 200, 56);
-    private final Rectangle helpDismissBtn = new Rectangle(CX - 140, 430, 280, 56);
-    private final Rectangle rtRetryBtn = new Rectangle(CX - 100, 160, 200, 40);
-    private final Rectangle rtSettingsBtn = new Rectangle(CX + 110, 160, 120, 40);
+    private final Rectangle helpDismissBtn = new Rectangle(CX - 140, 380, 280, 56);
+    private final Rectangle rtRetryBtn = new Rectangle(CX - 140, 200, 130, 44);
+    private final Rectangle rtSettingsBtn = new Rectangle(CX + 10, 200, 130, 44);
 
     private float time = 0f;
     private float mx, my;
@@ -57,7 +61,6 @@ public final class MainMenuScreen extends ScreenAdapter {
     private String aiPickerMessage = "";
     private static final int AI_ROWS_VISIBLE = 6;
 
-    // Heightened panel geometry to accommodate the browse button
     private static final float AI_MW = 600f, AI_MH = 560f;
     private final Rectangle[] aiRowBtn = new Rectangle[AI_ROWS_VISIBLE];
     private final Rectangle aiCloseBtn = new Rectangle();
@@ -88,14 +91,16 @@ public final class MainMenuScreen extends ScreenAdapter {
     public void show() {
         helpOpen = !game.settings.firstRunHelpSeen;
         focus.clear();
-        focus.add(playBtn); focus.add(watchBtn); focus.add(settingsBtn);
-        focus.add(labBtn); focus.add(quitBtn); focus.add(rtLabBtn); focus.add(rtAiBtn);
+        focus.add(playBtn); focus.add(watchBtn);
+        focus.add(settingsBtn); focus.add(labBtn);
+        focus.add(rtLabBtn); focus.add(rtAiBtn); focus.add(quitBtn);
         focus.ensureStarted();
         Gdx.input.setInputProcessor(new InputAdapter() {
             @Override public boolean touchDown(int sx, int sy, int pointer, int button) {
-                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(),
+                        viewport.getScreenWidth(), viewport.getScreenHeight());
                 if (helpOpen) {
-                    if (helpDismissBtn.contains(touch.x, touch.y) || helpCloseBtn.contains(touch.x, touch.y)) {
+                    if (helpDismissBtn.contains(touch.x, touch.y)) {
                         helpOpen = false;
                         game.settings.firstRunHelpSeen = true;
                         SettingsPersistence.save(game.settings);
@@ -135,7 +140,8 @@ public final class MainMenuScreen extends ScreenAdapter {
                 return true;
             }
             @Override public boolean mouseMoved(int sx, int sy) {
-                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(), viewport.getScreenWidth(), viewport.getScreenHeight());
+                camera.unproject(touch.set(sx, sy, 0), viewport.getScreenX(), viewport.getScreenY(),
+                        viewport.getScreenWidth(), viewport.getScreenHeight());
                 mx = touch.x; my = touch.y;
                 return false;
             }
@@ -183,7 +189,7 @@ public final class MainMenuScreen extends ScreenAdapter {
             } else {
                 String fail = dev.suika.game.rtlab.RtLabLauncher.lastFailure();
                 if (fail != null) {
-                    rtHintText = fail + "  ·  Retry or open Settings → RT Lab";
+                    rtHintText = fail;
                     rtHintTimer = 8f;
                     rtFailureActionable = true;
                     awaitingRtLaunch = false;
@@ -213,48 +219,61 @@ public final class MainMenuScreen extends ScreenAdapter {
             s.circle(m[0], y, rr, 24);
         }
 
-        Ui.button(s, playBtn,     Theme.ACCENT_2,    playBtn.contains(mx, my) || focus.isFocused(playBtn),     true);
-        Ui.button(s, watchBtn,    Theme.ACCENT_BLUE, watchBtn.contains(mx, my) || focus.isFocused(watchBtn),    true);
-        Ui.button(s, settingsBtn, Theme.PANEL_EDGE,  settingsBtn.contains(mx, my) || focus.isFocused(settingsBtn), true);
-        Ui.button(s, labBtn,      Theme.GOLD,        labBtn.contains(mx, my) || focus.isFocused(labBtn), true);
-        Ui.button(s, quitBtn,     Theme.ACCENT,      quitBtn.contains(mx, my) || focus.isFocused(quitBtn),     true);
-        Ui.button(s, rtLabBtn, RT_LAB_VIOLET, rtLabBtn.contains(mx, my) || focus.isFocused(rtLabBtn), true);
-        Ui.button(s, rtAiBtn, Theme.ACCENT_2, rtAiBtn.contains(mx, my) || focus.isFocused(rtAiBtn), true);
-        focus.drawRing(s);
+        // Soft brand underglow behind the wordmark
+        s.setColor(Theme.GOLD_SOFT);
+        Ui.fillRoundRect(s, CX - 200, 880, 400, 160, 40);
+
+        if (!helpOpen) {
+            Ui.button(s, playBtn,     Theme.ACCENT_2,    playBtn.contains(mx, my) || focus.isFocused(playBtn), true);
+            Ui.button(s, watchBtn,    Theme.ACCENT_BLUE, watchBtn.contains(mx, my) || focus.isFocused(watchBtn), true);
+            UiChrome.secondaryButton(s, settingsBtn, settingsBtn.contains(mx, my) || focus.isFocused(settingsBtn), true);
+            Ui.button(s, labBtn, Theme.GOLD, labBtn.contains(mx, my) || focus.isFocused(labBtn), true);
+            Ui.button(s, rtLabBtn, RT_LAB_VIOLET, rtLabBtn.contains(mx, my) || focus.isFocused(rtLabBtn), true);
+            Ui.button(s, rtAiBtn, Theme.ACCENT_2, rtAiBtn.contains(mx, my) || focus.isFocused(rtAiBtn), true);
+            UiChrome.ghostButton(s, quitBtn, quitBtn.contains(mx, my) || focus.isFocused(quitBtn), true);
+            focus.drawRing(s);
+        }
 
         if (helpOpen) {
             Ui.modalScrim(s, Theme.VW, Theme.VH);
             Ui.modalCard(s, CX - 280, 340, 560, 420);
             Ui.button(s, helpDismissBtn, Theme.ACCENT_2, helpDismissBtn.contains(mx, my), true);
         }
-        if (rtFailureActionable && rtHintTimer > 0f) {
+        if (rtFailureActionable && rtHintTimer > 0f && !helpOpen) {
             Ui.button(s, rtRetryBtn, Theme.ACCENT_2, rtRetryBtn.contains(mx, my), true);
-            Ui.button(s, rtSettingsBtn, Theme.PANEL_EDGE, rtSettingsBtn.contains(mx, my), true);
+            UiChrome.secondaryButton(s, rtSettingsBtn, rtSettingsBtn.contains(mx, my), true);
         }
 
         s.end();
 
         game.batch.begin();
         Ui.textCenter(game.batch, game.fontHuge, "SUIKA", CX, 1010, Theme.GOLD);
-        Ui.textCenter(game.batch, game.fontHuge, "AI SANDBOX", CX, 920, Theme.TEXT);
+        Ui.textCenter(game.batch, game.fontHuge, "AI+", CX, 920, Theme.TEXT);
         Ui.textCenter(game.batch, game.font,
-                "A faithful merge-puzzle clone fused with an AI laboratory",
+                "Play the merge puzzle · train and watch AI",
                 CX, 838, Theme.TEXT_DIM);
 
-        Ui.textCenter(game.batch, game.fontMed, "PLAY",     CX, playBtn.y + 39,     Theme.TEXT);
-        Ui.textCenter(game.batch, game.fontMed, "WATCH AI", CX, watchBtn.y + 39,    Theme.TEXT);
-        Ui.textCenter(game.batch, game.fontMed, "SETTINGS", CX, settingsBtn.y + 39, Theme.TEXT);
-        Ui.textCenter(game.batch, game.fontMed, "LAB",      CX, labBtn.y + 39,      Theme.BG_BOTTOM);
-        Ui.textCenter(game.batch, game.fontMed, "QUIT",     CX, quitBtn.y + 35,     Theme.TEXT);
-        String mode = game.settings.rt3dPhysics ? "3D" : "2D";
-        Ui.textCenter(game.batch, game.fontSmall, "RT LAB · " + mode,
-                CX, rtLabBtn.y + 30, Theme.TEXT);
-        Ui.textCenter(game.batch, game.fontSmall, "AI PLAYS ->",
-                rtAiBtn.x + rtAiBtn.width / 2f, rtAiBtn.y + 26, Theme.BG_BOTTOM);
-        if (rtHintTimer > 0f) {
+        if (!helpOpen) {
+            Ui.textCenter(game.batch, game.fontMed, "PLAY", CX, playBtn.y + 40, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontMed, "AI PLAYGROUND", CX, watchBtn.y + 37, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "SETTINGS",
+                    settingsBtn.x + settingsBtn.width / 2f, settingsBtn.y + 28, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "LAB",
+                    labBtn.x + labBtn.width / 2f, labBtn.y + 28, Theme.BG_BOTTOM);
+
+            String mode = game.settings.rt3dPhysics ? "3D" : "2D";
+            Ui.textCenter(game.batch, game.fontSmall, "RT LAB · " + mode,
+                    rtLabBtn.x + rtLabBtn.width / 2f, rtLabBtn.y + 24, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "AI PLAYS",
+                    rtAiBtn.x + rtAiBtn.width / 2f, rtAiBtn.y + 24, Theme.BG_BOTTOM);
+
+            Ui.textCenter(game.batch, game.fontSmall, "QUIT",
+                    quitBtn.x + quitBtn.width / 2f, quitBtn.y + 22, Theme.TEXT_DIM);
+        }
+
+        if (rtHintTimer > 0f && !helpOpen) {
             rtHintTimer -= delta;
-            Ui.textCenter(game.batch, game.fontSmall, rtHintText,
-                    CX, rtLabBtn.y - 12, Theme.GOLD);
+            Ui.textCenter(game.batch, game.fontSmall, rtHintText, CX, 340, Theme.GOLD);
             if (rtFailureActionable) {
                 Ui.textCenter(game.batch, game.fontSmall, "RETRY",
                         rtRetryBtn.x + rtRetryBtn.width / 2f, rtRetryBtn.y + 22, Theme.TEXT);
@@ -263,23 +282,24 @@ public final class MainMenuScreen extends ScreenAdapter {
             }
         }
 
-        Ui.textCenter(game.batch, game.fontSmall,
-                "Tab focus · Enter select · Mouse or ←/→ · Space drops · ESC pauses · R restarts",
-                CX, 250, Theme.TEXT_FAINT);
+        if (!helpOpen) {
+            Ui.textCenter(game.batch, game.fontSmall,
+                    "Tab · Enter  ·  Esc quits",
+                    CX, 220, Theme.TEXT_FAINT);
+        }
         if (helpOpen) {
-            Ui.textCenter(game.batch, game.fontMed, "Welcome to Suika AI+", CX, 720, Theme.GOLD);
-            Ui.textCenter(game.batch, game.fontSmall, "PLAY — human watermelon merge puzzle", CX, 660, Theme.TEXT);
-            Ui.textCenter(game.batch, game.fontSmall, "WATCH AI — pick a technique, tune, LAUNCH", CX, 620, Theme.TEXT);
-            Ui.textCenter(game.batch, game.fontSmall, "SETTINGS — display, sim, AI, RT Lab, data", CX, 580, Theme.TEXT);
-            Ui.textCenter(game.batch, game.fontSmall, "LAB — reward, dashboard, bench, replay, physics", CX, 540, Theme.TEXT);
-            Ui.textCenter(game.batch, game.fontSmall, "RT LAB — ray-traced board (needs Vulkan RT)", CX, 500, Theme.TEXT);
-            Ui.textCenter(game.batch, game.fontSmall, "Tab / Enter for keyboard-first navigation", CX, 500, Theme.TEXT_DIM);
+            Ui.textCenter(game.batch, game.fontMed, "Welcome", CX, 700, Theme.GOLD);
+            Ui.textCenter(game.batch, game.fontSmall, "PLAY — drop fruit yourself", CX, 640, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "AI PLAYGROUND — pick a technique and launch", CX, 600, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "SETTINGS — display, sim, AI, RT Lab", CX, 560, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "LAB — research tools · RT LAB — ray-traced board", CX, 520, Theme.TEXT);
+            Ui.textCenter(game.batch, game.fontSmall, "Tab / Enter navigate · Esc leaves most screens", CX, 480, Theme.TEXT_DIM);
             Ui.textCenter(game.batch, game.fontMed, "GOT IT",
                     helpDismissBtn.x + helpDismissBtn.width / 2f, helpDismissBtn.y + 28, Theme.TEXT);
         }
         Ui.text(game.batch, game.fontSmall, "v" + Theme.VERSION, 14, 30, Theme.TEXT_FAINT);
         Ui.textRight(game.batch, game.fontSmall,
-                AiTechnique.values().length + " AI techniques · " + game.settings.fpsLabel(),
+                AiTechnique.values().length + " techniques · " + game.settings.fpsLabel(),
                 Theme.VW - 14, 30, Theme.TEXT_FAINT);
         game.batch.end();
 
@@ -320,8 +340,6 @@ public final class MainMenuScreen extends ScreenAdapter {
         }
         aiScrollUpBtn.set(m0x + AI_MW - 84, m0y + AI_MH - 44, 30, 30);
         aiScrollDownBtn.set(m0x + AI_MW - 48, m0y + AI_MH - 44, 30, 30);
-
-        // Browse button placed below the rows but above the close button
         aiBrowseBtn.set(m0x + 24, m0y + 74, AI_MW - 48, 44);
         aiCloseBtn.set(m0x + AI_MW / 2f - 90, m0y + 16, 180, 44);
     }
@@ -333,13 +351,10 @@ public final class MainMenuScreen extends ScreenAdapter {
             if (aiScrollIndex + AI_ROWS_VISIBLE < aiSaves.size()) aiScrollIndex += AI_ROWS_VISIBLE;
             return;
         }
-
-        // Trigger standard system open dialog on browse click
         if (aiBrowseBtn.contains(x, y)) {
             triggerFileBrowse();
             return;
         }
-
         for (int i = 0; i < AI_ROWS_VISIBLE; i++) {
             int idx = aiScrollIndex + i;
             if (idx >= aiSaves.size()) break;
@@ -357,10 +372,6 @@ public final class MainMenuScreen extends ScreenAdapter {
         if (x < m0x || x > m0x + AI_MW || y < m0y || y > m0y + AI_MH) aiPickerOpen = false;
     }
 
-    /**
-     * Triggers a native system file explorer dialog using JDK's standard AWT FileDialog
-     * (Fully supported on Windows, macOS, and Linux out-of-the-box with zero LWJGL dependency issues).
-     */
     private void triggerFileBrowse() {
         try {
             java.awt.FileDialog dialog = new java.awt.FileDialog(
@@ -397,11 +408,8 @@ public final class MainMenuScreen extends ScreenAdapter {
 
         ShapeRenderer s = game.shapes;
         s.begin(ShapeRenderer.ShapeType.Filled);
-        s.setColor(0f, 0f, 0f, 0.86f);
-        s.rect(0, 0, Theme.VW, Theme.VH);
-        s.setColor(0.08f, 0.09f, 0.13f, 1f);
-        Ui.fillRoundRect(s, m0x, m0y, AI_MW, AI_MH, 16);
-        Ui.panel(s, m0x, m0y, AI_MW, AI_MH, 16, Theme.PANEL_DEEP, Theme.PANEL_EDGE);
+        Ui.modalScrim(s, Theme.VW, Theme.VH);
+        Ui.panel(s, m0x, m0y, AI_MW, AI_MH, Theme.RADIUS_LG, Theme.PANEL_DEEP, Theme.PANEL_EDGE);
         s.setColor(RT_LAB_VIOLET);
         Ui.fillRoundRect(s, m0x, m0y + AI_MH - 4f, AI_MW, 4f, 3f);
 
@@ -419,26 +427,21 @@ public final class MainMenuScreen extends ScreenAdapter {
 
         s.setColor(aiBrowseBtn.contains(mx, my) ? Theme.ACCENT_BLUE : Theme.PANEL);
         Ui.fillRoundRect(s, aiBrowseBtn.x, aiBrowseBtn.y, aiBrowseBtn.width, aiBrowseBtn.height, 8);
-        s.setColor(aiBrowseBtn.contains(mx, my) ? Theme.TEXT : Theme.PANEL_EDGE);
-        Ui.fillRoundRect(s, aiBrowseBtn.x + 3, aiBrowseBtn.y + 3, aiBrowseBtn.width - 6, aiBrowseBtn.height - 6, 6);
 
         boolean ch = aiCloseBtn.contains(mx, my);
-        s.setColor(0f, 0f, 0f, 0.35f);
-        Ui.fillRoundRect(s, aiCloseBtn.x + 3, aiCloseBtn.y - 4, aiCloseBtn.width, aiCloseBtn.height, 14);
-        s.setColor(ch ? 1f : 0.92f, ch ? 0.40f : 0.32f, ch ? 0.43f : 0.36f, 1f);
-        Ui.fillRoundRect(s, aiCloseBtn.x, aiCloseBtn.y, aiCloseBtn.width, aiCloseBtn.height, 14);
+        Ui.button(s, aiCloseBtn, Theme.ACCENT, ch, true);
         s.end();
 
         game.batch.begin();
-        Ui.textCenter(game.batch, game.fontMed, "PLAY AS: PICK A SAVED AI",
+        Ui.textCenter(game.batch, game.fontMed, "Pick a saved AI",
                 m0x + AI_MW / 2f, m0y + AI_MH - 32, Theme.TEXT);
         Ui.textCenter(game.batch, game.fontSmall, "−", aiScrollUpBtn.x + 15, aiScrollUpBtn.y + 20, Theme.TEXT);
         Ui.textCenter(game.batch, game.fontSmall, "+", aiScrollDownBtn.x + 15, aiScrollDownBtn.y + 20, Theme.TEXT);
 
         if (aiSaves.isEmpty()) {
-            Ui.textCenter(game.batch, game.fontSmall,
-                    "No AI saves yet — save one from Watch AI's SAVES panel.",
-                    m0x + AI_MW / 2f, m0y + AI_MH / 2f, Theme.TEXT_DIM);
+            Ui.statusCopy(game.batch, game.font, game.fontSmall,
+                    m0x + AI_MW / 2f, m0y + AI_MH / 2f,
+                    "No saves yet", "Save one from AI Playground → SAVES");
         } else {
             for (int i = 0; i < AI_ROWS_VISIBLE; i++) {
                 int idx = aiScrollIndex + i;
@@ -453,7 +456,7 @@ public final class MainMenuScreen extends ScreenAdapter {
             }
         }
 
-        Ui.textCenter(game.batch, game.fontSmall, "BROWSE LOCAL FILE (.sav)...",
+        Ui.textCenter(game.batch, game.fontSmall, "Browse local file (.sav)…",
                 aiBrowseBtn.x + aiBrowseBtn.width / 2f, aiBrowseBtn.y + aiBrowseBtn.height / 2f - 5f, Theme.TEXT);
 
         if (!aiPickerMessage.isEmpty()) Ui.textCenter(game.batch, game.fontSmall, aiPickerMessage,

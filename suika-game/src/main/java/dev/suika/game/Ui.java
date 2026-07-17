@@ -62,16 +62,29 @@ public final class Ui {
 
     /** A glossy button face. Draw the label separately in the text pass. */
     public static void button(ShapeRenderer s, Rectangle r, Color base, boolean hovered, boolean enabled) {
+        button(s, r, base, hovered, enabled, false);
+    }
+
+    /**
+     * Button face with optional pressed (active) state — darkens slightly so click
+     * feedback is visible without a separate animation system.
+     */
+    public static void button(ShapeRenderer s, Rectangle r, Color base, boolean hovered,
+                              boolean enabled, boolean pressed) {
         Color face = base;
         if (!enabled) { TMP.set(base.r * 0.45f, base.g * 0.45f, base.b * 0.45f, 1f); face = TMP; }
+        else if (pressed) { TMP.set(base.r * 0.82f, base.g * 0.82f, base.b * 0.82f, 1f); face = TMP; }
         else if (hovered) { TMP.set(Math.min(1f, base.r * 1.18f), Math.min(1f, base.g * 1.18f),
                                     Math.min(1f, base.b * 1.18f), 1f); face = TMP; }
+        float shadowLift = pressed ? 1f : 5f;
+        float shadowOff  = pressed ? 1f : 3f;
         s.setColor(Theme.SHADOW);
-        fillRoundRect(s, r.x + 3f, r.y - 5f, r.width, r.height, Theme.RADIUS_LG);
+        fillRoundRect(s, r.x + shadowOff, r.y - shadowLift, r.width, r.height, Theme.RADIUS_LG);
         s.setColor(face);
-        fillRoundRect(s, r.x, r.y, r.width, r.height, Theme.RADIUS_LG);
-        s.setColor(1f, 1f, 1f, hovered ? 0.16f : 0.10f);
-        fillRoundRect(s, r.x + 7f, r.y + r.height * 0.82f, r.width - 14f, r.height * 0.14f, Theme.RADIUS_SM);
+        fillRoundRect(s, r.x, pressed ? r.y - 2f : r.y, r.width, r.height, Theme.RADIUS_LG);
+        s.setColor(1f, 1f, 1f, hovered && !pressed ? 0.16f : 0.10f);
+        float top = pressed ? r.y - 2f : r.y;
+        fillRoundRect(s, r.x + 7f, top + r.height * 0.82f, r.width - 14f, r.height * 0.14f, Theme.RADIUS_SM);
     }
 
     /** A pill toggle; draws an on/off track with a knob. */
