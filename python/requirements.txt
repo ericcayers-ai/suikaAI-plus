@@ -6,7 +6,7 @@
 # Settings -> AI ENVIRONMENT; this file exists for reproducible manual/CI setups.
 
 numpy>=1.24.0
-gymnasium>=0.29.0
+gymnasium>=1.3.0
 stable-baselines3>=2.3.0
 torch>=2.1.0
 tensorboard>=2.14.0
